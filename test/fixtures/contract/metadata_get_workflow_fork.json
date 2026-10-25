@@ -1,0 +1,112 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/metadata/workflow/archon_fork",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "createTime": 1792916407463,
+      "updateTime": 0,
+      "name": "archon_fork",
+      "description": "FORK_JOIN with two branches and a JOIN",
+      "version": 1,
+      "tasks": [
+        {
+          "name": "fork",
+          "taskReferenceName": "fork_ref",
+          "inputParameters": {},
+          "type": "FORK_JOIN",
+          "decisionCases": {},
+          "defaultCase": [],
+          "forkTasks": [
+            [
+              {
+                "name": "archon_task_a",
+                "taskReferenceName": "branch_a_ref",
+                "inputParameters": {},
+                "type": "SIMPLE",
+                "decisionCases": {},
+                "defaultCase": [],
+                "forkTasks": [],
+                "startDelay": 0,
+                "joinOn": [],
+                "optional": false,
+                "defaultExclusiveJoinTask": [],
+                "asyncComplete": false,
+                "loopOver": [],
+                "onStateChange": {},
+                "permissive": false,
+                "metadata": {}
+              }
+            ],
+            [
+              {
+                "name": "archon_task_b",
+                "taskReferenceName": "branch_b_ref",
+                "inputParameters": {},
+                "type": "SIMPLE",
+                "decisionCases": {},
+                "defaultCase": [],
+                "forkTasks": [],
+                "startDelay": 0,
+                "joinOn": [],
+                "optional": false,
+                "defaultExclusiveJoinTask": [],
+                "asyncComplete": false,
+                "loopOver": [],
+                "onStateChange": {},
+                "permissive": false,
+                "metadata": {}
+              }
+            ]
+          ],
+          "startDelay": 0,
+          "joinOn": [],
+          "optional": false,
+          "defaultExclusiveJoinTask": [],
+          "asyncComplete": false,
+          "loopOver": [],
+          "onStateChange": {},
+          "permissive": false,
+          "metadata": {}
+        },
+        {
+          "name": "join",
+          "taskReferenceName": "join_ref",
+          "inputParameters": {},
+          "type": "JOIN",
+          "decisionCases": {},
+          "defaultCase": [],
+          "forkTasks": [],
+          "startDelay": 0,
+          "joinOn": [
+            "branch_a_ref",
+            "branch_b_ref"
+          ],
+          "optional": false,
+          "defaultExclusiveJoinTask": [],
+          "asyncComplete": false,
+          "loopOver": [],
+          "onStateChange": {},
+          "permissive": false,
+          "metadata": {}
+        }
+      ],
+      "inputParameters": [],
+      "outputParameters": {},
+      "schemaVersion": 2,
+      "restartable": true,
+      "workflowStatusListenerEnabled": false,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "variables": {},
+      "inputTemplate": {},
+      "enforceSchema": true,
+      "metadata": {},
+      "maskedFields": []
+    }
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/2799f63a-2f0d-43ab-9e58-f2c411a58295",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "taskType": "archon_task_a",
+      "status": "COMPLETED",
+      "inputData": {
+        "x": 1
+      },
+      "referenceTaskName": "task_a_ref",
+      "retryCount": 0,
+      "seq": 1,
+      "correlationId": "archon-corr-1",
+      "pollCount": 1,
+      "taskDefName": "archon_task_a",
+      "scheduledTime": 1792916407788,
+      "startTime": 1792916407888,
+      "endTime": 1792916408385,
+      "updateTime": 1792916407913,
+      "startDelayInSeconds": 0,
+      "retried": false,
+      "executed": true,
+      "callbackFromWorker": true,
+      "responseTimeoutSeconds": 60,
+      "workflowInstanceId": "4c1fb7f9-80e7-4d02-aaf3-b00a6316031a",
+      "workflowType": "archon_simple",
+      "taskId": "2799f63a-2f0d-43ab-9e58-f2c411a58295",
+      "callbackAfterSeconds": 0,
+      "workerId": "archon-contract",
+      "outputData": {
+        "y": 2
+      },
+      "workflowTask": {
+        "name": "archon_task_a",
+        "taskReferenceName": "task_a_ref",
+        "inputParameters": {
+          "x": "${workflow.input.x}"
+        },
+        "type": "SIMPLE",
+        "decisionCases": {},
+        "defaultCase": [],
+        "forkTasks": [],
+        "startDelay": 0,
+        "joinOn": [],
+        "optional": false,
+        "taskDefinition": {
+          "createTime": 1792916407072,
+          "updateTime": 0,
+          "createdBy": "",
+          "name": "archon_task_a",
+          "retryCount": 0,
+          "timeoutSeconds": 300,
+          "inputKeys": [
+            "x"
+          ],
+          "outputKeys": [
+            "y"
+          ],
+          "runtimeMetadata": [],
+          "timeoutPolicy": "TIME_OUT_WF",
+          "retryLogic": "FIXED",
+          "retryDelaySeconds": 60,
+          "responseTimeoutSeconds": 60,
+          "inputTemplate": {},
+          "rateLimitPerFrequency": 0,
+          "rateLimitFrequencyInSeconds": 1,
+          "backoffScaleFactor": 1,
+          "maxRetryDelaySeconds": 0,
+          "backoffJitterMs": 0,
+          "totalTimeoutSeconds": 0,
+          "taskStatusListenerEnabled": true,
+          "enforceSchema": false
+        },
+        "defaultExclusiveJoinTask": [],
+        "asyncComplete": false,
+        "loopOver": [],
+        "onStateChange": {},
+        "permissive": false,
+        "metadata": {}
+      },
+      "rateLimitPerFrequency": 0,
+      "rateLimitFrequencyInSeconds": 1,
+      "workflowPriority": 0,
+      "iteration": 0,
+      "subworkflowChanged": false,
+      "firstStartTime": 0,
+      "executionMetadata": {
+        "additionalContext": {},
+        "empty": true,
+        "additionalContextMap": {}
+      },
+      "taskDefinition": {
+        "createTime": 1792916407072,
+        "updateTime": 0,
+        "createdBy": "",
+        "name": "archon_task_a",
+        "retryCount": 0,
+        "timeoutSeconds": 300,
+        "inputKeys": [
+          "x"
+        ],
+        "outputKeys": [
+          "y"
+        ],
+        "runtimeMetadata": [],
+        "timeoutPolicy": "TIME_OUT_WF",
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 60,
+        "responseTimeoutSeconds": 60,
+        "inputTemplate": {},
+        "rateLimitPerFrequency": 0,
+        "rateLimitFrequencyInSeconds": 1,
+        "backoffScaleFactor": 1,
+        "maxRetryDelaySeconds": 0,
+        "backoffJitterMs": 0,
+        "totalTimeoutSeconds": 0,
+        "taskStatusListenerEnabled": true,
+        "enforceSchema": false
+      },
+      "queueWaitTime": 100,
+      "loopOverTask": false
+    }
+  }
+}

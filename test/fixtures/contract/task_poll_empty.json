@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/poll/archon_task_b?workerid=archon-contract",
+    "body": null
+  },
+  "response": {
+    "status": 204,
+    "content_type": null,
+    "body": null
+  }
+}
