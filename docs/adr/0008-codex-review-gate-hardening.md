@@ -61,7 +61,7 @@ BOSS는 이를 반복되는 문제로 보고 archon 게이트를 태극 수준�
 - Codex 요약의 상태 표식은 공개 API가 아니다. 형식이 바뀌면 게이트는 pending에 머물고, 사람이 결과를 확인해 머지한다.
 - 게이트는 저장소 writer를 신뢰하는 자동화다. push 권한이 있으면 다른 workflow로 상태를 게시할 수 있다.
 - `pull_request_target`·`issue_comment` workflow는 기본 브랜치 파일로 돌기 때문에 이 ADR을 담은 PR 안에서는
-  새 게이트가 실행되지 않는다. 실제 동작은 머지 후 다음 PR에서 확인한다.
+  새 게이트가 실행되지 않는다. 실제 동작은 머지 후 sensibile/archon#12에서 확인했다.
 - **멈춘 리뷰 재요청은 넣지 않았다(제안).** Codex 리뷰가 `running`에 머물면 게이트를 깨울 이벤트가 없다.
   이를 처리하려면 예약 실행(`schedule`)으로 열린 PR을 훑어, head 리뷰가 임계값 이상 `running`이면 head와 요약 시각마다
   한 번 `@codex review`를 다는 job이 필요하다. 임계값은 BOSS가 정한다. 근거로 2026-10-16~25 archon·태극 요약 댓글
