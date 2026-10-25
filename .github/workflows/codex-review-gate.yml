@@ -1,0 +1,67 @@
+name: Codex review gate
+# Publishes the `codex-review` commit status from Codex's PR summary comment and
+# enables squash auto-merge once that review covers the head commit.
+#
+# Both triggers run the default branch's workflow and gate script, never PR
+# code, so a PR cannot change how its own review is judged. Codex's review
+# result reaches the gate as an edit of its summary comment.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled, edited]
+  issue_comment:
+    types: [created, edited, deleted]
+permissions: {}
+jobs:
+  # Unserialized, so a queued run can never drop it: turns an event that voids
+  # the review (deleted Codex summary, retargeted base) into a persistent marker.
+  record:
+    if: >-
+      github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.action == 'deleted' &&
+      github.event.comment.user.login == 'chatgpt-codex-connector[bot]' && contains(github.event.comment.body, 'codex-pull-request-review-summary') ||
+      github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.action == 'edited' && github.event.changes.base != null
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: python3 scripts/codex_review_gate.py --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --invalidate
+
+  # Serialized per PR so verdicts are published in order. It decides only from
+  # persistent PR state, so a run replaced in the queue loses nothing: the run
+  # replacing it was queued later and reads the same or newer state.
+  gate:
+    needs: record
+    if: >-
+      !cancelled() && needs.record.result != 'failure' && (
+      (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.login == 'chatgpt-codex-connector[bot]'))
+    concurrency:
+      group: codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          # Optional fine-grained PAT (contents and pull requests read/write). A merge performed through
+          # GITHUB_TOKEN does not trigger the push-to-main CI run; without the secret the gate falls back to it.
+          AUTO_MERGE_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN }}
+        run: python3 scripts/codex_review_gate.py --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --request-review --auto-merge

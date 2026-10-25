@@ -42,6 +42,8 @@ mix deps.audit
 
 - 브랜치는 `type/slug`, 커밋·PR 제목은 conventional 형식에 한국어 본문입니다.
   PR 본문은 `.github/pull_request_template.md`를 따릅니다.
-- 머지는 필수 체크와 Codex 리뷰를 통과하면 자동으로 됩니다([ADR 0006](docs/adr/0006-merge-policy.md)).
-  사용자가 특정 PR에 대해 직접 요청하지 않는 한 자동 머지를 끄거나 머지를 미루지 않습니다.
-- 새 커밋을 push한 뒤에는 `@codex review` 코멘트로 다시 리뷰를 요청합니다.
+- 머지는 필수 체크와 Codex 리뷰를 통과하면 자동으로 됩니다([ADR 0006](docs/adr/0006-merge-policy.md),
+  [ADR 0008](docs/adr/0008-codex-review-gate-hardening.md)). 사용자가 특정 PR에 대해 직접 요청하지 않는 한
+  자동 머지를 끄거나 머지를 미루지 않습니다.
+- 새 커밋을 push하면 gate workflow가 head마다 한 번 `@codex review`를 요청합니다. 요청이 없거나 리뷰가
+  `running`에 오래 머물면 `@codex review` 코멘트를 직접 답니다.

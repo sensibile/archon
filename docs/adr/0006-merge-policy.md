@@ -1,6 +1,6 @@
 # ADR 0006: 머지 정책과 Codex 리뷰 게이트
 
-- 상태: 승인
+- 상태: 승인 (결정 3·4는 [ADR 0008](0008-codex-review-gate-hardening.md)이 대체)
 - 날짜: 2026-10-25
 - 관련 PR: sensibile/archon#6, sensibile/archon#7
 - 비고: 저장소 설정은 생성 때, Codex 게이트는 PR #6에서 구현했다. 기록은 결정 이후에 보충했다.

@@ -36,10 +36,12 @@ mix deps.audit
 
 CI runs the same checks. Credo findings are also uploaded to GitHub code scanning.
 
-Pull requests from branches of this repository get squash auto-merge enabled when opened. They
-merge once the required checks pass, including `codex-review`, which turns green only after Codex
-has reviewed the latest commit with no unresolved findings. After pushing new commits, comment
-`@codex review` to request a fresh review.
+The `codex-review` required status turns green only after Codex has reviewed the head commit with
+no unresolved findings. When new commits arrive after an earlier review, the gate workflow comments
+`@codex review` once per head. Once `codex-review` succeeds, the workflow enables squash auto-merge
+bound to that reviewed commit; GitHub merges when the other required checks pass and review threads
+are resolved. Draft pull requests and those labeled `no-auto-merge` are left alone. See
+[ADR 0008](docs/adr/0008-codex-review-gate-hardening.md).
 
 ## License
 

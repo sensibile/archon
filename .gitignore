@@ -25,3 +25,6 @@ archon-*.tar
 
 # Dialyzer PLTs.
 /priv/plts/
+
+# Python bytecode from the Codex review gate script tests.
+__pycache__/
