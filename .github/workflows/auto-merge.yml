@@ -1,0 +1,27 @@
+# Enables squash auto-merge on every PR opened from a branch of this repository. GitHub merges once
+# the main ruleset is satisfied: required checks (including `codex-review`) and resolved threads.
+name: Auto-merge
+on:
+  # pull_request_target runs the default-branch copy of this file with the permissions below.
+  # Nothing from the PR is checked out or executed.
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+permissions: {}
+jobs:
+  enable:
+    name: Enable auto-merge
+    # Fork PRs are excluded: the ruleset needs no approving review, so auto-merge there would let
+    # outside code land on green checks alone.
+    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - run: gh pr merge "$PR_URL" --auto --squash
+        env:
+          # A merge performed through GITHUB_TOKEN does not trigger the push-to-main CI run. Set the
+          # AUTO_MERGE_TOKEN secret (fine-grained PAT: contents and pull requests read/write) to
+          # merge as a user instead.
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN || github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}

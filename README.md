@@ -31,6 +31,11 @@ mix deps.audit
 
 CI runs the same checks. Credo findings are also uploaded to GitHub code scanning.
 
+Pull requests from branches of this repository get squash auto-merge enabled when opened. They
+merge once the required checks pass, including `codex-review`, which turns green only after Codex
+has reviewed the latest commit with no unresolved findings. After pushing new commits, comment
+`@codex review` to request a fresh review.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
