@@ -17,7 +17,12 @@ supervised OTP process with durable state and API-level compatibility with exist
 ```bash
 mix deps.get
 mix test
+mix credo --strict
+mix dialyzer
+mix deps.audit
 ```
+
+CI runs the same checks. Credo findings are also uploaded to GitHub code scanning.
 
 ## License
 
