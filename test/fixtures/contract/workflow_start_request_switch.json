@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow",
+    "body": {
+      "name": "archon_switch",
+      "version": 1,
+      "correlationId": "archon-corr-2",
+      "input": {
+        "route": "b"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "9cba762c-4a23-44ab-877e-0f0fbf4888bb"
+  }
+}

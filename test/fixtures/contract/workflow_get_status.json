@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/4c1fb7f9-80e7-4d02-aaf3-b00a6316031a/status?includeOutput=true",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "workflowId": "4c1fb7f9-80e7-4d02-aaf3-b00a6316031a",
+      "correlationId": "archon-corr-1",
+      "output": {
+        "y": 3
+      },
+      "status": "COMPLETED"
+    }
+  }
+}

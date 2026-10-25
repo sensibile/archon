@@ -1,0 +1,95 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/metadata/workflow/archon_switch",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "createTime": 1792916407430,
+      "updateTime": 0,
+      "name": "archon_switch",
+      "description": "SWITCH on workflow input",
+      "version": 1,
+      "tasks": [
+        {
+          "name": "route",
+          "taskReferenceName": "route_ref",
+          "inputParameters": {
+            "route": "${workflow.input.route}"
+          },
+          "type": "SWITCH",
+          "decisionCases": {
+            "a": [
+              {
+                "name": "archon_task_a",
+                "taskReferenceName": "case_a_ref",
+                "inputParameters": {},
+                "type": "SIMPLE",
+                "decisionCases": {},
+                "defaultCase": [],
+                "forkTasks": [],
+                "startDelay": 0,
+                "joinOn": [],
+                "optional": false,
+                "defaultExclusiveJoinTask": [],
+                "asyncComplete": false,
+                "loopOver": [],
+                "onStateChange": {},
+                "permissive": false,
+                "metadata": {}
+              }
+            ],
+            "b": [
+              {
+                "name": "archon_task_b",
+                "taskReferenceName": "case_b_ref",
+                "inputParameters": {},
+                "type": "SIMPLE",
+                "decisionCases": {},
+                "defaultCase": [],
+                "forkTasks": [],
+                "startDelay": 0,
+                "joinOn": [],
+                "optional": false,
+                "defaultExclusiveJoinTask": [],
+                "asyncComplete": false,
+                "loopOver": [],
+                "onStateChange": {},
+                "permissive": false,
+                "metadata": {}
+              }
+            ]
+          },
+          "defaultCase": [],
+          "forkTasks": [],
+          "startDelay": 0,
+          "joinOn": [],
+          "optional": false,
+          "defaultExclusiveJoinTask": [],
+          "asyncComplete": false,
+          "loopOver": [],
+          "evaluatorType": "value-param",
+          "expression": "route",
+          "onStateChange": {},
+          "permissive": false,
+          "metadata": {}
+        }
+      ],
+      "inputParameters": [],
+      "outputParameters": {},
+      "schemaVersion": 2,
+      "restartable": true,
+      "workflowStatusListenerEnabled": false,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "variables": {},
+      "inputTemplate": {},
+      "enforceSchema": true,
+      "metadata": {},
+      "maskedFields": []
+    }
+  }
+}
