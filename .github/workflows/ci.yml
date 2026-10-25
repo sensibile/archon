@@ -29,6 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-elixir
+      # Compile first so dependency build output doesn't land in the SARIF file.
+      - run: mix compile
       - run: mix credo --strict --format sarif > credo.sarif
       - uses: github/codeql-action/upload-sarif@v4
         if: always() && hashFiles('credo.sarif') != ''
