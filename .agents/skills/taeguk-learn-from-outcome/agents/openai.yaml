@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk learn-from-outcome"
+  short_description: "Bounded learn from outcome workflow"
+  default_prompt: "Use $taeguk-learn-from-outcome for the assigned task."

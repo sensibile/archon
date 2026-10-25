@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk implement-small-change"
+  short_description: "Bounded implement small change workflow"
+  default_prompt: "Use $taeguk-implement-small-change for the assigned task."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk plan-cross-verification"
+  short_description: "Bounded plan cross verification workflow"
+  default_prompt: "Use $taeguk-plan-cross-verification for the assigned task."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "태극 개선 루프"
+  short_description: "관측된 태극 문제를 작은 수정과 적용 후 효과 확인까지 연결합니다"
+  default_prompt: "Use $taeguk-self-improve to repair one observed Taeguk problem and verify its applied effect."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk inspect-changeability"
+  short_description: "Bounded inspect changeability workflow"
+  default_prompt: "Use $taeguk-inspect-changeability for the assigned task."

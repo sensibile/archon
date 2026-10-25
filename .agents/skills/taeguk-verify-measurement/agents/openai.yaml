@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk verify-measurement"
+  short_description: "Bounded verify measurement workflow"
+  default_prompt: "Use $taeguk-verify-measurement for the assigned task."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk verify-delivery-effect"
+  short_description: "Bounded verify delivery effect workflow"
+  default_prompt: "Use $taeguk-verify-delivery-effect for the assigned task."
