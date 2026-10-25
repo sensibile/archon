@@ -1,8 +1,8 @@
 # ADR 0009: Codex 판정이 오지 않을 때의 시간 기준 규칙
 
-- 상태: 제안
+- 상태: 승인
 - 날짜: 2026-10-25
-- 관련 PR: (이 ADR을 담은 PR)
+- 관련 PR: sensibile/archon#13
 - 보완: [ADR 0008](0008-codex-review-gate-hardening.md). 결과 섹션의 "멈춘 리뷰 재요청은 넣지 않았다(제안)"를 이 ADR이 대체한다.
 - 출처: 태극(sensibile/taeguk) #13 `f8c7b9b`의 `scripts/codex_review_gate.py`, `tests/test_codex_review_gate.py`,
   `.github/workflows/codex-review-gate.yml`과 `docs/repository-operations.md` PR 플로우 4단계. 운영 보완은 태극 #14(병합 전)의 6단계.
