@@ -1,6 +1,6 @@
 # ADR 0009: Codex 판정이 오지 않을 때의 시간 기준 규칙
 
-- 상태: 승인
+- 상태: 대체됨 ([ADR 0010](0010-codex-gate-status-only.md))
 - 날짜: 2026-10-25
 - 관련 PR: sensibile/archon#13
 - 보완: [ADR 0008](0008-codex-review-gate-hardening.md). 결과 섹션의 "멈춘 리뷰 재요청은 넣지 않았다(제안)"를 이 ADR이 대체한다.

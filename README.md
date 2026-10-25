@@ -37,15 +37,12 @@ mix deps.audit
 CI runs the same checks. Credo findings are also uploaded to GitHub code scanning.
 
 The `codex-review` required status turns green only after Codex has reviewed the head commit with
-no unresolved findings. When new commits arrive after an earlier review, the gate workflow comments
-`@codex review` once per head. Once `codex-review` succeeds, the workflow enables squash auto-merge
-bound to that reviewed commit; GitHub merges when the other required checks pass and review threads
-are resolved. Draft pull requests and those labeled `no-auto-merge` are left alone. See
-[ADR 0008](docs/adr/0008-codex-review-gate-hardening.md).
-
-If Codex gives no verdict for the head, a scheduled run asks again every 10 minutes. After three
-unanswered requests the gate passes `codex-review` when Codex has no unresolved review threads
-([ADR 0009](docs/adr/0009-codex-review-time-rule.md)).
+no unresolved findings. The gate workflow only publishes that status: it never asks Codex for a review
+and never merges. If Codex gives no verdict, the status stays pending. The Claude Code session driving
+a pull request asks Codex for a review from the user's account when needed, and once `codex-review`
+succeeds it enables squash auto-merge bound to the reviewed commit; GitHub merges when the other
+required checks pass and review threads are resolved. Draft pull requests and those labeled
+`no-auto-merge` are left alone. See [ADR 0010](docs/adr/0010-codex-gate-status-only.md).
 
 ## License
 
