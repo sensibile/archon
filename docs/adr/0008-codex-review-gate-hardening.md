@@ -1,8 +1,8 @@
 # ADR 0008: Codex 리뷰 게이트 보강
 
-- 상태: 제안
+- 상태: 승인
 - 날짜: 2026-10-25
-- 관련 PR: (이 ADR을 담은 PR)
+- 관련 PR: sensibile/archon#11
 - 대체: [ADR 0006](0006-merge-policy.md)의 결정 3·4. 결정 1·2·5는 그대로 유효하다.
 - 출처: 태극(sensibile/taeguk) `.github/workflows/codex-review-gate.yml`, `scripts/codex_review_gate.py`,
   `tests/test_codex_review_gate.py`, 기준 커밋 `44dfb55`
