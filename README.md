@@ -1,5 +1,7 @@
 # Archon
 
+[![CI](https://github.com/sensibile/archon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sensibile/archon/actions/workflows/ci.yml)
+
 A Conductor-compatible workflow orchestration engine in Elixir, running each workflow as a
 supervised OTP process with durable state and API-level compatibility with existing workers and SDKs.
 
