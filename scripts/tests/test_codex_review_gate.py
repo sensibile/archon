@@ -23,7 +23,7 @@ def state_comment(sha=HEAD, status='completed', unresolved=False, updated='2026-
 
 class FakeGitHub:
     def __init__(self, comments, head_repo=REPO, base='main', later_comments=None,
-                 threads=(), more_threads=False, threads_error=False, current=None):
+                 threads=(), more_threads=False, threads_error=False, current=None, read_error=None):
         self.pr = {'state': 'open', 'html_url': f'https://github.com/{REPO}/pull/9', 'head': {'sha': HEAD, 'repo': {'full_name': head_repo}},
                    'base': {'ref': base, 'repo': {'default_branch': 'main'}}}
         self.comments = comments
@@ -31,6 +31,7 @@ class FakeGitHub:
         self.threads = {'pageInfo': {'hasNextPage': more_threads}, 'nodes': list(threads)}
         self.threads_error = threads_error
         self.current = current  # latest codex-review status as GitHub reports it
+        self.read_error = read_error  # 'comments' or 'statuses': that read fails with HTTP 502
         self.calls = []
 
     def __call__(self, *args):
@@ -38,8 +39,12 @@ class FakeGitHub:
         if args == ('api', f'repos/{REPO}/pulls/9'):
             return json.dumps(self.pr)
         if args == ('api', f'repos/{REPO}/commits/{HEAD}/statuses?per_page=100'):
+            if self.read_error == 'statuses':
+                raise subprocess.CalledProcessError(1, ['gh', *args], stderr='HTTP 502')
             return json.dumps([self.current] if self.current else [])
         if args[:3] == ('api', '--paginate', '--slurp'):
+            if self.read_error == 'comments':
+                raise subprocess.CalledProcessError(1, ['gh', *args], stderr='HTTP 502')
             if len(self.called(args)) > 1 and self.later_comments is not None:
                 return json.dumps([self.later_comments])
             return json.dumps([self.comments])
@@ -125,6 +130,19 @@ class StatusRepostTests(unittest.TestCase):
         fake = FakeGitHub([state_comment()], current=old)
         gate.run(REPO, 9, call=fake)
         self.assertEqual(fake.posted_status()[0]['state'], 'success')
+
+
+class ReadFailureTests(unittest.TestCase):
+    # A same-head re-review can leave an older success behind; if this run cannot
+    # read the evidence, that success must not keep satisfying merge protection.
+    def test_failed_read_replaces_an_older_success_with_pending(self):
+        old = {'context': gate.CONTEXT, 'state': 'success', 'description': 'Codex review completed with no unresolved findings', 'creator': {'login': gate.ACTIONS_LOGIN}}
+        for failing in ('comments', 'statuses'):
+            with self.subTest(failing):
+                fake = FakeGitHub([state_comment()], current=old, read_error=failing)
+                with self.assertRaises(subprocess.CalledProcessError):
+                    gate.run(REPO, 9, call=fake)
+                self.assertEqual([status['state'] for status in fake.posted_status()], ['pending'])
 
 
 class EvaluateTests(unittest.TestCase):
