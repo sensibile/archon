@@ -1,19 +1,16 @@
 name: Codex review gate
-# Publishes the `codex-review` commit status from Codex's PR summary comment and
-# enables squash auto-merge once that review covers the head commit.
+# Publishes the `codex-review` commit status from Codex's PR summary comment.
+# It only judges: asking Codex for a review and merging are left to the Claude
+# Code session driving the PR, because Codex ignores requests from this bot.
 #
 # Both triggers run the default branch's workflow and gate script, never PR
 # code, so a PR cannot change how its own review is judged. Codex's review
 # result reaches the gate as an edit of its summary comment.
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled, edited]
+    types: [opened, synchronize, reopened, edited]
   issue_comment:
     types: [created, edited, deleted]
-  # Drives the time rule (re-request, then pass) when no event arrives.
-  # GitHub may delay scheduled runs, so intervals are at least 10 minutes.
-  schedule:
-    - cron: '*/10 * * * *'
 permissions: {}
 jobs:
   # Unserialized, so a queued run can never drop it: turns an event that voids
@@ -53,9 +50,9 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+      contents: read
+      issues: read
+      pull-requests: read
       statuses: write
     steps:
       - uses: actions/checkout@v7
@@ -65,53 +62,4 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
-          # Optional fine-grained PAT (contents and pull requests read/write). A merge performed through
-          # GITHUB_TOKEN does not trigger the push-to-main CI run; without the secret the gate falls back to it.
-          AUTO_MERGE_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN }}
-        run: python3 scripts/codex_review_gate.py --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --request-review --auto-merge
-
-  # Lists open same-repository PRs to the default branch for the scheduled gate.
-  scheduled-prs:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-    outputs:
-      prs: ${{ steps.list.outputs.prs }}
-    steps:
-      - id: list
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE: ${{ github.event.repository.default_branch }}
-        run: |
-          prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --base "$BASE" --state open --limit 100 --json number,isCrossRepository \
-            --jq '[.[] | select(.isCrossRepository | not) | .number]')
-          echo "prs=$prs" >> "$GITHUB_OUTPUT"
-
-  # Same gate as above, per PR, in the same per-PR concurrency group.
-  scheduled-gate:
-    needs: scheduled-prs
-    if: needs.scheduled-prs.outputs.prs != '[]' && needs.scheduled-prs.outputs.prs != ''
-    strategy:
-      fail-fast: false
-      matrix:
-        pr: ${{ fromJSON(needs.scheduled-prs.outputs.prs) }}
-    concurrency:
-      group: codex-review-gate-${{ matrix.pr }}
-      cancel-in-progress: false
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      statuses: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ matrix.pr }}
-          AUTO_MERGE_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN }}
-        run: python3 scripts/codex_review_gate.py --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --request-review --auto-merge
+        run: python3 scripts/codex_review_gate.py --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER"

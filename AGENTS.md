@@ -42,13 +42,13 @@ mix deps.audit
 
 - 브랜치는 `type/slug`, 커밋·PR 제목은 conventional 형식에 한국어 본문입니다.
   PR 본문은 `.github/pull_request_template.md`를 따릅니다.
-- 머지는 필수 체크와 Codex 리뷰를 통과하면 자동으로 됩니다([ADR 0006](docs/adr/0006-merge-policy.md),
-  [ADR 0008](docs/adr/0008-codex-review-gate-hardening.md)). 사용자가 특정 PR에 대해 직접 요청하지 않는 한
-  자동 머지를 끄거나 머지를 미루지 않습니다.
-- 새 커밋을 push하면 gate workflow가 head마다 한 번 `@codex review`를 요청합니다. 판정이 없으면 10분마다 다시
-  요청하고, 3번 요청해도 판정이 없으면 미해결 Codex thread가 없을 때 통과시킵니다
-  ([ADR 0009](docs/adr/0009-codex-review-time-rule.md)).
-- Codex는 gate(`github-actions[bot]`)의 요청을 무시할 수 있습니다. PR을 맡은 세션에 Auto-fix가 켜져 있으면, gate 요청
-  댓글이 전달될 때 `gh` 계정으로 같은 PR에 `@codex review`를 한 번 다시 답니다. 그 head의 Codex 결과 댓글이 이미
-  있거나 리뷰가 `running`이면 달지 않습니다.
-- PR 본문에 `@codex`를 쓰지 않습니다. PR #11에서 본문의 멘션을 Codex가 작업 요청으로 받아 자동 리뷰를 하지 않았습니다.
+- 머지는 필수 체크와 Codex 리뷰를 통과하면 PR을 맡은 세션이 켭니다([ADR 0010](docs/adr/0010-codex-gate-status-only.md)).
+  head의 `codex-review`가 success이고 미해결 리뷰 thread가 없으면 `gh pr merge <번호> --squash --auto --match-head-commit <head SHA>`로
+  켭니다. draft PR과 `no-auto-merge` label PR은 제외합니다. 사용자가 특정 PR에 대해 직접 요청하지 않는 한 머지를 미루지 않습니다.
+- gate workflow는 `codex-review` status 판정만 합니다. 리뷰를 요청하지 않고, 판정이 없으면 시간이 지나도 pending입니다.
+- 리뷰 요청은 세션이 `gh` 계정으로 합니다. Codex는 gate(`github-actions[bot]`)의 요청을 무시합니다. PR은 멘션 없이 열고
+  2분 안에 리뷰 요약이 붙지 않을 때만 `@codex review`를 답니다. 새 커밋 push 뒤나 gate의 무효 표식 뒤에도 그 head에 한 번
+  답니다. 그 head의 Codex 결과 댓글이 이미 있거나 리뷰가 `running`이면 달지 않습니다. 10분 넘게 멈추면 한 번 더 달고,
+  그래도 응답이 없으면 BOSS에게 보고합니다. 멈춤에는 Auto-fix 이벤트가 오지 않으므로 세션이 직접 다시 확인합니다.
+- PR 제목·본문·댓글에는 리뷰 요청 댓글 말고는 `@codex` 문자열을 쓰지 않습니다. 백틱 안에 있어도 멘션으로 읽혀 리뷰 대신
+  Codex 클라우드 작업이 호출됩니다(PR #11, 태극 PR #13~#16). 가리킬 때는 "Codex 리뷰 요청"처럼 풀어 씁니다.
