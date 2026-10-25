@@ -20,6 +20,8 @@ jobs:
       - run: mix format --check-formatted
       - run: mix compile --warnings-as-errors
       - run: mix test
+      # Codex review gate script (.github/workflows/codex-review-gate.yml); the runner ships python3.
+      - run: python3 -m unittest discover -s scripts/tests -v
 
   credo:
     runs-on: ubuntu-latest
