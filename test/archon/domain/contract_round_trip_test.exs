@@ -1,0 +1,149 @@
+defmodule Archon.Domain.ContractRoundTripTest do
+  @moduledoc """
+  Every golden fixture body that is a domain object must decode, encode back to the same JSON
+  (after `Archon.Contract.normalize/1`) and pass the upstream JSON schema.
+  """
+
+  use ExUnit.Case, async: true
+
+  alias Archon.Contract
+  alias Archon.Domain.{Task, TaskDef, TaskResult, Workflow, WorkflowDef}
+
+  # Which domain model each fixture body decodes to. Every fixture is listed so that a newly
+  # captured one cannot be skipped silently; [] means the exchange carries no domain object.
+  @models %{
+    "metadata_get_taskdef" => [response: TaskDef],
+    "metadata_get_workflow" => [response: WorkflowDef],
+    "metadata_get_workflow_fork" => [response: WorkflowDef],
+    "metadata_get_workflow_switch" => [response: WorkflowDef],
+    "metadata_register_taskdefs" => [request: {:list, TaskDef}],
+    "metadata_register_workflow_conflict" => [request: WorkflowDef],
+    "metadata_register_workflow_fork" => [request: WorkflowDef],
+    "metadata_register_workflow_simple" => [request: WorkflowDef],
+    "metadata_register_workflow_switch" => [request: WorkflowDef],
+    "task_batch_poll_fork_a" => [response: {:list, Task}],
+    "task_get" => [response: Task],
+    "task_poll_fork_b" => [response: Task],
+    "task_poll_simple_a" => [response: Task],
+    "task_poll_simple_b" => [response: Task],
+    "task_poll_switch_b" => [response: Task],
+    "task_update_fork_a" => [request: TaskResult],
+    "task_update_fork_b" => [request: TaskResult],
+    "task_update_simple_a" => [request: TaskResult],
+    "task_update_switch_b" => [request: TaskResult],
+    "task_update_v2_simple_b" => [request: TaskResult],
+    "workflow_get_completed_fork" => [response: Workflow],
+    "workflow_get_completed_simple" => [response: Workflow],
+    "workflow_get_completed_switch" => [response: Workflow],
+    "workflow_get_running" => [response: Workflow],
+    "workflow_get_terminated" => [response: Workflow],
+    "workflow_get_without_tasks" => [response: Workflow],
+    # Error bodies, text/plain IDs, empty bodies, raw workflow input maps, the
+    # StartWorkflowRequest (outside Phase 1) and the status-only workflow summary.
+    "metadata_get_taskdef_not_found" => [],
+    "metadata_get_workflow_not_found" => [],
+    "task_poll_empty" => [],
+    "workflow_get_not_found" => [],
+    "workflow_get_status" => [],
+    "workflow_start_fork" => [],
+    "workflow_start_request_switch" => [],
+    "workflow_start_simple" => [],
+    "workflow_start_to_terminate" => [],
+    "workflow_terminate" => []
+  }
+
+  @schemas %{
+    TaskDef => :task_def,
+    WorkflowDef => :workflow_def,
+    Task => :task,
+    Workflow => :workflow
+  }
+
+  # Registration requests and the fixture where upstream returned what it stored.
+  # {request fixture, element index of a list body, stored fixture, model}
+  @stored [
+    {"metadata_register_workflow_simple", nil, "metadata_get_workflow", WorkflowDef},
+    {"metadata_register_workflow_switch", nil, "metadata_get_workflow_switch", WorkflowDef},
+    {"metadata_register_workflow_fork", nil, "metadata_get_workflow_fork", WorkflowDef},
+    {"metadata_register_taskdefs", 0, "metadata_get_taskdef", TaskDef}
+  ]
+
+  # Fields the server fills in on registration (MetadataServiceImpl sets the audit fields).
+  @server_fields ~w(createTime updateTime createdBy updatedBy ownerApp)
+
+  test "every fixture is classified" do
+    assert MapSet.new(Contract.fixture_names()) == MapSet.new(Map.keys(@models))
+  end
+
+  for {name, sides} <- @models, {side, model} <- sides do
+    schema_module = with {:list, module} <- model, do: module
+
+    describe "#{name} #{side}" do
+      setup do
+        body = get_in(Contract.fixture(unquote(name)), [Atom.to_string(unquote(side)), "body"])
+        %{items: items(unquote(model), body), module: module(unquote(model))}
+      end
+
+      test "decodes and encodes back to the same JSON", %{items: items, module: module} do
+        for {item, _index} <- items do
+          encoded = round_trip(module, item)
+
+          if unquote(side) == :response do
+            # Responses are complete objects as upstream serialized them.
+            assert Contract.normalize(encoded) == Contract.normalize(item)
+          else
+            # Requests are sparse: every field sent survives unchanged, defaults fill the rest,
+            # and decoding the result again is a fixed point.
+            assert_subset(item, encoded)
+            assert round_trip(module, encoded) == encoded
+          end
+        end
+      end
+
+      if schema = Map.get(@schemas, schema_module) do
+        test "encoded JSON passes the #{schema} schema", %{items: items, module: module} do
+          for {item, _index} <- items do
+            assert Contract.validate(unquote(schema), round_trip(module, item)) == :ok
+          end
+        end
+      end
+    end
+  end
+
+  for {request, index, stored, module} <- @stored do
+    test "#{request} decodes to the definition upstream stored (#{stored})" do
+      body = element(Contract.fixture(unquote(request))["request"]["body"], unquote(index))
+      stored = Contract.fixture(unquote(stored))["response"]["body"]
+
+      assert Map.drop(round_trip(unquote(module), body), @server_fields) ==
+               Map.drop(stored, @server_fields)
+    end
+  end
+
+  defp element(body, nil), do: body
+  defp element(body, index), do: Enum.at(body, index)
+
+  defp items({:list, _module}, body) when is_list(body), do: Enum.with_index(body)
+  defp items(_module, body), do: [{body, nil}]
+
+  defp module({:list, module}), do: module
+  defp module(module), do: module
+
+  # Encodes through the real JSON text, as a REST response would.
+  defp round_trip(module, json) do
+    assert {:ok, struct} = module.from_json(json)
+    struct |> module.to_json() |> JSON.encode!() |> JSON.decode!()
+  end
+
+  defp assert_subset(expected, actual) when is_map(expected) do
+    assert is_map(actual)
+    for {key, value} <- expected, do: assert_subset(value, Map.fetch!(actual, key))
+  end
+
+  defp assert_subset(expected, actual) when is_list(expected) do
+    assert length(expected) == length(actual)
+    Enum.zip_with(expected, actual, &assert_subset/2)
+  end
+
+  defp assert_subset(expected, actual), do: assert(expected == actual)
+end
