@@ -24,4 +24,4 @@ Archon의 합의된 기술·운영 결정을 누적합니다. 파일 이름은 `
 | [0005](0005-static-analysis.md) | CodeQL 대신 쓰는 정적 분석 | 승인 |
 | [0006](0006-merge-policy.md) | 머지 정책과 Codex 리뷰 게이트 | 승인 (일부 0008이 대체) |
 | [0007](0007-taeguk-adoption.md) | 태극 개발 구성 채택 | 제안 |
-| [0008](0008-codex-review-gate-hardening.md) | Codex 리뷰 게이트 보강 | 제안 |
+| [0008](0008-codex-review-gate-hardening.md) | Codex 리뷰 게이트 보강 | 승인 |

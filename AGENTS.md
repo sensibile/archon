@@ -47,3 +47,4 @@ mix deps.audit
   자동 머지를 끄거나 머지를 미루지 않습니다.
 - 새 커밋을 push하면 gate workflow가 head마다 한 번 `@codex review`를 요청합니다. 요청이 없거나 리뷰가
   `running`에 오래 머물면 `@codex review` 코멘트를 직접 답니다.
+- PR 본문에 `@codex`를 쓰지 않습니다. PR #11에서 본문의 멘션을 Codex가 작업 요청으로 받아 자동 리뷰를 하지 않았습니다.
