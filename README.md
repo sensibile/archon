@@ -43,6 +43,10 @@ bound to that reviewed commit; GitHub merges when the other required checks pass
 are resolved. Draft pull requests and those labeled `no-auto-merge` are left alone. See
 [ADR 0008](docs/adr/0008-codex-review-gate-hardening.md).
 
+If Codex gives no verdict for the head, a scheduled run asks again every 10 minutes. After three
+unanswered requests the gate passes `codex-review` when Codex has no unresolved review threads
+([ADR 0009](docs/adr/0009-codex-review-time-rule.md)).
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

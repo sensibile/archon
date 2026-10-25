@@ -45,6 +45,10 @@ mix deps.audit
 - 머지는 필수 체크와 Codex 리뷰를 통과하면 자동으로 됩니다([ADR 0006](docs/adr/0006-merge-policy.md),
   [ADR 0008](docs/adr/0008-codex-review-gate-hardening.md)). 사용자가 특정 PR에 대해 직접 요청하지 않는 한
   자동 머지를 끄거나 머지를 미루지 않습니다.
-- 새 커밋을 push하면 gate workflow가 head마다 한 번 `@codex review`를 요청합니다. 요청이 없거나 리뷰가
-  `running`에 오래 머물면 `@codex review` 코멘트를 직접 답니다.
+- 새 커밋을 push하면 gate workflow가 head마다 한 번 `@codex review`를 요청합니다. 판정이 없으면 10분마다 다시
+  요청하고, 3번 요청해도 판정이 없으면 미해결 Codex thread가 없을 때 통과시킵니다
+  ([ADR 0009](docs/adr/0009-codex-review-time-rule.md)).
+- Codex는 gate(`github-actions[bot]`)의 요청을 무시할 수 있습니다. PR을 맡은 세션에 Auto-fix가 켜져 있으면, gate 요청
+  댓글이 전달될 때 `gh` 계정으로 같은 PR에 `@codex review`를 한 번 다시 답니다. 그 head의 Codex 결과 댓글이 이미
+  있거나 리뷰가 `running`이면 달지 않습니다.
 - PR 본문에 `@codex`를 쓰지 않습니다. PR #11에서 본문의 멘션을 Codex가 작업 요청으로 받아 자동 리뷰를 하지 않았습니다.

@@ -3,6 +3,7 @@
 - 상태: 승인
 - 날짜: 2026-10-25
 - 관련 PR: sensibile/archon#11
+- 보완: [ADR 0009](0009-codex-review-time-rule.md)가 멈춘 리뷰 처리를 정한다.
 - 대체: [ADR 0006](0006-merge-policy.md)의 결정 3·4. 결정 1·2·5는 그대로 유효하다.
 - 출처: 태극(sensibile/taeguk) `.github/workflows/codex-review-gate.yml`, `scripts/codex_review_gate.py`,
   `tests/test_codex_review_gate.py`, 기준 커밋 `44dfb55`
