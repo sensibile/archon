@@ -21,6 +21,9 @@ The upstream contract Archon targets is pinned in [`priv/contract/`](priv/contra
 ([`test/fixtures/contract/`](test/fixtures/contract/README.md)). Which endpoints are in scope is
 decided in [ADR 0001](docs/adr/0001-api-contract-scope.md).
 
+Design and operations decisions are recorded in [`docs/adr/`](docs/adr/README.md).
+Agent working rules are in [AGENTS.md](AGENTS.md).
+
 ## Development
 
 ```bash
