@@ -23,7 +23,7 @@ def state_comment(sha=HEAD, status='completed', unresolved=False, updated='2026-
 
 class FakeGitHub:
     def __init__(self, comments, draft=False, labels=(), head_repo=REPO, auto_merge=None, base='main', later=(), later_comments=None,
-                 threads=(), more_threads=False, threads_error=False):
+                 threads=(), more_threads=False, threads_error=False, statuses=(), current=None):
         self.pr = {'state': 'open', 'draft': draft, 'html_url': f'https://github.com/{REPO}/pull/9', 'auto_merge': auto_merge,
                    'labels': [{'name': name} for name in labels], 'head': {'sha': HEAD, 'repo': {'full_name': head_repo}},
                    'base': {'ref': base, 'repo': {'default_branch': 'main'}}}
@@ -32,6 +32,8 @@ class FakeGitHub:
         self.later_comments = later_comments  # comments seen by every fetch after the first
         self.threads = {'pageInfo': {'hasNextPage': more_threads}, 'nodes': list(threads)}
         self.threads_error = threads_error
+        self.statuses = list(statuses)
+        self.current = current  # latest codex-review status as GitHub reports it
         self.calls = []
 
     def __call__(self, *args):
@@ -40,6 +42,10 @@ class FakeGitHub:
             if len(self.called(args)) > 1 and self.later:
                 self.pr = {**self.pr, **self.later.pop(0)}
             return json.dumps(self.pr)
+        if args == ('api', f'repos/{REPO}/commits/{HEAD}/statuses?per_page=100'):
+            return json.dumps([self.current] if self.current else [])
+        if args[:3] == ('api', '--paginate', '--slurp') and args[3].endswith('/statuses'):
+            return json.dumps([self.statuses])
         if args[:3] == ('api', '--paginate', '--slurp'):
             if len(self.called(args)) > 1 and self.later_comments is not None:
                 return json.dumps([self.later_comments])
@@ -110,6 +116,127 @@ class NullFindingsTests(unittest.TestCase):
         state, fake = self.status([state_comment()])
         self.assertEqual(state, 'success')
         self.assertEqual(fake.called(('api', 'graphql')), [])
+
+
+NOW = gate.parse_time('2026-10-25T12:00:00Z')
+
+
+def minutes_ago(minutes):
+    return (NOW - gate.timedelta(minutes=minutes)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def gate_request(minutes, head=HEAD, login=gate.ACTIONS_LOGIN, marker=None):
+    marker = marker or gate.request_marker(head)
+    return {'user': {'login': login, 'type': 'Bot'}, 'created_at': minutes_ago(minutes), 'updated_at': minutes_ago(minutes),
+            'body': f'@codex review\n\n{marker}'}
+
+
+def gate_status(minutes, login=gate.ACTIONS_LOGIN, context=gate.CONTEXT):
+    return {'context': context, 'state': 'pending', 'created_at': minutes_ago(minutes), 'creator': {'login': login}}
+
+
+class TimeRuleTests(unittest.TestCase):
+    # BOSS (2026-10-25): with no Codex verdict, re-request every 10 minutes;
+    # after 3 unanswered requests the gate passes, unless Codex left open threads.
+    stalled = [state_comment(status='running', unresolved=None)]
+
+    def run_gate(self, comments, **github):
+        fake = FakeGitHub(comments, **github)
+        result = gate.run(REPO, 9, request_review=True, auto_merge=True, now=NOW, call=fake)
+        return result, fake
+
+    def requests(self, fake):
+        return [call for call in fake.called(('api', '-X', 'POST', f'repos/{REPO}/issues/9/comments'))]
+
+    def test_first_request_after_ten_minutes_without_a_verdict(self):
+        result, fake = self.run_gate(self.stalled, statuses=[gate_status(11)])
+        self.assertEqual(len(self.requests(fake)), 1)
+        self.assertIn(gate.request_marker(HEAD), self.requests(fake)[0][-1])
+        self.assertEqual(fake.posted_status()[0]['state'], 'pending')
+
+    def test_waits_ten_minutes_between_requests(self):
+        for name, (comments, statuses) in {'since first status': (self.stalled, [gate_status(9)]),
+                                           'since last request': (self.stalled + [gate_request(25), gate_request(9)], [gate_status(40)])}.items():
+            with self.subTest(name):
+                _, fake = self.run_gate(comments, statuses=statuses)
+                self.assertEqual(self.requests(fake), [])
+                self.assertEqual(fake.posted_status()[0]['state'], 'pending')
+
+    def test_third_request_then_pass_after_ten_more_minutes(self):
+        _, fake = self.run_gate(self.stalled + [gate_request(40), gate_request(25)], statuses=[gate_status(50)])
+        self.assertEqual(len(self.requests(fake)), 1)
+        result, fake = self.run_gate(self.stalled + [gate_request(40), gate_request(25), gate_request(11)], statuses=[gate_status(50)])
+        status = fake.posted_status()[0]
+        self.assertEqual(status['state'], 'success')
+        self.assertIn('3 requests', status['description'])
+        self.assertEqual(self.requests(fake), [])
+        self.assertIn('enabled_auto_merge', result['actions'])
+
+    def test_unanswered_requests_do_not_override_codex_findings(self):
+        three = [gate_request(40), gate_request(25), gate_request(11)]
+        _, fake = self.run_gate(self.stalled + three, statuses=[gate_status(50)], threads=[thread(False)])
+        self.assertEqual(fake.posted_status()[0]['state'], 'failure')
+        _, fake = self.run_gate(self.stalled + three, statuses=[gate_status(50)], threads_error=True)
+        self.assertEqual(fake.posted_status()[0]['state'], 'pending')
+        _, fake = self.run_gate([state_comment(unresolved=True)] + three, statuses=[gate_status(50)])
+        self.assertEqual(fake.posted_status()[0]['state'], 'failure')
+
+    def test_only_gate_requests_for_this_head_after_the_last_invalidation_count(self):
+        others = [gate_request(40, head='0' * 40), gate_request(30, login='sensibile'), gate_request(20, head='1' * 40)]
+        result, fake = self.run_gate(self.stalled + others, statuses=[gate_status(50)])
+        self.assertNotEqual(fake.posted_status()[0]['state'], 'success')
+        voided = [gate_request(45), gate_request(35), gate_request(25), gate_request(15, marker=gate.invalidation_marker(HEAD))]
+        _, fake = self.run_gate(self.stalled + voided, statuses=[gate_status(50)])
+        self.assertEqual(fake.posted_status()[0]['state'], 'pending')
+        self.assertEqual(len(self.requests(fake)), 1)
+
+    def test_no_anchor_means_no_timed_action(self):
+        _, fake = self.run_gate(self.stalled, statuses=[gate_status(60, login='sensibile'), gate_status(60, context='rules')])
+        self.assertEqual(self.requests(fake), [])
+
+    def test_time_rule_skips_states_outside_the_approved_cases(self):
+        three = [gate_request(40), gate_request(25), gate_request(11)]
+        unreadable = {**state_comment(), 'body': '<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v2 {} -->'}
+        cases = {'unreadable state': [unreadable], 'unknown review status': [state_comment(status='paused', unresolved=None)],
+                 'completed finding field missing': [missing_findings_field()],
+                 'completed null with a suggestions receipt': [state_comment(unresolved=None), receipt(text='Here are some automated review suggestions for this pull request.')],
+                 'running with a suggestions receipt': [state_comment(status='running', unresolved=None), receipt(text='Here are some automated review suggestions for this pull request.')],
+                 'not started with a receipt': [receipt(text='Here are some automated review suggestions for this pull request.')]}
+        for name, comments in cases.items():
+            with self.subTest(name):
+                _, fake = self.run_gate(comments + three, statuses=[gate_status(50)])
+                self.assertEqual(fake.posted_status()[0]['state'], 'pending')
+                self.assertEqual(fake.called(('pr', 'merge')), [])
+
+    def test_time_rule_covers_approved_cases(self):
+        three = [gate_request(40), gate_request(25), gate_request(11)]
+        cases = {'not started': [], 'older head reviewed': [state_comment(sha='0' * 40)], 'running': self.stalled,
+                 'completed null without receipt': [state_comment(unresolved=None)]}
+        for name, comments in cases.items():
+            with self.subTest(name):
+                _, fake = self.run_gate(comments + three, statuses=[gate_status(50)])
+                self.assertEqual(fake.posted_status()[0]['state'], 'success')
+
+    def test_time_rule_needs_request_review_enabled(self):
+        fake = FakeGitHub(self.stalled + [gate_request(40), gate_request(25), gate_request(11)], statuses=[gate_status(50)])
+        gate.run(REPO, 9, now=NOW, call=fake)
+        self.assertEqual(fake.posted_status()[0]['state'], 'pending')
+
+
+class StatusRepostTests(unittest.TestCase):
+    # GitHub keeps at most 1000 statuses per SHA and context; scheduled runs
+    # must not spend them restating an unchanged verdict.
+    def test_unchanged_status_is_not_posted_again(self):
+        same = {'context': gate.CONTEXT, 'state': 'pending', 'description': 'Codex review is running', 'creator': {'login': gate.ACTIONS_LOGIN}}
+        fake = FakeGitHub([state_comment(status='running', unresolved=None)], current=same)
+        gate.run(REPO, 9, call=fake)
+        self.assertEqual(fake.posted_status(), [])
+
+    def test_changed_status_is_posted(self):
+        old = {'context': gate.CONTEXT, 'state': 'pending', 'description': 'Codex review is running', 'creator': {'login': gate.ACTIONS_LOGIN}}
+        fake = FakeGitHub([state_comment()], current=old)
+        gate.run(REPO, 9, call=fake)
+        self.assertEqual(fake.posted_status()[0]['state'], 'success')
 
 
 class EvaluateTests(unittest.TestCase):

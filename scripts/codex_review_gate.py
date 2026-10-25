@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Publish the Codex review result for a PR head as the `codex-review` commit status."""
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import re
@@ -27,6 +28,12 @@ THREADS = '''query($owner: String!, $name: String!, $number: Int!) {
     reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved comments(first: 1) { nodes { author { login } } } } }
   } }
 }'''
+
+
+# Time rule approved by BOSS (2026-10-25): with no Codex verdict, ask again
+# every REQUEST_INTERVAL; after MAX_REQUESTS unanswered requests, pass.
+REQUEST_INTERVAL = timedelta(minutes=10)
+MAX_REQUESTS = 3
 
 
 def gh(*args, token=None):
@@ -88,18 +95,21 @@ def null_findings(state, head_sha):
             and 'has_unresolved_findings' in review and review['has_unresolved_findings'] is None)
 
 
-def clean_receipt(comments, head_sha):
-    """True when Codex's newest receipt for this head reports no major issues."""
+def newest_receipt(comments, head_sha):
+    """Codex's newest receipt comment for this head, or None."""
     receipts = []
     for comment in comments:
         body = comment.get('body') or ''
         match = RECEIPT_COMMIT.search(body)
         if is_codex(comment) and body.lstrip().startswith(RECEIPT_MARKER) and match and head_sha.startswith(match.group(1)):
             receipts.append(comment)
-    if not receipts:
-        return False
-    newest = max(receipts, key=lambda comment: comment.get('updated_at') or '')
-    return bool(CLEAN_RECEIPT.search(newest.get('body') or ''))
+    return max(receipts, key=lambda comment: comment.get('updated_at') or '') if receipts else None
+
+
+def clean_receipt(comments, head_sha):
+    """True when Codex's newest receipt for this head reports no major issues."""
+    newest = newest_receipt(comments, head_sha)
+    return newest is not None and bool(CLEAN_RECEIPT.search(newest.get('body') or ''))
 
 
 def unresolved_codex_threads(repo, number, call):
@@ -134,6 +144,50 @@ def invalidated(comments, head_sha):
                and (comment.get('created_at') or '') > reviewed_at for comment in comments)
 
 
+def parse_time(value):
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00')) if value else None
+    except ValueError:
+        return None
+
+
+def gate_requests(comments, head_sha):
+    """Times of the gate's own review requests for this head since its last invalidation.
+
+    Returns None when a request has no readable time, so nothing is counted on guesswork.
+    """
+    markers = (request_marker(head_sha), invalidation_marker(head_sha))
+    found = []
+    for comment in comments:
+        body = comment.get('body') or ''
+        if (comment.get('user') or {}).get('login') != ACTIONS_LOGIN or not any(marker in body for marker in markers):
+            continue
+        created = parse_time(comment.get('created_at'))
+        if created is None:
+            return None
+        found.append((created, invalidation_marker(head_sha) in body))
+    voided_at = max((created for created, invalidation in found if invalidation), default=None)
+    return sorted(created for created, _ in found if voided_at is None or created >= voided_at)
+
+
+def first_gate_status(repo, head_sha, call):
+    """When the gate first published a status for this head: the time rule's starting point."""
+    pages = json.loads(call('api', '--paginate', '--slurp', f'repos/{repo}/commits/{head_sha}/statuses'))
+    times = [parse_time(status.get('created_at')) for page in pages for status in page
+             if status.get('context') == CONTEXT and (status.get('creator') or {}).get('login') == ACTIONS_LOGIN]
+    times = [time for time in times if time is not None]
+    return min(times) if times else None
+
+
+def current_status(repo, head_sha, call):
+    """Latest gate status on this head; GitHub keeps at most 1000 per SHA and context."""
+    # The combined-status endpoint omits the creator, so read the newest-first list.
+    for status in json.loads(call('api', f'repos/{repo}/commits/{head_sha}/statuses?per_page=100')):
+        if status.get('context') == CONTEXT and (status.get('creator') or {}).get('login') == ACTIONS_LOGIN:
+            return status.get('state'), status.get('description')
+    return None
+
+
 def opted_out(pr):
     return bool(pr.get('draft')) or NO_AUTO_MERGE_LABEL in {label.get('name') for label in pr.get('labels') or []}
 
@@ -162,10 +216,54 @@ def judge(repo, number, head, call):
     return (state, comments, *evaluate(state, head))
 
 
-def run(repo, number, request_review=False, auto_merge=False, invalidate=False, call=gh, merge=None):
+def time_rule_applies(state, comments, head_sha):
+    """Only the approved stalls: no review yet for this head, a running review,
+    or a completed review with explicit null findings and no receipt at all.
+    Unreadable states, and any receipt Codex did post, stay pending."""
+    if newest_receipt(comments, head_sha) is not None:
+        return False  # Codex answered for this head; that is not "no verdict".
+    if state is None:
+        return True
+    review = state.get('code_review')
+    if not isinstance(review, dict) or not isinstance(review.get('commit_sha'), str):
+        return False
+    if review['commit_sha'] != head_sha:
+        return True
+    if review.get('status') == 'running':
+        return True
+    return null_findings(state, head_sha)
+
+
+def decide(repo, number, head, call, now, request_review):
+    """Return (state, comments, status, description, ask_codex)."""
+    state, comments, status, description = judge(repo, number, head, call)
+    if status != 'pending' or not request_review:
+        return state, comments, status, description, False
+    requests = gate_requests(comments, head)
+    if requests is None:
+        return state, comments, status, description, False
+    if not requests and needs_review_request(state, comments, head):
+        return state, comments, status, description, True
+    if not time_rule_applies(state, comments, head):
+        return state, comments, status, description, False
+    anchor = requests[-1] if requests else first_gate_status(repo, head, call)
+    if anchor is None or now - anchor < REQUEST_INTERVAL:
+        return state, comments, status, description, False
+    if len(requests) < MAX_REQUESTS:
+        return state, comments, status, f'{description}; asking Codex again ({len(requests) + 1}/{MAX_REQUESTS})'[:140], True
+    threads = unresolved_codex_threads(repo, number, call)
+    if threads == 0:
+        return state, comments, 'success', f'No Codex verdict after {MAX_REQUESTS} requests; passed by the time rule', False
+    if threads:
+        return state, comments, 'failure', 'Codex left unresolved review threads', False
+    return state, comments, status, description, False
+
+
+def run(repo, number, request_review=False, auto_merge=False, invalidate=False, now=None, call=gh, merge=None):
     # Merges performed through GITHUB_TOKEN do not trigger the push-to-main CI run, so auto-merge
     # may use a separate user token; comments and statuses stay with github-actions[bot].
     merge = merge or call
+    now = now or datetime.now(timezone.utc)
     pr = json.loads(call('api', f'repos/{repo}/pulls/{number}'))
     head_repo = (pr.get('head') or {}).get('repo') or {}
     base = pr.get('base') or {}
@@ -184,19 +282,20 @@ def run(repo, number, request_review=False, auto_merge=False, invalidate=False, 
         call('api', '-X', 'POST', f'repos/{repo}/issues/{number}/comments', '-f', f'body=@codex review\n\n{invalidation_marker(head)}')
         actions.append('invalidated_codex_review')
         return {'pr': number, 'head': head, 'actions': actions}
-    state, comments, status, description = judge(repo, number, head, call)
+    state, comments, status, description, ask_codex = decide(repo, number, head, call, now, request_review)
     if status == 'success':
         # Re-read right before publishing success to narrow the window for
         # evidence that changed while this run was working.
-        state, comments, status, description = judge(repo, number, head, call)
+        state, comments, status, description, ask_codex = decide(repo, number, head, call, now, request_review)
     if auto_merge and opted_out(pr) and pr.get('auto_merge'):
         # Before the status: a success could otherwise merge the PR first. A
         # failed disable raises here, so no status is published.
         merge('pr', 'merge', str(number), '--repo', repo, '--disable-auto')
         actions.append('disabled_auto_merge')
-    call('api', '-X', 'POST', f'repos/{repo}/statuses/{head}', '-f', f'state={status}',
-         '-f', f'context={CONTEXT}', '-f', f'description={description}', '-f', f'target_url={pr["html_url"]}')
-    if request_review and status == 'pending' and needs_review_request(state, comments, head):
+    if current_status(repo, head, call) != (status, description):
+        call('api', '-X', 'POST', f'repos/{repo}/statuses/{head}', '-f', f'state={status}',
+             '-f', f'context={CONTEXT}', '-f', f'description={description}', '-f', f'target_url={pr["html_url"]}')
+    if ask_codex and status == 'pending':
         call('api', '-X', 'POST', f'repos/{repo}/issues/{number}/comments', '-f', f'body=@codex review\n\n{request_marker(head)}')
         actions.append('requested_codex_review')
     if auto_merge and status == 'success' and not opted_out(pr) and not pr.get('auto_merge'):
