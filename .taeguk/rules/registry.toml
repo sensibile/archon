@@ -1,0 +1,108 @@
+schema_version = 1
+
+[[rules]]
+id = "GOV-001"
+version = "1.0"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "governance.md#gov-001"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-05"
+
+[[rules]]
+id = "GOV-002"
+version = "1.0"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "governance.md#gov-002"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-05"
+
+[[rules]]
+id = "GOV-004"
+version = "1.0"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "governance.md#gov-004"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-11"
+
+[[rules]]
+id = "REQ-001"
+version = "1.1"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "verification.md#req-001"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-23"
+
+[[rules]]
+id = "VER-003"
+version = "1.0"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "verification.md#ver-003"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-11"
+
+[[rules]]
+id = "VER-004"
+version = "1.1"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "verification.md#ver-004"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-16"
+
+[[rules]]
+id = "MET-001"
+version = "1.0"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "verification.md#met-001"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-11"
+
+[[rules]]
+id = "REQ-006"
+version = "1.0"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "verification.md#req-006"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-11"
+
+[[rules]]
+id = "REQ-007"
+version = "1.0"
+status = "approved"
+scope = "Taeguk pilot projects: hoplites, acropolis, thesmothetai"
+document = "verification.md#req-007"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-23"
+
+[[rules]]
+id = "DEV-002"
+version = "1.1"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "verification.md#dev-002"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-16"
+
+[[rules]]
+id = "REL-005"
+version = "1.0"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "delivery.md#rel-005"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-11"
+
+[[rules]]
+id = "GOV-005"
+version = "0.1"
+status = "proposed"
+scope = "Taeguk and explicitly assigned workflows"
+document = "proposals/index.md#gov-005"
+enforcement = "guidance"

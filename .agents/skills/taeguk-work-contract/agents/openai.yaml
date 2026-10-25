@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk work-contract"
+  short_description: "Bounded work contract workflow"
+  default_prompt: "Use $taeguk-work-contract for the assigned task."

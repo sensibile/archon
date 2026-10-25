@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk resume-with-evidence"
+  short_description: "Bounded resume with evidence workflow"
+  default_prompt: "Use $taeguk-resume-with-evidence for the assigned task."

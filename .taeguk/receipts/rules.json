@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "source_version": "8dbf62681faf14771c86b86dddc2d1b5f0378d33",
+  "link_pin": "8dbf62681faf14771c86b86dddc2d1b5f0378d33",
+  "files": {
+    ".taeguk/rules/approvals.md": "b6bb38875a5fbce9af6e925cb7d8674e69a87b73e96c5fc6e0cdd743885c04dd",
+    ".taeguk/rules/delivery.md": "66a66923fb3296d7f286d8845883c5678375b578e9fc00d0b7bc6bb7df80c68d",
+    ".taeguk/rules/governance.md": "98adb27880316ba215426c136e80335b00e1673fc41228330ec3141b30be0ffc",
+    ".taeguk/rules/index.md": "18f55ffdc005bba56464ffbb514b588a62e1fd5235aba4a4dc16d388963c4f66",
+    ".taeguk/rules/mechanical-checks.md": "fdef2952de9230ecf6d0b4ac2ab589e3ec515310d13f36bbac8c4a24f9934d84",
+    ".taeguk/rules/proposals/index.md": "731d47fd6930f7dc4fa31a01303e87201bbfafab7785a39660d3ee10db13a878",
+    ".taeguk/rules/proposals/intent-requirement-records.md": "004be0b10f188ea1ccfebfe49dbb1ec7f825e228e028531c46113d0a36420a86",
+    ".taeguk/rules/registry.toml": "5448dd9f41079b3a993e6092276c6e4c05c644829bdd6adfcaf32c38c43d23de",
+    ".taeguk/rules/verification.md": "d94b7b39b86b7788254033615aa929952494899126bff0bfa7af8e0dcbfbaea2"
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk investigate-and-reproduce"
+  short_description: "Bounded investigate and reproduce workflow"
+  default_prompt: "Use $taeguk-investigate-and-reproduce for the assigned task."

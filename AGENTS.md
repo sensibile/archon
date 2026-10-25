@@ -2,6 +2,8 @@
 
 Archon에서 일하는 에이전트(Claude Code, Codex 등)를 위한 규칙입니다.
 
+Read `.taeguk/rules/index.md` before planning and apply Taeguk rules to explicitly assigned workflows.
+
 ## 프로젝트
 
 Conductor OSS(`../conductor-oss`, Java/Spring)를 Elixir/OTP로 포팅합니다. 외부 계약(REST·JSON)은 upstream과

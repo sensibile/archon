@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk propose-rule-change"
+  short_description: "Bounded propose rule change workflow"
+  default_prompt: "Use $taeguk-propose-rule-change for the assigned task."
