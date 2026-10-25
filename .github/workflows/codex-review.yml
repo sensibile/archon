@@ -1,0 +1,78 @@
+# Publishes the Codex review result as the `codex-review` commit status on the PR head, so the
+# main ruleset can require it. The source of truth is the state block Codex embeds in its
+# summary comment (`<!-- codex-review-state:v1 {...} -->`), re-read on every Codex comment edit.
+name: Codex review
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  # Runs from the default branch with a write token. No PR code is checked out and comment text is
+  # only parsed in JavaScript, never interpolated into a shell.
+  issue_comment:
+    types: [created, edited]
+permissions: {}
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  # The job name must differ from the status context: a check run named `codex-review` would
+  # satisfy the required check on its own, even while the review is still pending.
+  evaluate:
+    name: Codex review gate
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event.issue.pull_request && github.event.comment.user.login == 'chatgpt-codex-connector[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const bot = 'chatgpt-codex-connector[bot]';
+            const number = context.payload.pull_request?.number ?? context.payload.issue.number;
+            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number: number, per_page: 100,
+            });
+            const summary = comments
+              .filter((c) => c.user.login === bot && c.body.includes('codex-review-state:v1'))
+              .at(-1);
+            const match = summary?.body.match(/codex-review-state:v1\s+(\{.*?\})\s*-->/s);
+
+            let state = 'pending';
+            let description;
+            if (!match) {
+              description = 'Codex 리뷰 대기 중';
+            } else {
+              const review = JSON.parse(match[1]).code_review ?? {};
+              if (review.commit_sha !== pr.head.sha) {
+                description = '최신 커밋 리뷰 필요: "@codex review" 코멘트';
+              } else if (review.status !== 'completed') {
+                description = 'Codex 리뷰 진행 중';
+              } else if (review.has_unresolved_findings === false) {
+                state = 'success';
+                description = 'Codex 리뷰 완료, 미해결 지적 없음';
+              } else {
+                state = 'failure';
+                description = 'Codex 지적 사항 미해결';
+              }
+            }
+
+            core.info(`PR #${number} ${pr.head.sha}: ${state} (${description})`);
+            try {
+              await github.rest.repos.createCommitStatus({
+                ...context.repo,
+                sha: pr.head.sha,
+                context: 'codex-review',
+                state,
+                description,
+                target_url: summary?.html_url ?? pr.html_url,
+              });
+            } catch (error) {
+              // Fork pull_request runs get a read-only token. The issue_comment run
+              // that follows the Codex comment publishes the status instead.
+              core.warning(`Could not publish codex-review status: ${error.message}`);
+            }
