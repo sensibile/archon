@@ -1,0 +1,25 @@
+name: Set up Elixir
+description: Install the pinned Erlang/Elixir, restore the deps/_build cache, and fetch deps.
+outputs:
+  otp-version:
+    value: ${{ steps.beam.outputs.otp-version }}
+  elixir-version:
+    value: ${{ steps.beam.outputs.elixir-version }}
+runs:
+  using: composite
+  steps:
+    - uses: erlef/setup-beam@v1
+      id: beam
+      with:
+        version-file: .tool-versions
+        version-type: strict
+    - uses: actions/cache@v6
+      with:
+        path: |
+          deps
+          _build
+        key: mix-${{ runner.os }}-${{ env.MIX_ENV }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
+        restore-keys: |
+          mix-${{ runner.os }}-${{ env.MIX_ENV }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
+    - run: mix deps.get
+      shell: bash
