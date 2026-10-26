@@ -23,7 +23,7 @@ def state_comment(sha=HEAD, status='completed', unresolved=False, updated='2026-
 
 class FakeGitHub:
     def __init__(self, comments, head_repo=REPO, base='main', later_comments=None,
-                 threads=(), more_threads=False, threads_error=False, current=None, read_error=None):
+                 threads=(), more_threads=False, threads_error=False, current=None, read_error=None, comment_error=False):
         self.pr = {'state': 'open', 'html_url': f'https://github.com/{REPO}/pull/9', 'head': {'sha': HEAD, 'repo': {'full_name': head_repo}},
                    'base': {'ref': base, 'repo': {'default_branch': 'main'}}}
         self.comments = comments
@@ -32,10 +32,13 @@ class FakeGitHub:
         self.threads_error = threads_error
         self.current = current  # latest codex-review status as GitHub reports it
         self.read_error = read_error  # 'comments' or 'statuses': that read fails with HTTP 502
+        self.comment_error = comment_error  # posting a PR comment fails with HTTP 502
         self.calls = []
 
     def __call__(self, *args):
         self.calls.append(args)
+        if self.comment_error and args[:4] == ('api', '-X', 'POST', f'repos/{REPO}/issues/9/comments'):
+            raise subprocess.CalledProcessError(1, ['gh', *args], stderr='HTTP 502')
         if args == ('api', f'repos/{REPO}/pulls/9'):
             return json.dumps(self.pr)
         if args == ('api', f'repos/{REPO}/commits/{HEAD}/statuses?per_page=100'):
@@ -144,6 +147,14 @@ class ReadFailureTests(unittest.TestCase):
                     gate.run(REPO, 9, call=fake)
                 self.assertEqual([status['state'] for status in fake.posted_status()], ['pending'])
 
+
+    def test_failed_invalidation_marker_blocks_an_older_success(self):
+        # The gate step is skipped when the record step fails, so the record step
+        # itself must replace the success the voiding event made stale.
+        fake = FakeGitHub([state_comment()], comment_error=True)
+        with self.assertRaises(subprocess.CalledProcessError):
+            gate.run(REPO, 9, invalidate=True, call=fake)
+        self.assertEqual([status['state'] for status in fake.posted_status()], ['pending'])
 
 class EvaluateTests(unittest.TestCase):
     def test_completed_review_of_head_without_unresolved_findings_succeeds(self):
