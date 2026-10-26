@@ -33,18 +33,25 @@ class FakeGitHub:
         self.current = current  # latest codex-review status as GitHub reports it
         self.read_error = read_error  # 'comments' or 'statuses': that read fails with HTTP 502
         self.comment_error = comment_error  # posting a PR comment fails with HTTP 502
+        self.history = []  # statuses this fake accepted, newest first; GitHub keeps them all
         self.calls = []
 
     def __call__(self, *args):
         self.calls.append(args)
         if self.comment_error and args[:4] == ('api', '-X', 'POST', f'repos/{REPO}/issues/9/comments'):
             raise subprocess.CalledProcessError(1, ['gh', *args], stderr='HTTP 502')
+        if args[:4] == ('api', '-X', 'POST', f'repos/{REPO}/statuses/{HEAD}'):
+            fields = dict(field.split('=', 1) for field in args[5::2])
+            self.history.insert(0, {'context': fields['context'], 'state': fields['state'], 'description': fields['description'],
+                                    'creator': {'login': gate.ACTIONS_LOGIN}, 'created_at': f'2026-10-26T13:00:{len(self.history):02d}Z'})
+            return '{}'
         if args == ('api', f'repos/{REPO}/pulls/9'):
             return json.dumps(self.pr)
-        if args == ('api', f'repos/{REPO}/commits/{HEAD}/statuses?per_page=100'):
+        if args == ('api', f'repos/{REPO}/commits/{HEAD}/statuses?per_page=100') or args[3:] == (f'repos/{REPO}/commits/{HEAD}/statuses',):
             if self.read_error == 'statuses':
                 raise subprocess.CalledProcessError(1, ['gh', *args], stderr='HTTP 502')
-            return json.dumps([self.current] if self.current else [])
+            statuses = self.history + ([self.current] if self.current else [])
+            return json.dumps([statuses] if args[1] == '--paginate' else statuses)
         if args[:3] == ('api', '--paginate', '--slurp'):
             if self.read_error == 'comments':
                 raise subprocess.CalledProcessError(1, ['gh', *args], stderr='HTTP 502')
@@ -155,6 +162,57 @@ class ReadFailureTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             gate.run(REPO, 9, invalidate=True, call=fake)
         self.assertEqual([status['state'] for status in fake.posted_status()], ['pending'])
+
+
+class RecordFailureTests(unittest.TestCase):
+    # acropolis Codex security review (AGENT-002): a failed marker POST leaves only
+    # the record step's pending status, which later or concurrent runs must honor.
+    record_failed = {'context': gate.CONTEXT, 'state': 'pending', 'description': gate.RECORD_FAILED, 'creator': {'login': gate.ACTIONS_LOGIN}}
+
+    def test_later_run_keeps_a_failed_invalidation(self):
+        fake = FakeGitHub([state_comment()], comment_error=True)
+        with self.assertRaises(subprocess.CalledProcessError):
+            gate.run(REPO, 9, invalidate=True, call=fake)
+        gate.run(REPO, 9, call=fake)
+        self.assertEqual([status['state'] for status in fake.posted_status()], ['pending', 'pending'])
+
+    def test_run_overlapping_a_failed_invalidation_ends_pending(self):
+        fake = FakeGitHub([state_comment()], comment_error=True)
+        original, fired = fake.__call__, []
+
+        def interleave(*args):
+            # The record step fails right after this run's last evidence read.
+            if args[1:2] == (f'repos/{REPO}/commits/{HEAD}/statuses?per_page=100',) and not fired:
+                fired.append(True)
+                with self.assertRaises(subprocess.CalledProcessError):
+                    gate.run(REPO, 9, invalidate=True, call=original)
+            return original(*args)
+        gate.run(REPO, 9, call=interleave)
+        self.assertEqual(fake.posted_status()[-1]['state'], 'pending')
+
+    def test_newer_codex_summary_clears_a_failed_invalidation(self):
+        failed = {**self.record_failed, 'created_at': '2026-10-23T05:00:00Z'}
+        fake = FakeGitHub([state_comment(updated='2026-10-23T06:00:00Z')], current=failed)
+        gate.run(REPO, 9, call=fake)
+        self.assertEqual(fake.posted_status()[0]['state'], 'success')
+
+    def test_failed_invalidation_in_the_same_second_counts(self):
+        failed = {**self.record_failed, 'created_at': '2026-10-23T06:00:00Z'}
+        fake = FakeGitHub([state_comment(updated='2026-10-23T06:00:00Z')], current=failed)
+        gate.run(REPO, 9, call=fake)
+        self.assertEqual(fake.posted_status()[0]['state'], 'pending')
+
+    def test_failed_invalidation_without_a_time_counts(self):
+        fake = FakeGitHub([state_comment(updated='2026-10-23T06:00:00Z')], current=self.record_failed)
+        gate.run(REPO, 9, call=fake)
+        self.assertEqual(fake.posted_status()[0]['state'], 'pending')
+
+    def test_other_authors_cannot_forge_a_failed_invalidation(self):
+        forged = {**self.record_failed, 'creator': {'login': 'mallory'}, 'created_at': '2026-10-26T00:00:00Z'}
+        fake = FakeGitHub([state_comment()], current=forged)
+        gate.run(REPO, 9, call=fake)
+        self.assertEqual(fake.posted_status()[0]['state'], 'success')
+
 
 class EvaluateTests(unittest.TestCase):
     def test_completed_review_of_head_without_unresolved_findings_succeeds(self):

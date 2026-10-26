@@ -10,6 +10,9 @@ CONTEXT = 'codex-review'
 CODEX_LOGIN = 'chatgpt-codex-connector[bot]'
 CODEX_APP = 'chatgpt-codex-connector'
 ACTIONS_LOGIN = 'github-actions[bot]'
+# Published by the record step when it cannot leave the invalidation marker; the
+# status itself then stands in for the marker until Codex updates its summary.
+RECORD_FAILED = 'Codex review evidence was invalidated but could not be recorded'
 # Undocumented marker inside Codex's summary comment; a format change must
 # leave the gate pending, never successful.
 SUMMARY_MARKERS = ('codex-pull-request-review-summary', 'codex-review-state')
@@ -121,21 +124,29 @@ def invalidation_marker(head_sha):
     return f'<!-- codex-review-gate-invalidated:{head_sha} -->'
 
 
-def invalidated(comments, head_sha):
-    """True when the gate voided the review evidence for this head after Codex last updated it."""
+def invalidated(comments, statuses, head_sha):
+    """True unless Codex updated its summary strictly after the gate voided the evidence for this head."""
     summary = codex_summary(comments)
     reviewed_at = (summary or {}).get('updated_at') or ''
     marker = invalidation_marker(head_sha)
-    return any((comment.get('user') or {}).get('login') == ACTIONS_LOGIN and marker in (comment.get('body') or '')
-               and (comment.get('created_at') or '') > reviewed_at for comment in comments)
+    if any((comment.get('user') or {}).get('login') == ACTIONS_LOGIN and marker in (comment.get('body') or '')
+           and (comment.get('created_at') or '') >= reviewed_at for comment in comments):
+        return True
+    # Timestamps have one-second resolution, so a tie counts as voided, and so does a
+    # status without a readable time: an unprovable order must not restore success.
+    return any(status.get('context') == CONTEXT and (status.get('creator') or {}).get('login') == ACTIONS_LOGIN
+               and status.get('description') == RECORD_FAILED and (status.get('created_at') or '\uffff') >= reviewed_at
+               for status in statuses)
 
 
 def judge(repo, number, head, call):
     """Decide only from persistent PR state, never from the triggering event."""
     pages = json.loads(call('api', '--paginate', '--slurp', f'repos/{repo}/issues/{number}/comments'))
     comments = [comment for page in pages for comment in page]
+    pages = json.loads(call('api', '--paginate', '--slurp', f'repos/{repo}/commits/{head}/statuses'))
+    statuses = [status for page in pages for status in page]
     state = codex_state(comments)
-    if invalidated(comments, head):
+    if invalidated(comments, statuses, head):
         return state, comments, 'pending', 'Codex review evidence was invalidated; waiting for a new review'
     if null_findings(state, head) and clean_receipt(comments, head) and unresolved_codex_threads(repo, number, call) == 0:
         # Approved by BOSS (2026-10-24): a completed review with unknown finding
@@ -179,7 +190,7 @@ def run(repo, number, invalidate=False, call=gh):
         except subprocess.CalledProcessError:
             # The gate step is skipped when this step fails, so without the marker
             # an older success would survive the event that voided it.
-            publish('pending', 'Codex review evidence was invalidated but could not be recorded')
+            publish('pending', RECORD_FAILED)
             raise
         return {'pr': number, 'head': head, 'actions': ['invalidated_codex_review']}
     try:
@@ -188,14 +199,19 @@ def run(repo, number, invalidate=False, call=gh):
             # Re-read right before publishing success to narrow the window for
             # evidence that changed while this run was working.
             state, comments, status, description = judge(repo, number, head, call)
-        unchanged = current_status(repo, head, call) == (status, description)
+        if current_status(repo, head, call) != (status, description):
+            publish(status, description)
+        if status == 'success':
+            # A record step that failed while this run was working leaves only its
+            # status behind; read once more so this success does not bury it.
+            state, comments, status, description = judge(repo, number, head, call)
+            if status != 'success':
+                publish(status, description)
     except (subprocess.CalledProcessError, ValueError, KeyError, TypeError):
         # An older success on this head must not outlive evidence this run failed
         # to read, so block before failing the run.
         publish('pending', 'Codex review evidence could not be read; waiting for the next gate run')
         raise
-    if not unchanged:
-        publish(status, description)
     return {'pr': number, 'head': head, 'status': status, 'description': description, 'actions': []}
 
 
