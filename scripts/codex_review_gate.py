@@ -164,18 +164,24 @@ def run(repo, number, invalidate=False, call=gh):
     if base.get('ref') != (base.get('repo') or {}).get('default_branch'):
         return {'pr': number, 'skipped': 'pull request does not target the default branch'}
     head = pr['head']['sha']
+    def publish(status, description):
+        call('api', '-X', 'POST', f'repos/{repo}/statuses/{head}', '-f', f'state={status}',
+             '-f', f'context={CONTEXT}', '-f', f'description={description}', '-f', f'target_url={pr["html_url"]}')
+
     if invalidate:
         # Record step: a deleted summary or a retargeted base voids the evidence.
         # The marker is persistent state, so the serialized gate step sees it even
         # if the run carrying this event is replaced in the queue. Asking Codex
         # again is left to the session driving the PR: Codex ignores bot requests.
-        call('api', '-X', 'POST', f'repos/{repo}/issues/{number}/comments', '-f',
-             f'body=Codex review evidence for this head was invalidated; a new Codex review is needed.\n\n{invalidation_marker(head)}')
+        try:
+            call('api', '-X', 'POST', f'repos/{repo}/issues/{number}/comments', '-f',
+                 f'body=Codex review evidence for this head was invalidated; a new Codex review is needed.\n\n{invalidation_marker(head)}')
+        except subprocess.CalledProcessError:
+            # The gate step is skipped when this step fails, so without the marker
+            # an older success would survive the event that voided it.
+            publish('pending', 'Codex review evidence was invalidated but could not be recorded')
+            raise
         return {'pr': number, 'head': head, 'actions': ['invalidated_codex_review']}
-    def publish(status, description):
-        call('api', '-X', 'POST', f'repos/{repo}/statuses/{head}', '-f', f'state={status}',
-             '-f', f'context={CONTEXT}', '-f', f'description={description}', '-f', f'target_url={pr["html_url"]}')
-
     try:
         state, comments, status, description = judge(repo, number, head, call)
         if status == 'success':
