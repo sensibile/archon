@@ -1,9 +1,11 @@
 {
   "schema_version": 1,
-  "source_version": "8dbf62681faf14771c86b86dddc2d1b5f0378d33",
-  "link_pin": "8dbf62681faf14771c86b86dddc2d1b5f0378d33",
+  "source_version": "9119a54c4ead760e8620df57765dc6b8799ab478",
+  "link_pin": "9119a54c4ead760e8620df57765dc6b8799ab478",
   "files": {
-    ".codex/agents/taeguk_coordinator.toml": "dc0e532eaa510edc85391d092a6cd1826e7eda84cafd72755146df2fe8523ef1",
+    ".codex/agents/taeguk_codex_cross_reviewer.toml": "fa65d5f2aa89deb504b05df1c7676faa1fb1278b4848f140b797abc4ec965845",
+    ".codex/agents/taeguk_codex_security_reviewer.toml": "d69b1c43e1704c611ad5813d1a330a182cb32bd2c0ccb8a16b9ecb619082368b",
+    ".codex/agents/taeguk_coordinator.toml": "55f1adae8b1d74261fb8b51aa26b9a4c3109dc6c7d7f3e885e8fafaacc596752",
     ".codex/agents/taeguk_designer.toml": "6db76c9ff49b0e2e6181d39666422ab14e05d56ae67125c5992b3b0866b2edc5",
     ".codex/agents/taeguk_implementer.toml": "f3e77a5405a0ae7b3a19692e034123c9814eb9f07404624a3cb4ca2d8970c1b0",
     ".codex/agents/taeguk_llm_reviewer.toml": "4d26f3bbe92233505b0663fd8d593cb175a32d41adf3c4b548e93144966707bc",
@@ -13,6 +15,11 @@
     ".codex/agents/taeguk_tool_verifier.toml": "c3914d9a0addc5a103edd53a852a927855b1056c14891021706de11536606a0a",
     ".codex/agents/taeguk_verification_builder.toml": "d481ec58aad057953421662704e23a36abe34984df007633e975df7fac3020f2",
     ".codex/agents/taeguk_verifier.toml": "559bc532fd5aa005369928fd10150ee83b571028083dfa96208697047a0437de",
+    ".agents/skills/taeguk-codex-local-review/SKILL.md": "c29db42913ef775922c3a377502a67702604d7f324c756a124f4a4e9c206fe86",
+    ".agents/skills/taeguk-codex-local-review/agents/openai.yaml": "a6175d8bfdfe516a4894c247cef5352bfdd9b828f494d4ad2f72b1f2a5b8c881",
+    ".agents/skills/taeguk-codex-local-review/references/review-prompts.md": "3542390151bb5518eb8fbc19a2450b5023684934aabda8c0a1508da26c3c2847",
+    ".agents/skills/taeguk-daily-cleanup/SKILL.md": "d6ab84ea153659b5dda7dbd6b06e1c0b989a23d8bb38b67083cebba1951e5db8",
+    ".agents/skills/taeguk-daily-cleanup/agents/openai.yaml": "0825e18dce1074ac0b0318edbaee8f8a1ad76f15ffddfb922fbbe75bd5b48c47",
     ".agents/skills/taeguk-implement-small-change/SKILL.md": "8a9d313ac989b6f742faea1519bf3e43352b7958cb11ac25b8103133da3026d9",
     ".agents/skills/taeguk-implement-small-change/agents/openai.yaml": "87f03e509d9562766420dda6fb417abab4e795aec780424dd4be0eabaeaa4701",
     ".agents/skills/taeguk-implement-small-change/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
@@ -47,10 +54,11 @@
     ".agents/skills/taeguk-verify-measurement/agents/openai.yaml": "a02a229d03ebf94c64a774e56c7fd828ad341aa142508e44add5b779d9180492",
     ".agents/skills/taeguk-verify-measurement/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
     ".agents/skills/taeguk-verify-measurement/references/measurement.md": "6f7bfefd62292366978d828f967ce539c616dbca2708fcec4cffe2d950316e15",
-    ".agents/skills/taeguk-work-contract/SKILL.md": "7de1533efb7e627e7f827bf41e538c768ede40fec63cf9e3f4e20e484b6017ef",
+    ".agents/skills/taeguk-work-contract/SKILL.md": "d7a784003c816da2e6e023345e5c8e0bcd18c59682c2cafd577ca9d5a20e8399",
     ".agents/skills/taeguk-work-contract/agents/openai.yaml": "d11934eaaba06358082f5aabd0edbd174d5a5fc024d3078cab6ab774fa717e85",
-    ".agents/skills/taeguk-work-contract/references/completion-review.md": "759099de8c199e423a43c7a0e3badddee411b01831c6b28eba57b0fb2a97d4a2",
+    ".agents/skills/taeguk-work-contract/references/completion-review.md": "32529530df205125b022fe9d9b12cbf10ef7c631d288804cae6a306b40a7f4cd",
     ".agents/skills/taeguk-work-contract/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
-    ".agents/skills/taeguk-work-contract/references/intent-requirement-records.md": "374d055dc7bd2c056b31fe801a5e0bd02172d652d0db33a20e7dcf64d33e1815"
+    ".agents/skills/taeguk-work-contract/references/intent-requirement-records.md": "aa43bb20c9e4ec59ad2580507090c5ff5d266cea4abe6bceb4c04f96b23af3e5",
+    ".agents/skills/taeguk-work-contract/references/phases.md": "ae7c57811603c7a7616d3b57804cb35c2a517938cbf54c1eccfe3536998d7adc"
   }
 }
