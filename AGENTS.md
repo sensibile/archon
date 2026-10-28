@@ -42,13 +42,18 @@ mix deps.audit
 
 - 브랜치는 `type/slug`, 커밋·PR 제목은 conventional 형식에 한국어 본문입니다.
   PR 본문은 `.github/pull_request_template.md`를 따릅니다.
-- 머지는 필수 체크와 Codex 리뷰를 통과하면 PR을 맡은 세션이 켭니다([ADR 0010](docs/adr/0010-codex-gate-status-only.md)).
-  head의 `codex-review`가 success이고 미해결 리뷰 thread가 없으면 `gh pr merge <번호> --squash --auto --match-head-commit <head SHA>`로
-  켭니다. draft PR과 `no-auto-merge` label PR은 제외합니다. 사용자가 특정 PR에 대해 직접 요청하지 않는 한 머지를 미루지 않습니다.
-- gate workflow는 `codex-review` status 판정만 합니다. 리뷰를 요청하지 않고, 판정이 없으면 시간이 지나도 pending입니다.
-- 리뷰 요청은 세션이 `gh` 계정으로 합니다. Codex는 gate(`github-actions[bot]`)의 요청을 무시합니다. PR은 멘션 없이 열고
-  2분 안에 리뷰 요약이 붙지 않을 때만 `@codex review`를 답니다. 새 커밋 push 뒤나 gate의 무효 표식 뒤에도 그 head에 한 번
-  답니다. 그 head의 Codex 결과 댓글이 이미 있거나 리뷰가 `running`이면 달지 않습니다. 10분 넘게 멈추면 한 번 더 달고,
-  그래도 응답이 없으면 BOSS에게 보고합니다. 멈춤에는 Auto-fix 이벤트가 오지 않으므로 세션이 직접 다시 확인합니다.
-- PR 제목·본문·댓글에는 리뷰 요청 댓글 말고는 `@codex` 문자열을 쓰지 않습니다. 백틱 안에 있어도 멘션으로 읽혀 리뷰 대신
+- GitHub Codex 리뷰 gate는 없습니다. 리뷰는 push 전에 로컬에서 하고, 머지 조건은 필수 체크(`test`, `credo`, `dialyzer`, `audit`)입니다
+  ([ADR 0011](docs/adr/0011-local-review-auto-merge.md)).
+  1. push 전에 PR 누적 범위(`origin/main`과의 merge-base부터 head까지)를 태극 `taeguk-codex-local-review` 절차로 리뷰합니다.
+     교차 리뷰는 항상, 보안 리뷰는 코드·스크립트·CI·의존성·권한처럼 실행 동작에 영향을 주는 변경에 합니다(문서만이면 NOT_APPLICABLE).
+     지적은 반영하거나 반영하지 않은 이유를 PR 본문에 남깁니다.
+  2. 그 head에 대한 필수 로컬 리뷰가 NOT_RUN이나 UNKNOWN이면 auto-merge를 켜지 않고 원인을 해소하거나 BOSS에게 보고합니다.
+     끝났으면 PR을 만든 세션이 `gh pr merge <번호> --squash --auto --match-head-commit <리뷰한 head SHA>`로 켭니다.
+     draft PR과 `no-auto-merge` label PR은 제외합니다. 사용자가 특정 PR에 대해 직접 요청하지 않는 한 머지를 미루지 않습니다.
+  3. 새 커밋을 올리기 전에 `gh pr merge <번호> --disable-auto`로 끄고, 새 누적 범위를 리뷰한 뒤 push하고 다시 켭니다.
+  4. `main`이 앞서 나가면 먼저 auto-merge를 끄고 `gh pr view <번호> --json autoMergeRequest`가 `null`인지 확인한 뒤
+     `gh pr update-branch`로 갱신합니다. 누적 diff가 같아도 새 head로 다시 리뷰한 뒤 켭니다.
+- GitHub의 Codex 자동 리뷰는 Codex 설정에서 켜져 있어 계속 댓글을 달 수 있습니다. 머지 조건은 아니지만 ruleset이 리뷰 thread
+  해소를 요구하므로, 판정해 반영하거나 이유를 답한 뒤 해소합니다.
+- PR 제목·본문·댓글에는 `@codex` 문자열을 쓰지 않습니다. 백틱 안에 있어도 멘션으로 읽혀 리뷰 대신
   Codex 클라우드 작업이 호출됩니다(PR #11, 태극 PR #13~#16). 가리킬 때는 "Codex 리뷰 요청"처럼 풀어 씁니다.
