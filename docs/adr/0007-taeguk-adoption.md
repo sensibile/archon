@@ -1,6 +1,6 @@
 # ADR 0007: 태극 개발 구성 채택
 
-- 상태: 제안
+- 상태: 승인 (결정 4의 시험 프로젝트 제외는 [ADR 0012](0012-taeguk-pilot-and-bundle-update.md)가 대체)
 - 날짜: 2026-10-25
 - 태극 원본: sensibile/taeguk `8dbf62681faf14771c86b86dddc2d1b5f0378d33`
 

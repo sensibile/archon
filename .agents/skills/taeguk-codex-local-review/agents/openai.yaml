@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk codex-local-review"
+  short_description: "Local Codex CLI cross and security review"
+  default_prompt: "Use $taeguk-codex-local-review for the assigned task."

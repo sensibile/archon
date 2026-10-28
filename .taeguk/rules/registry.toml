@@ -29,12 +29,12 @@ approval = "approvals.md#approval-2026-10-11"
 
 [[rules]]
 id = "REQ-001"
-version = "1.1"
+version = "1.2"
 status = "approved"
 scope = "Taeguk and explicitly assigned workflows"
 document = "verification.md#req-001"
 enforcement = "guidance"
-approval = "approvals.md#approval-2026-10-23"
+approval = "approvals.md#approval-2026-10-29"
 
 [[rules]]
 id = "VER-003"
@@ -74,12 +74,12 @@ approval = "approvals.md#approval-2026-10-11"
 
 [[rules]]
 id = "REQ-007"
-version = "1.0"
+version = "1.1"
 status = "approved"
-scope = "Taeguk pilot projects: hoplites, acropolis, thesmothetai"
+scope = "Taeguk pilot projects: hoplites, acropolis, thesmothetai, archon"
 document = "verification.md#req-007"
 enforcement = "guidance"
-approval = "approvals.md#approval-2026-10-23"
+approval = "approvals.md#approval-2026-10-29"
 
 [[rules]]
 id = "DEV-002"
@@ -98,6 +98,15 @@ scope = "Taeguk and explicitly assigned workflows"
 document = "delivery.md#rel-005"
 enforcement = "guidance"
 approval = "approvals.md#approval-2026-10-11"
+
+[[rules]]
+id = "VER-005"
+version = "1.0"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "verification.md#ver-005"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-28"
 
 [[rules]]
 id = "GOV-005"

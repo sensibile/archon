@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk daily-cleanup"
+  short_description: "Daily cleanup agreed with Codex, merged through the PR flow"
+  default_prompt: "Use $taeguk-daily-cleanup for today's run."

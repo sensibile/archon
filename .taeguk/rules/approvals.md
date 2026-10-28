@@ -2,7 +2,7 @@
 
 ## Approval-2026-10-05
 
-근거: 이 대화에서 BOSS가 “규칙의 적용은 에이전트가 자유롭게 사용하고 규칙의 변경은 사용자 확인으로 하면 되겠다”라고 지시했다. GOV-001과 GOV-002의 기존 합의를 유지한다. 원래 기록은 [규칙 목록](https://github.com/sensibile/taeguk/blob/8dbf62681faf14771c86b86dddc2d1b5f0378d33/docs/research/archive/규칙-목록.md)과 [규칙 관리](https://github.com/sensibile/taeguk/blob/8dbf62681faf14771c86b86dddc2d1b5f0378d33/docs/research/archive/규칙-관리.md)에 보존한다.
+근거: 이 대화에서 BOSS가 “규칙의 적용은 에이전트가 자유롭게 사용하고 규칙의 변경은 사용자 확인으로 하면 되겠다”라고 지시했다. GOV-001과 GOV-002의 기존 합의를 유지한다. 원래 기록은 [규칙 목록](https://github.com/sensibile/taeguk/blob/9119a54c4ead760e8620df57765dc6b8799ab478/docs/research/archive/규칙-목록.md)과 [규칙 관리](https://github.com/sensibile/taeguk/blob/9119a54c4ead760e8620df57765dc6b8799ab478/docs/research/archive/규칙-관리.md)에 보존한다.
 
 ## Approval-2026-10-11
 
@@ -37,3 +37,23 @@
 근거: 변경 전 diff를 제시한 뒤 BOSS가 “이 diff대로 규칙 문서 변경을 승인해. approvals.md에 승인 기록 남기고 PR #3에 커밋·push해줘”라고 지시했다. 인용문의 PR #3은 [sensibile/taeguk#3](https://github.com/sensibile/taeguk/pull/3)이다.
 
 범위: 프로젝트 단위 설치로 `.taeguk/rules`에 복사되는 문서가 설치된 프로젝트에서도 사실이 되도록 index.md, mechanical-checks.md, approvals.md, proposals/index.md의 Taeguk 저장소 전용 경로·검사·원격 설정 설명에 적용 위치를 명시하고, 사본에서 끊기는 research archive 상대 링크를 원격 주소로 바꿨다. 오래된 "remote 없음" 설명은 저장소 운영 기록 참조로 대체했다. 규칙 ID 본문, registry, 규칙 버전·의미·임계값·권한은 바꾸지 않았다. 원격 주소로 바꾼 링크는 로컬 링크 검사 대상에서 빠진다.
+
+## Approval-2026-10-28
+
+근거: [리뷰 반복 종료·상향 기준 개정안](proposals/review-loop-exit.md)의 확인 사항 네 가지를 제시한 뒤 BOSS가 "그대로 승인"이라고 답했다. 같은 날 BOSS는 기준의 내용을 공통 기준으로 확정했고("예시를 공통 기준으로"), 정식 규칙 등록은 별도 PR로 하도록 결정했다.
+
+범위: VER-005 1.0. 리뷰 반복의 종료 조건(필수 검사 PASS, 평가 역할이 확정한 P0·P1 0건, P2 이하는 반영하거나 이유 기록, 작업 기준이 더 엄격하면 그 기준), 평가 역할의 등급 확정과 재분류 이유 기록, 상향 조건("같은 지적이 두 번 되풀이되거나 수정이 다른 지적을 계속 낳으면" BOSS 보고). "같은 지적"을 같은 위치로 좁히지 않는다. 적용 범위는 "Taeguk and explicitly assigned workflows"다. 반복 횟수 상한, GOV-005의 한도, 새 실행 권한, 기계 검사는 포함하지 않는다.
+
+적용: 승인일 이후 새로 시작하는 작업부터 적용한다. 진행 중인 작업은 기존 판단을 유지하고, 채택할 때 기록한다. 시험 프로젝트에는 다음 설치 갱신 때 규칙 스냅샷으로 전달하며 프로젝트별 dry-run 확인과 BOSS 승인을 거친다.
+
+되돌림: 이유를 기록하고 넘긴 P2가 나중에 실제 결함으로 반복 발견됨, 등급 재분류가 잦거나 근거가 약함, 상향 보고가 너무 잦거나 한 번도 쓰이지 않음이 재검토 신호다. 자동 되돌림 조건은 아니다. 되돌릴 때는 VER-005를 retired로 바꾸고 작업 단계 문서를 작업별 기준으로 복원한다.
+
+## Approval-2026-10-29
+
+근거: [archon 시험 프로젝트 추가 개정안](proposals/archon-pilot.md)을 제시한 뒤 BOSS가 개정안 승인 질문에 "그대로 승인"을 골랐다. 앞서 BOSS는 "일단 태극을 단단하게 만들어가면서 conductor라는 전환 프로젝트와 함께 태극 강화를 먼저 진행해두려고"라고 했고, archon 등록 안에 "등록하고 진행"이라고 답했다.
+
+범위: REQ-001 1.2와 REQ-007 1.1에서 적용 대상에 archon(`sensibile/archon`)을 추가한다. 다른 의무의 의미는 바꾸지 않는다. 기존 세 프로젝트의 시작일 2026-10-23은 유지한다.
+
+적용: archon은 승인된 규칙 스냅샷이 archon `main`에 머지된 뒤 새로 시작하는 작업부터 적용한다. 그 전에 시작한 작업에는 소급하지 않는다. 설치는 dry-run 확인을 거친다. 같은 자리의 별도 질문에서 BOSS가 Codex 전송에 "archon도 상시 허용"을, archon gate에 "태극처럼 로컬 리뷰로 전환"을 골랐다. 이 둘은 실행 권한 결정이며 이 규칙 개정의 범위가 아니다. 기록은 [구성과 실행 계약](../architecture.md)과 archon의 ADR에 둔다.
+
+되돌림: 요구사항 기록이 upstream 계약 참조를 반복할 뿐 재작업 감소가 없음, 포팅 속도 대비 기록 비용 과다, ADR과의 충돌 반복이 재검토 신호다. 자동 되돌림 조건은 아니다. 되돌릴 때는 REQ-001 1.1, REQ-007 1.0의 적용 대상으로 복원하고 archon에 남은 기록은 보존한다.
