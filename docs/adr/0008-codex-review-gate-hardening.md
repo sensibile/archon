@@ -1,6 +1,6 @@
 # ADR 0008: Codex 리뷰 게이트 보강
 
-- 상태: 승인
+- 상태: 대체됨 (일부 [ADR 0010](0010-codex-gate-status-only.md), 나머지 전체 [ADR 0011](0011-local-review-auto-merge.md))
 - 날짜: 2026-10-25
 - 관련 PR: sensibile/archon#11
 - 보완: [ADR 0009](0009-codex-review-time-rule.md)가 멈춘 리뷰 처리를 정한다.

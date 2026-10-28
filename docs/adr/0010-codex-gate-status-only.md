@@ -1,6 +1,6 @@
 # ADR 0010: Codex 리뷰 게이트를 판정 전용으로 줄이고 요청·머지는 세션이 맡기
 
-- 상태: 승인
+- 상태: 대체됨 ([ADR 0011](0011-local-review-auto-merge.md) 전체)
 - 날짜: 2026-10-26
 - 관련 PR: sensibile/archon#15 (`79f8876`)
 - 대체: [ADR 0009](0009-codex-review-time-rule.md) 전체. [ADR 0008](0008-codex-review-gate-hardening.md)의 결정 1 중
