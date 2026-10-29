@@ -1,6 +1,6 @@
 ---
 name: taeguk-daily-cleanup
-description: "Run the daily cleanup of the Taeguk repository: collect evidenced cleanup candidates since the last run, keep only the items Codex agrees are needed, and deliver them through the PR flow; report restructuring signals to BOSS instead of acting on them."
+description: "Run the daily cleanup of the Taeguk repository or an authorized installed project: collect evidenced cleanup candidates since the last run, keep only the items Codex agrees are needed, and deliver them through the PR flow; report restructuring signals to BOSS instead of acting on them."
 ---
 
 # taeguk-daily-cleanup
@@ -9,7 +9,11 @@ Cleanup that a single task leaves out of its scope accumulates. This run picks i
 
 ## Authority
 
-On 2026-10-29 BOSS set cleanup to run daily, with items that Codex agrees are needed carried through to merge, and restructuring to be reported and started only with BOSS approval. This applies to the Taeguk repository (`sensibile/taeguk`) only. Pilot projects need explicit BOSS authorization per project. Delivery follows `docs/repository-operations.md`; this skill grants no authority beyond it.
+On 2026-10-29 BOSS set cleanup to run daily, with items that Codex agrees are needed carried through to merge, and restructuring to be reported and started only with BOSS approval. Delivery follows the project's delivery document (in the Taeguk repository, `docs/repository-operations.md`); this skill grants no authority beyond it.
+
+## Where it runs
+
+The Taeguk repository (`sensibile/taeguk`), and an installed project only when that project records a BOSS authorization for this worker: its schedule, its merge authority, and standing authority to send diffs to Codex for review. On 2026-10-29 BOSS chose archon (`sensibile/archon`) as the first such project; other pilot projects need the Codex transmission authority extended first. Without that record, do not run in the project. Without Codex transmission authority the necessity review in step 7 cannot run, so the run stops before a PR as NOT_RUN. In an installed project, its own AGENTS.md validation commands, worktree rules, delivery document and `.taeguk/daily-cleanup/` replace the Taeguk ones named below.
 
 ## Cleanup versus restructuring
 

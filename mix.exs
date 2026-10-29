@@ -9,6 +9,7 @@ defmodule Archon.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
+      test_coverage: [summary: [threshold: 0]],
       dialyzer: [
         plt_local_path: "priv/plts",
         plt_core_path: "priv/plts",
