@@ -188,8 +188,10 @@ Effect를 실행하다 프로세스가 죽거나 Effect가 실패하면 다음 �
   큐에 없는 `SCHEDULED` 태스크를 다시 넣는다. upstream도 `createTasks` 뒤
   `addTaskToQueue` 실패를 스위퍼 복구에 맡긴다.
 - 하위 워크플로우 종료 Effect: 결정 8의 종료 순서가 "자식 종료(`pre`) 먼저, 부모 Commit 나중"이라 부모가 종료 상태로
-  저장되었으면 자식 종료는 이미 끝났다. 완료 경로는 upstream처럼 저장 뒤에 남은 태스크를 취소하므로(`post`) 자식이 남을
-  수 있다. 그 경우를 위해 자식의 복구 검사는 부모가 종료 상태이고 자기 부모 태스크가 `CANCELED`이면 스스로 종료한다.
+  저장되었으면 자식 종료는 이미 끝났다. 완료 경로는 upstream처럼 완료 뒤에 남은 태스크를 취소하지만, 취소한 태스크
+  상태(`CANCELED`)는 완료와 같은 Commit에 넣고 자식 종료 요청만 `post`로 보낸다. 그래서 Commit 뒤 자식 종료 전에 죽어도
+  부모 태스크는 이미 `CANCELED`이고, 자식의 복구 검사는 부모가 종료 상태이고 자기 부모 태스크가 `CANCELED`이면 스스로
+  종료한다.
 - 실패 워크플로우 시작 Effect: 결정 8 (a).
 - 부모 알림 Effect: 부모의 30초 재평가(결정 5)가 저장소에서 자식을 읽어 메운다.
 
@@ -278,7 +280,9 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   `correlationId`, 해석한 하위 워크플로우 정의·입력이다. 자식 생성은 `Archon.Runtime.start_workflow_idempotent/1`
   (upstream `startWorkflowIdempotent`)로 하며 멱등이다. 같은 ID가 이미 있으면 부모 ID·부모 태스크
   ID가 같은지 확인하고(다르면 upstream `validateIdempotentWorkflowOwnership`의 오류 문구) 그것을 쓰며, 그것이 성공이 아닌
-  종료 상태(`FAILED`·`TIMED_OUT`·`TERMINATED`)로 끝나 있으면 새 무작위 ID로 다시 시작한다. 자식의 첫 decide는 자식
+  종료 상태(`FAILED`·`TIMED_OUT`·`TERMINATED`)로 끝나 있으면 새 무작위 ID로 다시 시작한다. 이 대체 ID는 시작 Effect가 만들지
+  않는다. 시작 결과가 "기존 자식이 실패로 끝남"이면 `Step`이 `Env.new_id`로 대체 ID를 만들어 태스크의 `subWorkflowId`에 넣어
+  (상태는 `SCHEDULED` 그대로) 먼저 Commit하고, 그 ID로 다시 멱등 시작한다. 자식의 첫 decide는 자식
   프로세스가 기록을 만들고 답한 뒤 `{:continue, ...}`로 한다(결정 1의 활성화, upstream은 decider 큐에 우선순위 10으로 넣는다). 부모는 자식 기록 생성까지만
   기다린다. 시작이 일시적 오류면 태스크는 `SCHEDULED`로 남고 이유와 출력 `subWorkflowLaunchError`를 남겨 다음 재평가에서
   다시 시도하고, 그 밖의 오류면 `FAILED`다(upstream `start`의 예외 처리).
@@ -287,8 +291,9 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   뒤 응답한다. 저장 내용은 upstream `attachToSubWorkflow`와 같다: `subWorkflowId`와 출력 `subWorkflowId`(무작위 ID로 다시
   시작했으면 그 ID), `reasonForIncompletion`·`subWorkflowLaunchError` 지우기, 자식 상태에 따른 태스크 상태(`updateTaskStatus`). 그 뒤 태스크가 `SCHEDULED`가 아니면 decide한다(upstream
   `AsyncSystemTaskExecutor`가 `start` 뒤에 하는 일. 이미 끝난 자식에 붙어 태스크가 끝나는 경우가 있다).
-  두 Commit 사이에 프로세스가 죽으면 태스크는 자식 ID 없는 `SCHEDULED`로 남고, 복구 검사가 같은 결정적 ID로 시작을 다시
-  해서(멱등) 기존 자식에 붙는다.
+  Commit 사이에 프로세스가 죽으면 태스크는 `SCHEDULED`로 남는다. 복구 검사는 태스크에 `subWorkflowId`가 있으면 그 ID로,
+  없으면 결정적 ID로 시작을 다시 해서(멱등) 이미 만든 자식에 붙는다. 대체 ID가 시작 전에 저장되므로 대체 자식이 둘
+  생기지 않는다.
 - **진행 반영.** 자식이 종료 상태가 되면 자식 프로세스가 부모에게 `{:child_changed, task_id, child}`를 `cast`한다.
   부모는 그 태스크가 아직 자기 태스크 목록에 있는지 확인하고(upstream의 세대 펜스), `SystemTask.SubWorkflow.execute/2`로
   상태·출력·실패 이유를 반영한 뒤 진행 중 JOIN을 평가하고 decide한다. 알림이 사라질 경우(부모 재시작 등)에 대비해 부모는
@@ -374,7 +379,8 @@ upstream의 두 종료 경로를 그대로 나눈다. 둘 다 순서는 "남은 
 큐 정리·부모 알림"이다(upstream `terminateWorkflow`가 `cancelNonTerminalTasks` 뒤에 `updateWorkflow`를 하는 순서).
 그래서 `Step`은 종료 이벤트에서 자식 종료 요청을 `pre` Effect로 내고, 취소한 태스크와 워크플로우 상태는 `Commit`에,
 큐 정리·부모 알림·실패 워크플로우 시작은 `post`에 담는다(결정 2). `pre`가 실패하면 아무것도 저장하지 않고 다시 시도한다.
-완료 경로(결정 4의 3)는 upstream `endExecution`처럼 완료를 저장한 뒤 남은 태스크를 취소하므로 자식 종료도 `post`다.
+완료 경로(결정 4의 3)는 upstream `endExecution`처럼 완료 뒤에 남은 태스크를 취소하므로 자식 종료가 `post`다. 이때도
+취소한 태스크 상태는 완료와 같은 Commit에 넣는다(결정 2).
 
 **(a) Decider 종료**(`{:terminate, termination, outcome}`, `FAILED`·`TERMINATED` TERMINATE 태스크). upstream
 `terminate(workflow, exception)` → `terminateWorkflow(workflow, reason, failureWorkflow, version)`.
