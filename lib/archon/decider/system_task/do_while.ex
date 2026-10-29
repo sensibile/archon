@@ -189,22 +189,41 @@ defmodule Archon.Decider.SystemTask.DoWhile do
   end
 
   # The output keys of the iterations keepLastN drops, and upstream removeIterations: the body
-  # tasks of those iterations.
+  # tasks of those iterations. `iteration - keepLastN` is Java int arithmetic, so a subtraction
+  # that overflows drops nothing, as upstream. Only keys present are looked at.
   defp remove_iterations(_workflow, task, keep) when is_nil(keep) or task.iteration <= keep,
     do: {task, []}
 
   defp remove_iterations(workflow, %Task{iteration: iteration} = task, keep) do
-    dropped = iteration - keep
-    output = Map.drop(task.output_data, Enum.map(1..dropped//1, &Integer.to_string/1))
+    case java_int(iteration - keep) do
+      dropped when dropped <= 0 ->
+        {task, []}
 
-    removed =
-      for t <- workflow.tasks,
-          body_task?(task, t),
-          t.reference_task_name != task.reference_task_name,
-          t.iteration <= dropped,
-          do: t.task_id
+      dropped ->
+        output = Map.reject(task.output_data, fn {key, _value} -> dropped_key?(key, dropped) end)
 
-    {%{task | output_data: output}, removed}
+        removed =
+          for t <- workflow.tasks,
+              body_task?(task, t),
+              t.reference_task_name != task.reference_task_name,
+              t.iteration <= dropped,
+              do: t.task_id
+
+        {%{task | output_data: output}, removed}
+    end
+  end
+
+  # Integer.toString(n) for some n in 1..dropped.
+  defp dropped_key?(key, dropped) do
+    case Integer.parse(key) do
+      {n, ""} -> n in 1..dropped and Integer.to_string(n) == key
+      _not_an_iteration -> false
+    end
+  end
+
+  defp java_int(n) do
+    <<wrapped::signed-32>> = <<n::signed-32>>
+    wrapped
   end
 
   # isIterationComplete: every loopOver task of the iteration is present and terminal, every

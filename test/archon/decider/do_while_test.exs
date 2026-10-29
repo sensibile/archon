@@ -227,6 +227,21 @@ defmodule Archon.Decider.DoWhileTest do
       end
     end
 
+    # Java int arithmetic: 1 - (-2147483648) overflows to a negative count, so upstream drops
+    # nothing; -2147483646 gives Integer.MAX_VALUE, which drops every iteration.
+    test "iteration - keepLastN wraps like a Java int instead of enumerating a huge range" do
+      wt = loop_wt(loop_over: [simple("t1")], loop_condition: "false")
+
+      for {keep, kept} <- [{-2_147_483_648, ["1", "iteration"]}, {-2_147_483_646, ["iteration"]}] do
+        wt = %{wt | input_parameters: %{"keepLastN" => keep}}
+        loop = loop_task(wt, 1, %{"iteration" => 1})
+        result = execute(workflow([loop, body_task("t1", 1)]), loop)
+
+        assert result.task.output_data |> Map.keys() |> Enum.sort() == kept
+        assert result.removed_task_ids == if(kept == ["iteration"], do: ["t1-1"], else: [])
+      end
+    end
+
     test "a keepLastN that is not an int fails the task, where upstream's cast throws" do
       for keep <- ["2", 2.0, 2_147_483_648] do
         wt = loop_wt(loop_over: [simple("t1")], input_parameters: %{"keepLastN" => keep})
