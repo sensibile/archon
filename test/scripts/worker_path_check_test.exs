@@ -142,7 +142,56 @@ defmodule Archon.Scripts.WorkerPathCheckTest do
 
   test "a git error fails the check instead of passing with empty output", %{tmp_dir: dir} do
     assert {out, 2} = check(dir, "test-gap", ["origin/missing"])
-    assert out =~ "git diff failed for origin/missing...HEAD"
+    assert out =~ "cannot resolve origin/missing"
+  end
+
+  test "an option-like or unknown revision is an error, not a pass", %{tmp_dir: dir} do
+    write!(dir, "test/a_test.exs", "")
+    commit!(dir, "emptied")
+
+    assert {out, 2} = check(dir, "test-gap", ["--output=o"])
+    assert out =~ "cannot resolve"
+    assert {_, 2} = check(dir, "test-gap", ["main", "0000000000000000000000000000000000000000"])
+    refute File.exists?(Path.join(dir, "o...HEAD"))
+  end
+
+  test "binary content and odd modes are checked on the old side too", %{tmp_dir: dir} do
+    write!(dir, "lib/blob.ex", <<"a", 0, "b">>)
+    write!(dir, "lib/run.sh", "x\n")
+    File.chmod!(Path.join(dir, "lib/run.sh"), 0o755)
+    commit!(dir, "seed")
+    git!(dir, ["branch", "-f", "seeded"])
+    File.rm!(Path.join(dir, "lib/blob.ex"))
+    File.chmod!(Path.join(dir, "lib/run.sh"), 0o644)
+    commit!(dir, "drop")
+
+    assert {out, 1} = check(dir, "daily-cleanup", ["seeded"])
+    assert out =~ "binary\tlib/blob.ex"
+    assert out =~ "file mode 100755\tlib/run.sh"
+  end
+
+  test "a path that differs only in case from another path is rejected", %{tmp_dir: dir} do
+    write!(dir, "test/test_helper.exs", "ExUnit.start()\n")
+    commit!(dir, "helper")
+    git!(dir, ["branch", "-f", "seeded"])
+    blob = git_out!(dir, ["hash-object", "-w", "--stdin"], "ExUnit.start(exclude: [:test])\n")
+    git!(dir, ["update-index", "--add", "--cacheinfo", "100644,#{blob},test/Test_helper.exs"])
+    git!(dir, ["commit", "--quiet", "-m", "shadow"])
+
+    assert {out, 1} = check(dir, "test-gap", ["seeded"])
+    assert out =~ "case collision\ttest/test_helper.exs"
+  end
+
+  test "agent instruction files are rejected at any depth", %{tmp_dir: dir} do
+    write!(dir, "test/CLAUDE.md", "x\n")
+    write!(dir, "lib/AGENTS.override.md", "x\n")
+    write!(dir, "docs/.claude/skills/x/SKILL.md", "x\n")
+    commit!(dir, "instructions")
+
+    assert {out, 1} = check(dir, "daily-cleanup")
+    assert out =~ "outside allowlist\ttest/CLAUDE.md"
+    assert out =~ "outside allowlist\tlib/AGENTS.override.md"
+    assert out =~ "outside allowlist\tdocs/.claude/skills/x/SKILL.md"
   end
 
   test "an unknown worker is a usage error", %{tmp_dir: dir} do
@@ -163,6 +212,14 @@ defmodule Archon.Scripts.WorkerPathCheckTest do
   defp commit!(dir, message) do
     git!(dir, ["add", "--all"])
     git!(dir, ["commit", "--quiet", "-m", message])
+  end
+
+  defp git_out!(dir, args, input) do
+    path = Path.join(dir, ".stdin")
+    File.write!(path, input)
+    {out, 0} = System.cmd("sh", ["-c", "git " <> Enum.join(args, " ") <> " < .stdin"], cd: dir)
+    File.rm!(path)
+    String.trim(out)
   end
 
   defp git!(dir, args) do

@@ -57,8 +57,10 @@ echo "path check exit: $?"
   종료 코드 1은 허용 밖 변경이 있다는 뜻이고 그 목록을 출력한다. 2는 사용법 오류나 git 오류다.
 - 스크립트는 저장소 루트에서 경로를 `git diff -z`로 그대로 읽고, 변경을 숨기는 git 설정(`diff.relative`,
   `diff.ignoreSubmodules`)을 무시한다. 일반 파일 모드(`100644`)가 아닌 변경(심볼릭 링크, 서브모듈,
-  실행 비트), NUL 바이트가 있는 파일, 출력 가능한 ASCII 밖의 문자가 든 경로, `.gitattributes`·`.gitignore`·
-  `.gitmodules`는 경로와 관계없이 허용 밖이다. `docs/adr/`와 `docs/operations.md`는 대소문자를 가리지 않고 막는다.
+  실행 비트), NUL 바이트가 있는 파일(바뀌기 전과 후 모두), 출력 가능한 ASCII 밖의 문자가 든 경로, git 메타 파일
+  (`.gitattributes`·`.gitignore`·`.gitmodules`), 에이전트 지시 파일(`AGENTS*.md`, `CLAUDE.md`, `CLAUDE.local.md`,
+  `.claude/`·`.codex/`·`.agents/` 아래)은 어느 깊이에 있든 허용 밖이다. 보호 경로는 대소문자를 가리지 않고 막고,
+  head 트리에 대소문자만 다른 경로가 있으면 거부한다. base와 head는 커밋 SHA로 먼저 확인한다.
 
 | 워커 | 허용 경로 | 추가 조건 |
 |---|---|---|

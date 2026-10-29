@@ -29,7 +29,7 @@ archon 작업의 로컬 Codex 전송은 같은 날 상시 허용됐다.
    - 경로 허용 목록: auto-merge를 켜기 직전에 `origin/main`의 `scripts/worker_path_check.sh`로 리뷰한 head SHA의
      변경 경로를 기계적으로 검사한다. 테스트 보강은 `test/`만 허용하고 삭제는 없어야 한다. 데일리 정리는 `lib/`,
      `test/`, `docs/`, `README.md`만 허용하되 ADR과 운영 문서는 뺀다. 심볼릭 링크, 서브모듈, 바이너리, 비ASCII 경로,
-     git 메타 파일(`.gitattributes` 등)은 허용하지 않는다.
+     대소문자 충돌, git 메타 파일(`.gitattributes` 등), 에이전트 지시 파일(`CLAUDE.md`, `AGENTS*.md` 등)은 허용하지 않는다.
      테스트 보강은
      줄을 지울 수 없다. 종료 코드가 0이 아니면 auto-merge를 켜지 않고 BOSS에게 보고한다. 목록과 절차는 운영 문서에 있다.
    - Codex 전송: archon diff를 로컬 Codex CLI로 보내는 것은 상시 허용이다.
@@ -55,7 +55,9 @@ archon 작업의 로컬 Codex 전송은 같은 날 상시 허용됐다.
   - 경로 검사와 PR base·head 확인(`gh pr view`)은 워커 자신이 실행하는 절차이고 서버가 강제하지 않는다. ruleset은
     승인 0건을 요구하고 필수 체크는 경로를 보지 않는다. 공개 PR 댓글이나 upstream 소스의 지시문에 넘어간 워커가
     검사를 건너뛰면, 권한 기록을 바꾼 PR에도 auto-merge를 켤 수 있다. 검사는 정상으로 동작하는 워커의 실수와
-    리뷰에서 재현된 우회(대소문자, 비ASCII 경로, 심볼릭 링크, `.gitattributes`, 바이너리, git 설정)를 막는다.
+    리뷰에서 재현된 우회(대소문자, 비ASCII 경로, 심볼릭 링크, `.gitattributes`, 바이너리, git 설정, 옵션 모양
+    인자, 대소문자 충돌)와 하위 디렉터리의 에이전트 지시 파일을 막는다. 리뷰를 거듭할 때마다 새 우회가 나왔으므로,
+    이 목록이 완전하다고 보지 않는다.
   - 허용 경로 `test/`, `lib/`는 실행되는 코드다. 두 워커 모두 리뷰 전에 로컬에서 검증 명령(`mix test` 등)을 돌리므로,
     주입된 코드가 이 Mac의 자격 증명으로 실행될 수 있다. 머지된 뒤에는 CI와 다른 checkout에서도 실행된다.
   - 테스트 보강의 "추가만" 검사는 테스트를 약하게 만드는 추가(`ExUnit.configure(exclude: ...)`, `@moduletag :skip`,

@@ -39,6 +39,9 @@ allowed_path() {
     docs/adr/* | docs/operations.md) return 1 ;;
     # A PR-controlled .gitattributes can hide diffs from review or binaries from this check.
     .gitattributes | */.gitattributes | .gitignore | */.gitignore | .gitmodules | */.gitmodules) return 1 ;;
+    # Agent instructions found in subdirectories would steer later sessions.
+    agents*.md | */agents*.md | claude.md | */claude.md | claude.local.md | */claude.local.md) return 1 ;;
+    .claude/* | */.claude/* | .codex/* | */.codex/* | .agents/* | */.agents/*) return 1 ;;
   esac
 
   case "$worker" in
@@ -68,6 +71,19 @@ is_binary() {
 top="$(git rev-parse --show-toplevel)" || exit 2
 cd "$top" || exit 2
 
+# Resolve both ends to commit SHAs first, so an option-like or unknown argument
+# is a git error (exit 2) rather than a flag that changes what git diff prints.
+resolve_commit() {
+  case "$1" in
+    -*) return 1 ;;
+  esac
+  git rev-parse --verify --quiet --end-of-options "$1^{commit}"
+}
+if ! base_sha="$(resolve_commit "$base")" || ! head_sha="$(resolve_commit "$head")"; then
+  echo "cannot resolve $base or $head to a commit" >&2
+  exit 2
+fi
+
 raw_file="$(mktemp)" || exit 2
 numstat_file="$(mktemp)" || exit 2
 trap 'rm -f "$raw_file" "$numstat_file"' EXIT
@@ -76,8 +92,8 @@ trap 'rm -f "$raw_file" "$numstat_file"' EXIT
 # lines even where attributes would mark a file binary.
 # The flags override user config that would hide changes (diff.relative, diff.ignoreSubmodules).
 diff_flags=(-z --no-renames --no-relative --ignore-submodules=none)
-if ! git diff --raw --no-abbrev "${diff_flags[@]}" "$base...$head" >"$raw_file" ||
-  ! git diff --numstat --text "${diff_flags[@]}" "$base...$head" >"$numstat_file"; then
+if ! git diff --raw --no-abbrev "${diff_flags[@]}" "$base_sha...$head_sha" >"$raw_file" ||
+  ! git diff --numstat --text "${diff_flags[@]}" "$base_sha...$head_sha" >"$numstat_file"; then
   echo "git diff failed for $base...$head" >&2
   exit 2
 fi
@@ -90,12 +106,13 @@ while IFS= read -r -d '' meta; do
   fi
 
   # meta is ":<old mode> <new mode> <old sha> <new sha> <status>"
-  read -r old_mode new_mode _old_sha new_sha status <<<"${meta#:}"
+  read -r old_mode new_mode old_sha new_sha status <<<"${meta#:}"
   reason=""
 
   if [ "$worker" = "test-gap" ] && [ "$status" = "D" ]; then
     reason="deletion"
-  elif [ "$new_mode" = "100644" ] && is_binary "$new_sha"; then
+  elif { [ "$new_mode" = "100644" ] && is_binary "$new_sha"; } ||
+    { [ "$old_mode" = "100644" ] && is_binary "$old_sha"; }; then
     reason="binary"
   elif [ "$new_mode" = "120000" ] || [ "$old_mode" = "120000" ]; then
     reason="symlink"
@@ -103,6 +120,8 @@ while IFS= read -r -d '' meta; do
     reason="submodule"
   elif [ "$new_mode" != "100644" ] && [ "$new_mode" != "000000" ]; then
     reason="file mode $new_mode"
+  elif [ "$old_mode" != "100644" ] && [ "$old_mode" != "000000" ]; then
+    reason="file mode $old_mode"
   elif ! allowed_path "$path"; then
     reason="outside allowlist"
   fi
@@ -129,6 +148,20 @@ if [ "$worker" = "test-gap" ]; then
       violations=$((violations + 1))
     fi
   done <"$numstat_file"
+fi
+
+# On a case-insensitive checkout, test/Test_helper.exs overwrites test/test_helper.exs.
+# Reject any head tree whose paths (files or directories) collide when case-folded.
+collisions="$(git ls-tree -r -t -z --name-only "$head_sha" | tr '\000' '\n' |
+  tr '[:upper:]' '[:lower:]' | sort | uniq -d)" || {
+  echo "cannot list $head" >&2
+  exit 2
+}
+if [ -n "$collisions" ]; then
+  while IFS= read -r path; do
+    printf '%s\t%s\t%s\n' "-" "case collision" "$path"
+    violations=$((violations + 1))
+  done <<<"$collisions"
 fi
 
 if [ "$violations" -gt 0 ]; then
