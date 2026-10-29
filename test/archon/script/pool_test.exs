@@ -21,9 +21,12 @@ defmodule Archon.Script.PoolTest do
     pid
   end
 
+  # nil while the port is closed and not yet replaced.
   defp os_pid(pool) do
-    {:os_pid, os_pid} = Port.info(:sys.get_state(worker(pool)).port, :os_pid)
-    os_pid
+    case Port.info(:sys.get_state(worker(pool)).port, :os_pid) do
+      {:os_pid, os_pid} -> os_pid
+      nil -> nil
+    end
   end
 
   defp alive?(os_pid),
@@ -53,11 +56,14 @@ defmodule Archon.Script.PoolTest do
                  %{}
                )
 
-      # import() only returns a promise; no job ever runs, so it never settles.
+      # import() returns a promise that rejects: there is no module loader.
       assert {:ok, %{}} = Archon.Script.eval("import('qjs:std')", %{})
 
-      assert {:ok, nil} =
-               Archon.Script.eval("var m; import('qjs:os').then(x => m = x, e => m = e); m", %{})
+      assert {:ok, %{"err" => "ReferenceError: could not load module 'qjs:os'"}} =
+               Archon.Script.eval(
+                 "var r = {}; import('qjs:os').then(m => r.ok = 1, e => r.err = String(e)); r",
+                 %{}
+               )
 
       assert {:error, %Error{kind: :runtime, reason: "SyntaxError: " <> _}} =
                Archon.Script.eval("import * as std from 'qjs:std'", %{})
@@ -127,6 +133,13 @@ defmodule Archon.Script.PoolTest do
       assert {:ok, 3} = eval(pool, "[1, 2, 3].length")
     end
 
+    test "promise jobs run under the same time limit" do
+      pool = start_pool(:job_pool, timeout: 200)
+
+      assert {:error, %Error{kind: :timeout}} =
+               eval(pool, "Promise.resolve().then(() => { while (true) {} }); 1")
+    end
+
     test "deep recursion stops at the stack limit" do
       assert {:error, %Error{kind: :runtime, reason: "RangeError: " <> _}} =
                Archon.Script.eval("function f() { return f() + 1 } f()", %{})
@@ -147,7 +160,7 @@ defmodule Archon.Script.PoolTest do
       killed = os_pid(pool)
       System.cmd("kill", ["-KILL", "#{killed}"])
       # A request racing the exit notice would get the crash error; wait for the restart.
-      wait_until(fn -> os_pid(pool) != killed end)
+      wait_until(fn -> os_pid(pool) not in [killed, nil] end)
 
       assert {:ok, 2} = eval(pool, "1 + 1")
     end

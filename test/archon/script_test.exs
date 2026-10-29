@@ -296,6 +296,35 @@ defmodule Archon.ScriptTest do
              }
     end
 
+    test "promise jobs run before the result is read" do
+      cases = [
+        {"var r = {selectedCase:'before'}; Promise.resolve().then(() => r.selectedCase = 'after'); r",
+         %{"selectedCase" => "after"}},
+        {"var r = {v: 0}; (async () => { r.v = 1; await null; r.v = 2 })(); r", %{"v" => 2}},
+        {"var r = {n: 0}; Promise.resolve().then(() => { r.n = 1; return Promise.resolve() })" <>
+           ".then(() => r.n = 2); r", %{"n" => 2}},
+        {"Promise.reject(new Error('unhandled')); 5", 5}
+      ]
+
+      for {script, expected} <- cases do
+        assert eval!(script) === expected, script
+      end
+    end
+
+    test "script changes to built-ins and own properties do not change the reading" do
+      cases = [
+        {"var a = new Uint8Array([1,2]); Object.defineProperty(a, 'length', {value: 0}); a",
+         [1, 2]},
+        {"var a = (function(){ return arguments })(1,2); a.length = 4; a", [1, 2, nil, nil]},
+        {"Object.defineProperty(Array.prototype, '0', {set(v){}, get(){ return 'hijacked' }, " <>
+           "configurable: true}); new Map([['key', 'value']])", %{"key" => "value"}}
+      ]
+
+      for {script, expected} <- cases do
+        assert eval!(script) === expected, script
+      end
+    end
+
     test "objects shaped like protocol tags stay maps and lists" do
       assert eval!("({selectedCase: ['nonfinite', 'NaN']})") == %{
                "selectedCase" => ["nonfinite", "NaN"]
@@ -403,6 +432,11 @@ defmodule Archon.ScriptTest do
                Script.validate_syntax("foo(")
 
       assert {:error, "SyntaxError: " <> _} = Script.validate_syntax("import x from 'qjs:std'")
+    end
+
+    test "a parse stopped by the stack limit is not a syntax error" do
+      deep = String.duplicate("(", 10_000) <> "1" <> String.duplicate(")", 10_000)
+      assert Script.validate_syntax(deep) == :ok
     end
 
     test "anything but a syntax error counts as valid" do

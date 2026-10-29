@@ -209,7 +209,12 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
     realm보다 한 단계 더 나눴다). `JS_NewContextRaw`에 ECMAScript 내장 객체만 더하고, `JS_NewContext`가
     더하는 `performance`(시계)와 `atob`·`btoa`는 넣지 않는다. GraalJS 오라클에서도 `console`·`print`·
     `performance`·`setTimeout`·`require`는 없다. 결과를 읽는 데 쓰는 `Map` 순회와 원시 래퍼의 `valueOf`는
-    스크립트 실행 전에 잡아 두므로, 스크립트가 내장 객체를 바꿔도 변환 방식은 바뀌지 않는다.
+    스크립트 실행 전에 잡아 두므로, 스크립트가 내장 객체를 바꿔도 변환 방식은 바뀌지 않는다. typed array는
+    `length` 속성이 아니라 내부 길이로 읽는다.
+  - 스크립트가 예약한 Promise 작업(`then`, `async` 함수의 `await` 뒤)은 결과를 읽기 전에 같은 시간·메모리
+    상한 안에서 모두 실행한다. GraalJS 오라클과 같다. `import()`는 모듈 로더가 없어 거부되는 Promise다.
+  - 등록 검사는 파서가 낸 `SyntaxError`만 문법 오류로 본다. 깊은 괄호 중첩처럼 스택·메모리 상한으로 파싱이
+    멈춘 경우는 upstream처럼 통과시킨다.
   - 오류 종류는 `syntax`·`runtime`·`timeout`·`conversion`(결과를 읽다가 getter·프록시가 던진 예외. upstream처럼
     감싸지 않은 메시지를 쓴다)·`limit`·`request`다. Elixir 쪽 `Archon.Script.Error`가 결정 4의 문구를 만든다.
   - `Archon.Script.Pool`은 디스패처와 워커 감독자를 `:rest_for_one`으로 둔다. 요청은 디스패처 큐에서

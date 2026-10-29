@@ -82,6 +82,7 @@ typedef struct {
     JSValue number_value_of;
     JSValue string_value_of;
     JSValue boolean_value_of;
+    JSValue typed_array_length; /* the %TypedArray%.prototype.length getter */
     JSClassID number_class;
     JSClassID string_class;
     JSClassID boolean_class;
@@ -236,15 +237,19 @@ static JSContext *new_context(JSRuntime *rt)
 }
 
 /*
- * [map entry reader, Number/String/Boolean.prototype.valueOf, then sample objects whose class
- * IDs identify primitive wrappers and arguments objects].
+ * [map entry reader, Number/String/Boolean.prototype.valueOf, sample objects whose class IDs
+ * identify primitive wrappers and arguments objects, the typed array length getter]. The entry
+ * list has no prototype, so setters a script defines on Array.prototype never see it.
  */
 static const char HELPERS_SOURCE[] =
     "(() => {"
     "  const apply = Reflect.apply, entries = Map.prototype.entries, push = Array.prototype.push;"
+    "  const setPrototypeOf = Object.setPrototypeOf;"
     "  const next = Object.getPrototypeOf(new Map().entries()).next;"
+    "  const typedArrayLength = Object.getOwnPropertyDescriptor("
+    "    Object.getPrototypeOf(Uint8Array.prototype), 'length').get;"
     "  const mapEntries = (m) => {"
-    "    const it = apply(entries, m, []), out = [];"
+    "    const it = apply(entries, m, []), out = setPrototypeOf([], null);"
     "    for (let r = apply(next, it, []); !r.done; r = apply(next, it, []))"
     "      apply(push, out, [r.value[0], r.value[1]]);"
     "    return out;"
@@ -252,7 +257,7 @@ static const char HELPERS_SOURCE[] =
     "  return [mapEntries, Number.prototype.valueOf, String.prototype.valueOf,"
     "          Boolean.prototype.valueOf, new Number(0), new String(''), new Boolean(false),"
     "          (function () { 'use strict'; return arguments; })(),"
-    "          (function (a) { return arguments; })(0)];"
+    "          (function (a) { return arguments; })(0), typedArrayLength];"
     "})()";
 
 static int load_intrinsics(JSContext *ctx, Intrinsics *in)
@@ -262,8 +267,8 @@ static int load_intrinsics(JSContext *ctx, Intrinsics *in)
                           JS_EVAL_TYPE_GLOBAL);
     if (JS_IsException(in->helpers))
         return -1;
-    JSValue items[9];
-    for (uint32_t i = 0; i < 9; i++) {
+    JSValue items[10];
+    for (uint32_t i = 0; i < 10; i++) {
         items[i] = JS_GetPropertyUint32(ctx, in->helpers, i);
         /* The array keeps every item alive; hold borrowed copies. */
         JS_FreeValue(ctx, items[i]);
@@ -277,6 +282,7 @@ static int load_intrinsics(JSContext *ctx, Intrinsics *in)
     in->boolean_class = JS_GetClassID(items[6]);
     in->arguments_class = JS_GetClassID(items[7]);
     in->mapped_arguments_class = JS_GetClassID(items[8]);
+    in->typed_array_length = items[9];
     return 0;
 }
 
@@ -391,7 +397,16 @@ static void encode(Encoder *e, JSValueConst v, int depth, EncStatus *status);
 static void encode_list(Encoder *e, JSValueConst v, int depth, EncStatus *status)
 {
     int64_t len;
-    if (JS_GetLength(e->ctx, v, &len) < 0) {
+    if (JS_GetTypedArrayType(v) >= 0) {
+        /* The intrinsic size, as GraalJS getArraySize: an own `length` property does not count. */
+        JSValue n = JS_Call(e->ctx, e->intrinsics->typed_array_length, v, 0, NULL);
+        int r = JS_IsException(n) ? -1 : JS_ToInt64(e->ctx, &len, n);
+        JS_FreeValue(e->ctx, n);
+        if (r < 0) {
+            *status = ENC_EXCEPTION;
+            return;
+        }
+    } else if (JS_GetLength(e->ctx, v, &len) < 0) {
         *status = ENC_EXCEPTION;
         return;
     }
@@ -624,19 +639,51 @@ static char *get_string(JSContext *ctx, JSValueConst obj, const char *name, size
     return copy;
 }
 
+/* A SyntaxError thrown by the parser; a parse can also stop on the stack or memory limit. */
+static int is_syntax_error(JSContext *ctx, JSValueConst exc)
+{
+    if (!JS_IsError(exc))
+        return 0;
+    JSValue name = JS_GetPropertyStr(ctx, exc, "name");
+    const char *s = JS_IsString(name) ? JS_ToCString(ctx, name) : NULL;
+    int syntax = s && strcmp(s, "SyntaxError") == 0;
+    JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, name);
+    return syntax;
+}
+
 static void run_script(JSContext *ctx, Buf *out, const Deadline *d, int parse_only,
                        const char *script, size_t script_len, const Intrinsics *intrinsics)
 {
     int flags = JS_EVAL_TYPE_GLOBAL | (parse_only ? JS_EVAL_FLAG_COMPILE_ONLY : 0);
     JSValue result = JS_Eval(ctx, script, script_len, SCRIPT_NAME, flags);
     if (JS_IsException(result)) {
-        put_exception(out, ctx, parse_only ? "syntax" : "runtime", d);
+        const char *kind = "runtime";
+        if (parse_only) {
+            JSValue exc = JS_GetException(ctx);
+            if (is_syntax_error(ctx, exc))
+                kind = "syntax";
+            JS_Throw(ctx, exc);
+        }
+        put_exception(out, ctx, kind, d);
         return;
     }
     if (parse_only) {
         JS_FreeValue(ctx, result);
         buf_puts(out, "{\"ok\":[\"null\"]}");
         return;
+    }
+    /* GraalJS runs the promise jobs the script queued before the result is read. */
+    for (;;) {
+        JSContext *job_ctx;
+        int r = JS_ExecutePendingJob(JS_GetRuntime(ctx), &job_ctx);
+        if (r == 0)
+            break;
+        if (r < 0) {
+            JS_FreeValue(ctx, result);
+            put_exception(out, job_ctx, "runtime", d);
+            return;
+        }
     }
     Encoder e = {ctx, out, intrinsics};
     EncStatus status = ENC_OK;
