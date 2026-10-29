@@ -320,14 +320,15 @@ upstream의 decider 큐와 스위퍼, 시스템 태스크 큐의 지연 재평�
   - upstream `ExecutorUtils.computePostpone`의 후보(맥락의 목록 그대로, 상한 3600초, 후보가 없으면 30초).
   - 재시도 대기 중인 워커 태스크(`callbackAfterMs`)는 워커 큐 지연으로 처리하므로 후보가 아니다. 지연이 끝나면 큐에서
     보인다.
-  - 예약될 때 지연(`callbackAfterMs`, 없으면 `callbackAfterSeconds`)이 있는 비동기 시스템 태스크는 첫 평가(`start`)를
-    `scheduledTime + 지연`까지 미루고, 그 시각이 후보다. upstream은 그 지연을 걸어 시스템 태스크 큐에 넣는다. SUB_WORKFLOW
+  - 예약될 때 지연(`callbackAfterMs`, 없으면 `callbackAfterSeconds`)이 있는 비동기 시스템 태스크는 `scheduledTime + 지연`
+    전에는 어떤 계기(`:wake`, 사건)로도 평가하지 않고, 그 시각이 후보다. 지연이 끝난 뒤 첫 평가는 `SCHEDULED`면 `start`,
+    아니면 `execute`다(WAIT은 처음부터 `IN_PROGRESS`라 `execute`). upstream은 그 지연을 걸어 시스템 태스크 큐에 넣는다. SUB_WORKFLOW
     매퍼가 `startDelay`를 `callbackAfterSeconds`에 넣으므로 하위 워크플로우 시작이 그만큼 늦어진다.
 - upstream은 `computePostpone`이 30초와 다를 때만 decider 큐의 unack 타임아웃을 바꾸지만 Archon은 매번 새 시각으로
   바꾼다. 결과가 같은 시각이면 같은 일이다.
 - **워커 poll도 타이머를 당긴다.** poll로 태스크가 `IN_PROGRESS`가 되면 응답 타임아웃(태스크 정의 값, 0이면 태스크 값)이
   있을 때 `now + 응답 타임아웃`이 지금 타이머보다 이르면 그 시각으로 당긴다(upstream `adjustDeciderQueuePostpone`).
-- `:wake`를 받으면 진행 중 WAIT과 JOIN을 평가하고 decide한다. 그 결과 아무 태스크 상태도 바뀌지 않았으면 결정 7의 복구
+- `:wake`를 받으면 지연이 끝난 `SCHEDULED` 비동기 시스템 태스크를 `start`하고, 진행 중 WAIT과 JOIN을 평가하고 decide한다. 그 결과 아무 태스크 상태도 바뀌지 않았으면 결정 7의 복구
   검사를 한다(upstream 스위퍼가 상태 변화 없는 sweep마다 repair하는 것과 같다). Decider의 타임아웃 판정(워크플로우·태스크·poll·응답·
   전체 타임아웃, ADR 0014)은 이 decide에서 발화한다.
 - **비동기 시스템 태스크의 평가 시점.** 프로세스 밖에서 상태가 바뀌는 일이 없으므로 시간 기반 반복 poll 대신 사건으로
