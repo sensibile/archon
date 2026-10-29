@@ -251,7 +251,8 @@ behaviour마다 공통 계약 시험(결정 10)을 두어 Phase 4 구현이 같�
 3. `Decider.decide/2`를 부른다.
    - `complete?`면 `endExecution`: `terminate_task`가 있으면 그 입력의 `terminationStatus`로 `FAILED`·`TERMINATED`면
      결정 8 (a)로 종료, 아니면 완료. 완료는 `outcome.workflow.output`, `COMPLETED`, `endTime`, 실패 태스크 이름 집합을
-     저장하고 Decider가 바꾼 태스크는 저장하지 않는다. 남은 태스크를 취소한다.
+     저장한다. 끝난 태스크(Decider가 `executed` 등을 바꾼 것)는 저장하지 않고, 끝나지 않은 태스크만 `CANCELED`로 바꿔
+     같은 Commit에 넣는다(upstream `cancelNonTerminalTasks`). 자식 종료 요청은 `post`다.
    - `{:terminate, termination, outcome}`이면 결정 8 (a).
 4. 새 태스크에 도메인을 매긴다(`setTaskDomains`: 시스템 태스크 제외, `*` 뒤 태스크 타입 키로 덮어쓰기,
    `getActiveDomain`은 `activeWorkerLastPollTimeout` 10초 안에 poll된 첫 도메인, 없으면 마지막 값, `NO_DOMAIN`이면 없음).
