@@ -120,7 +120,11 @@ Archon.Supervisor (one_for_one)
   기존 기록으로 활성화된 프로세스는 `{:start}`에 최상위 시작이면 `{:error, :conflict}`, 하위 워크플로우의 멱등 시작이면
   결정 5의 규칙(소유자 확인 뒤 기존 기록을 쓰거나 새 무작위 ID로 다시 시작)으로 답하고, 수명은 아래 일반 규칙을 따른다
   (실행 중이면 끝나지 않는다). 기록이 없는 상태에서 `{:start}`의 생성이 실패한(conflict 포함) 프로세스는 오류로 답하고 바로 끝난다.
-  `{:start}` 처리 중 Commit 전에 예외가 나도 다시 시도할 상태가 없으므로 예외 격리 대신 오류로 답하고 끝난다.
+  `{:start}` 처리 중 예외는 예외 격리 대신 upstream `startWorkflow`처럼 처리한다. Commit 전이면 오류로 답하고 끝나고,
+  기록을 만든 뒤(첫 decide나 Effect 중)이면 그 워크플로우의 기록과 이미 넣은 큐 메시지를 지운 뒤(`Store.remove_workflow`,
+  upstream `removeWorkflow`) 오류로 답하고 끝난다. 호출자가 ID를 받지 못한 워크플로우가 계속 실행되지 않게 한다. 지우기
+  전에 프로세스가 죽으면 기록이 남아 복구된다(upstream도 서버가 그 사이에 죽으면 같다). 하위 워크플로우의 멱등 시작은
+  기록을 만든 뒤 바로 답하므로 이 규칙이 아니라 일반 예외 격리를 따른다.
 - **호출이 프로세스 종료와 겹칠 때.** 종료 직후 `:normal`로 끝나는 프로세스나 레지스트리에 남은 죽은 pid로 보낸
   `call`이 `:noproc`·`:normal` exit로 끝나면, 호출 함수(`Archon.Runtime` 안)는 활성화를 한 번 더 시도한다.
 - **읽기는 저장소에서 한다.** `GET /api/workflow/{id}`, `GET /api/tasks/{taskId}`에 해당하는 조회는 프로세스를 거치지
@@ -215,6 +219,7 @@ Phase 4가 갈아 끼울 경계를 지금 정한다. behaviour는 MVP 런타임�
 | `get_workflow(id, include_tasks?)` | 없으면 `{:error, :not_found}` |
 | `get_task(task_id)` | 태스크와 소속 워크플로우 ID |
 | `running_workflow_ids()` | 종료 상태가 아닌 워크플로우 ID(결정 7의 복구용) |
+| `remove_workflow(id)` | 워크플로우와 그 태스크 삭제(시작 실패 정리용, upstream `removeWorkflow`) |
 | `in_progress_count(task_def_name)` | 진행 중 태스크 수(동시 실행 한도용, upstream `getInProgressTaskCount`) |
 | `put_poll_data(task_type, domain, worker_id, now)`·`get_poll_data(task_type, domain)` | `PollData`(도메인 선택용) |
 
