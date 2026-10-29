@@ -154,6 +154,8 @@ defmodule Archon.Domain.DefinitionValidationTest do
         name: "s",
         task_reference_name: "s",
         type: "SWITCH",
+        evaluator_type: "value-param",
+        expression: "x",
         decision_cases: %{"a" => [simple("dup")]},
         default_case: [simple("dup")]
       }
@@ -200,6 +202,7 @@ defmodule Archon.Domain.DefinitionValidationTest do
         name: "l",
         task_reference_name: "l",
         type: "DO_WHILE",
+        loop_condition: "false",
         loop_over: [%WorkflowTask{name: "child", task_reference_name: "child", start_delay: -1}]
       }
 

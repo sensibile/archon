@@ -26,6 +26,10 @@ defmodule Archon.Domain.Codec do
     * Scalars are coerced the way Jackson does by default: integral strings and floats to
       integers, `"true"`/`"false"` to booleans and numbers or booleans to strings.
 
+  A field with `wire: false` is internal execution state (upstream `core` `TaskModel`/`WorkflowModel`
+  fields that the `common` wire classes lack). It always decodes to its default and is never
+  encoded, so REST responses keep the upstream wire shape.
+
   Enums are atoms on the Elixir side and upstream's constant names on the wire
   (`:time_out_wf` <-> `"TIME_OUT_WF"`).
 
@@ -84,7 +88,7 @@ defmodule Archon.Domain.Codec do
         field_path = path ++ [name]
 
         result =
-          case Map.fetch(json, name) do
+          case wire_value(json, name, opts) do
             :error -> {:ok, default(type, opts)}
             {:ok, nil} -> {:ok, null(type, opts)}
             {:ok, value} when type == :custom -> module.decode_custom(key, value, field_path)
@@ -106,13 +110,16 @@ defmodule Archon.Domain.Codec do
   def decode(_module, _fields, _json, path), do: type_error(path, "object")
 
   @doc """
-  Encodes a struct to a JSON object according to `fields`, omitting `nil` fields.
+  Encodes a struct to a JSON object according to `fields`, omitting `nil` and `wire: false`
+  fields.
 
   `:custom` fields are encoded with `module.encode_custom(key, value)`.
   """
   @spec encode(module(), [field()], struct()) :: json_object()
   def encode(module, fields, struct) do
-    Enum.reduce(fields, %{}, fn {key, name, type, _opts}, acc ->
+    fields
+    |> Enum.filter(fn {_key, _name, _type, opts} -> wire?(opts) end)
+    |> Enum.reduce(%{}, fn {key, name, type, _opts}, acc ->
       case Map.fetch!(struct, key) do
         nil -> acc
         value when type == :custom -> Map.put(acc, name, module.encode_custom(key, value))
@@ -238,6 +245,12 @@ defmodule Archon.Domain.Codec do
   @doc "A single type error at `path`."
   @spec type_error(path(), String.t()) :: {:error, [error()]}
   def type_error(path, expected), do: {:error, [{format_path(path), "must be #{expected}"}]}
+
+  defp wire_value(json, name, opts) do
+    if wire?(opts), do: Map.fetch(json, name), else: :error
+  end
+
+  defp wire?(opts), do: Keyword.get(opts, :wire, true)
 
   defp default(type, opts), do: Keyword.get(opts, :default, zero(type))
 

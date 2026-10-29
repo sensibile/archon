@@ -29,3 +29,4 @@ Archon의 합의된 기술·운영 결정을 누적합니다. 파일 이름은 `
 | [0010](0010-codex-gate-status-only.md) | Codex 리뷰 게이트를 판정 전용으로 줄이고 요청·머지는 세션이 맡기 | 대체됨 (0011) |
 | [0011](0011-local-review-auto-merge.md) | Codex 리뷰 게이트를 없애고 push 전 로컬 리뷰 후 auto-merge | 승인 |
 | [0012](0012-taeguk-pilot-and-bundle-update.md) | 태극 시험 프로젝트 등록과 번들 갱신 | 승인 |
+| [0014](0014-phase2-decider.md) | Phase 2 Decider 설계 | 제안 |

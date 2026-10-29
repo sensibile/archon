@@ -123,6 +123,44 @@ defmodule Archon.Domain.WorkflowDef do
     definition |> collect_tasks() |> Enum.find(&(&1.task_reference_name == ref_name))
   end
 
+  @doc "Upstream `containsType`: whether any task, nested ones included, has `type`."
+  @spec contains_type?(t(), String.t()) :: boolean()
+  def contains_type?(%__MODULE__{} = definition, type) do
+    definition |> collect_tasks() |> Enum.any?(&(&1.type == type))
+  end
+
+  @doc """
+  Upstream `getNextTask`: the task to schedule after the one with `ref_name`, or `nil`.
+
+  A `TERMINATE` task has no next task. Nested tasks are resolved with `WorkflowTask.next/3`, so
+  the last task of a `DO_WHILE` body gets the `DO_WHILE` task back.
+  """
+  @spec next_task(t(), String.t()) :: WorkflowTask.t() | nil
+  def next_task(%__MODULE__{tasks: tasks} = definition, ref_name) do
+    case task_by_ref_name(definition, ref_name) do
+      %WorkflowTask{type: "TERMINATE"} -> nil
+      _other -> tasks |> List.wrap() |> Enum.reject(&is_nil/1) |> next_top_level(ref_name)
+    end
+  end
+
+  defp next_top_level([], _ref_name), do: nil
+
+  defp next_top_level([task | rest], ref_name) do
+    cond do
+      task.task_reference_name == ref_name ->
+        List.first(rest)
+
+      next = WorkflowTask.next(task, ref_name, nil) ->
+        next
+
+      WorkflowTask.has?(task, ref_name) ->
+        if task.type == "DO_WHILE", do: nil, else: List.first(rest)
+
+      true ->
+        next_top_level(rest, ref_name)
+    end
+  end
+
   @doc """
   Bean validation of a workflow definition. See `Archon.Domain.Validation` for `opts`.
 
