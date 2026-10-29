@@ -10,7 +10,7 @@ Taeguk 저장소의 `python3 scripts/check_rules.py`는 표준 라이브러리�
 
 Taeguk 저장소에서는 AGENTS.md의 로컬 검증 명령과 `.githooks/pre-push`에서 실행한다. hook은 `.githooks`에 보관하고 저장소 `core.hooksPath` 설정을 통해 활성화한다. 기존 hooksPath나 실행 hook이 있으면 교체하지 않고 연결 방법을 별도로 정한다. 현재 Taeguk 저장소에서 기존 실행 hook과 hooksPath가 없는 것을 확인한 뒤 `.githooks`를 활성화했다. hook은 로컬에서 우회될 수 있다. 새 clone에는 Git 설정이 복사되지 않으므로 기존 hook을 먼저 확인하고 `git config --local core.hooksPath .githooks`로 연결한다.
 
-Taeguk 저장소의 GitHub workflow는 push와 PR에서 규칙 검사, Python 테스트, Rust 테스트, DB를 포함한 Elixir 테스트와 format 검사를 실행한다. Elixir job은 `TAEGUK_REQUIRE_STATE_TESTS=1`로 DB 검사 skip을 실패로 만든다. pre-push hook은 빠른 로컬 확인을 위해 규칙과 Python 검사만 실행한다. 필수 branch protection은 설정하지 않았으므로 CI 실패가 merge를 자동으로 막지는 않는다. 원격 설정의 세부는 [저장소 운영 기록](https://github.com/sensibile/taeguk/blob/f71224ac2e9c93db2b3f2004767e1fcce3579121/docs/repository-operations.md)을 따른다. 로컬 통과를 원격 강제 정책으로 보고하지 않는다.
+Taeguk 저장소의 GitHub workflow는 push와 PR에서 규칙 검사, Python 테스트, Rust 테스트, DB를 포함한 Elixir 테스트와 format 검사를 실행한다. Elixir job은 `TAEGUK_REQUIRE_STATE_TESTS=1`로 DB 검사 skip을 실패로 만든다. pre-push hook은 빠른 로컬 확인을 위해 규칙과 Python 검사만 실행한다. 필수 branch protection은 설정하지 않았으므로 CI 실패가 merge를 자동으로 막지는 않는다. 원격 설정의 세부는 [저장소 운영 기록](https://github.com/sensibile/taeguk/blob/a820b4a7027813368fd41d3a1b619f19e6f063a1/docs/repository-operations.md)을 따른다. 로컬 통과를 원격 강제 정책으로 보고하지 않는다.
 
 규칙을 설치한 프로젝트에는 이 검사기와 hook이 복사되지 않는다. 그 프로젝트의 검사 연결·CI·권한은 해당 프로젝트에서 정하며, 이 문서의 Taeguk 저장소 설정을 그 프로젝트의 상태로 보고하지 않는다.
 

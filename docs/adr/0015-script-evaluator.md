@@ -1,6 +1,6 @@
 # ADR 0015: 스크립트 평가기를 격리된 QuickJS-ng 프로세스로 실행
 
-- 상태: 제안
+- 상태: 승인
 - 날짜: 2026-10-29
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 

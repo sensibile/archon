@@ -2,7 +2,7 @@
 
 Archon에서 일하는 에이전트(Claude Code, Codex 등)를 위한 규칙입니다.
 
-Read `.taeguk/rules/index.md` before planning and apply Taeguk rules to explicitly assigned workflows.
+Read `.taeguk/rules/index.md` before planning and apply Taeguk rules to explicitly assigned workflows; apply DEV-003 (dedicated worktree, `.taeguk/rules/development.md`) to all repository edits.
 
 ## 프로젝트
 

@@ -1,19 +1,21 @@
 {
   "schema_version": 1,
-  "source_version": "f71224ac2e9c93db2b3f2004767e1fcce3579121",
-  "link_pin": "f71224ac2e9c93db2b3f2004767e1fcce3579121",
+  "source_version": "a820b4a7027813368fd41d3a1b619f19e6f063a1",
+  "link_pin": "a820b4a7027813368fd41d3a1b619f19e6f063a1",
   "files": {
-    ".taeguk/rules/approvals.md": "ee0c6ac3a29facaf8cca654a0b6d20c1ff5e83ca678236ea7c460ad1823e6db9",
+    ".taeguk/rules/approvals.md": "0fcc48e32e0ee8664943056a1432f527691bf6a02e008f5b81b0b51835619c5c",
     ".taeguk/rules/delivery.md": "66a66923fb3296d7f286d8845883c5678375b578e9fc00d0b7bc6bb7df80c68d",
+    ".taeguk/rules/development.md": "d074304b8561e8dbcedede5c3ea685a489ad69a4e6c0e2ce1be22e608be1e6b6",
     ".taeguk/rules/governance.md": "98adb27880316ba215426c136e80335b00e1673fc41228330ec3141b30be0ffc",
-    ".taeguk/rules/index.md": "1014a23c145c0c5817e815a45d0b1a790e929e5c59c991df69f55cc1d9f4bb38",
-    ".taeguk/rules/mechanical-checks.md": "9bc5b622f1070dd558dea36cba903b3ce0067c1ed6768d197e3c76e21b9bf9a5",
+    ".taeguk/rules/index.md": "70f1c0b677baac04989cb99e7eab52ee9dcb7b9afc59a515736747a5edd5a17b",
+    ".taeguk/rules/mechanical-checks.md": "a96da04792cbebc39d44358932dfb1e0d022f88c47fdb7e27ec151b67f6e8f32",
     ".taeguk/rules/proposals/archon-pilot.md": "17a04d16047ccb26dec8ac056f522ba2726bb08936bf448e1d1840fa7c5b4170",
     ".taeguk/rules/proposals/coverage-as-instrument.md": "ff17cbf44e058a01015f7387a56f2494c560535f33ba46294dbf2f896306ff7e",
-    ".taeguk/rules/proposals/index.md": "da2638fd01dcedf8d7ffcd5dc8ff3bef5044117132394b430d88f01de7df13e9",
+    ".taeguk/rules/proposals/index.md": "b8eb1581155d732c317c404515a0fc71036c1006a35596f7d6b9040807dbe1f3",
     ".taeguk/rules/proposals/intent-requirement-records.md": "004be0b10f188ea1ccfebfe49dbb1ec7f825e228e028531c46113d0a36420a86",
-    ".taeguk/rules/proposals/review-loop-exit.md": "db437bd21441522f55177d3b4af77b405a6bbf64e8f677823f2fe028e4f7844a",
-    ".taeguk/rules/registry.toml": "6fc76adeb33cb00c22b6da8d9061da78826c87d7fdfa79fa22734235ffa5bffe",
+    ".taeguk/rules/proposals/review-loop-exit.md": "5e489661ba9d2c480a3f63b66faf8d6e22db7754e9aabd9ceff9b05c5cede1eb",
+    ".taeguk/rules/proposals/worktree-first.md": "36dc772be8977a47ce25c6f4928feb3faa1984dfeae399f4d65b28d4d559935c",
+    ".taeguk/rules/registry.toml": "da1f7ca93e52588fc4640831e73a0db9293f28a3ef8eee1ed360bdbc45f7c452",
     ".taeguk/rules/verification.md": "da9a550eb5de5c2064486400bdcab6601a4091b918d03bf96fa4b0c439509d2d"
   }
 }

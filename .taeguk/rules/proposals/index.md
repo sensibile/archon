@@ -1,6 +1,6 @@
 # 미승인 규칙 후보
 
-Taeguk 저장소의 [기존 규칙 목록](https://github.com/sensibile/taeguk/blob/f71224ac2e9c93db2b3f2004767e1fcce3579121/docs/research/archive/규칙-목록.md) 후보 중 현행 registry에 등록되지 않은 항목은 계속 제안 상태다. archive는 원본을 보존하며 현행 규칙의 승인 목록으로 사용하지 않는다.
+Taeguk 저장소의 [기존 규칙 목록](https://github.com/sensibile/taeguk/blob/a820b4a7027813368fd41d3a1b619f19e6f063a1/docs/research/archive/규칙-목록.md) 후보 중 현행 registry에 등록되지 않은 항목은 계속 제안 상태다. archive는 원본을 보존하며 현행 규칙의 승인 목록으로 사용하지 않는다.
 
 ## GOV-005
 
@@ -11,6 +11,10 @@ Taeguk 저장소의 [기존 규칙 목록](https://github.com/sensibile/taeguk/b
 ## VER-006 후보
 
 커버리지를 빈 곳을 찾는 측정 도구로만 쓰고 목표·수용 기준으로 쓰지 않는 규칙 후보다. [커버리지 측정 도구 개정안](coverage-as-instrument.md)이 BOSS 확인을 기다린다.
+
+## DEV-003
+
+2026-10-29 승인되어 DEV-003 1.0으로 현행 규칙에 반영했다. [작업 전용 워크트리 개정안](worktree-first.md)은 개정 근거로 보존한다.
 
 ## archon 시험 프로젝트 추가
 
