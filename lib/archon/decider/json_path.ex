@@ -97,8 +97,28 @@ defmodule Archon.Decider.JsonPath do
 
   defp bracket_token([single]), do: property(single)
   defp bracket_token(["", double]), do: property(double)
-  defp bracket_token(["", "", index]), do: {:ok, {:index, String.to_integer(index)}}
+  defp bracket_token(["", "", index]), do: int(index)
   defp bracket_token(["", "", "", "*"]), do: {:ok, :wildcard}
+
+  # Jayway parses indexes with Integer.parseInt; anything outside an int fails the path. The
+  # digit count is checked first so huge inputs are never converted.
+  defp int(text) do
+    {sign, digits} =
+      case text do
+        "-" <> digits -> {-1, digits}
+        digits -> {1, digits}
+      end
+
+    significant = String.trim_leading(digits, "0")
+
+    with true <- byte_size(significant) <= 10,
+         value = sign * if(significant == "", do: 0, else: String.to_integer(significant)),
+         true <- value in -2_147_483_648..2_147_483_647 do
+      {:ok, {:index, value}}
+    else
+      false -> :error
+    end
+  end
 
   defp property(quoted) do
     with {:ok, name} <- unescape(quoted), do: {:ok, {:property, name}}

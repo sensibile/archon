@@ -34,6 +34,7 @@ defmodule Archon.Decider.JsonPathTest do
     assert JsonPath.read(@doc_json, "$['a']['b'][1]") == 20
     assert JsonPath.read(@doc_json, "a.b[-1]") == 30
     assert JsonPath.read(@doc_json, "a.b[ 0 ]") == 10
+    assert JsonPath.read(@doc_json, "a.b[0001]") == 20
     assert JsonPath.read(@doc_json, "a[ 'c d' ]") == 1
   end
 
@@ -91,7 +92,10 @@ defmodule Archon.Decider.JsonPathTest do
           "a.b.length()",
           "@.a",
           "$a",
-          "a[x]"
+          "a[x]",
+          "a.b[2147483648]",
+          "a.b[-2147483649]",
+          "a.b[" <> String.duplicate("9", 2_000_000) <> "]"
         ] do
       assert JsonPath.read(@doc_json, path) == nil, path
     end

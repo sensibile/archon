@@ -614,6 +614,20 @@ defmodule Archon.Decider.ParametersTest do
              }
     end
 
+    # Expected strings match Double#toString on JDK 25, which uses the same algorithm as the
+    # JDK 21 upstream builds on (JDK 19+).
+    test "subnormal doubles keep Java's two-digit rendering" do
+      doc = %{"a" => 5.0e-324, "b" => 1.0e-323, "c" => 9.5e-323, "d" => 4.0e-320}
+      input = Map.new(Map.keys(doc), fn key -> {key, "<${#{key}}>"} end)
+
+      assert Parameters.replace(input, doc) == %{
+               "a" => "<4.9E-324>",
+               "b" => "<9.9E-324>",
+               "c" => "<9.4E-323>",
+               "d" => "<4.0E-320>"
+             }
+    end
+
     test "values rendered into text use Java's toString" do
       doc = %{
         "f1" => 1.5,

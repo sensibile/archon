@@ -255,6 +255,13 @@ defmodule Archon.Domain.TaskTypeConstraintTest do
       # \s* also matches a trailing newline in Java's Pattern
       assert messages(wait.(%{"duration" => "10s\n"})) == []
 
+      assert messages(wait.(%{"duration" => "2147483647s"})) == []
+      assert messages(wait.(%{"duration" => "0002147483647s"})) == []
+
+      assert messages(wait.(%{"duration" => String.duplicate("9", 2_000_000) <> "s"})) == [
+               "Either date or duration is passed as null "
+             ]
+
       # Integer.parseInt overflow
       assert messages(wait.(%{"duration" => "2147483648s"})) == [
                "Either date or duration is passed as null "

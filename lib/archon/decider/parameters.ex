@@ -331,8 +331,25 @@ defmodule Archon.Decider.Parameters do
     sign <> body
   end
 
-  # Shortest round-trip digits and exponent such that value = 0.<digits> * 10^exponent.
+  # Digits and exponent such that value = 0.<digits> * 10^exponent: the shortest round-trip
+  # digits, except that Java always writes at least two significant digits (d.d), choosing the
+  # two-digit decimal closest to the value. That only differs from "<d>.0" for subnormals such
+  # as Double.MIN_VALUE (4.9E-324).
   defp decimal_digits(value) do
+    case shortest_digits(value) do
+      {<<_digit>>, _exponent} -> two_digits(value)
+      digits -> digits
+    end
+  end
+
+  defp two_digits(value) do
+    [mantissa, exponent] = value |> :erlang.float_to_binary(scientific: 1) |> String.split("e")
+    <<first, ?., second>> = mantissa
+    digits = String.trim_trailing(<<first, second>>, "0")
+    {digits, String.to_integer(exponent) + 1}
+  end
+
+  defp shortest_digits(value) do
     {mantissa, exponent} =
       case value |> :erlang.float_to_binary([:short]) |> String.split("e") do
         [mantissa] -> {mantissa, 0}

@@ -173,8 +173,16 @@ defmodule Archon.Domain.TaskTypeConstraint do
         false
 
       numbers ->
-        numbers |> Enum.reject(&(&1 == "")) |> Enum.all?(&(String.to_integer(&1) <= @int_max))
+        numbers |> Enum.reject(&(&1 == "")) |> Enum.all?(&int?/1)
     end
+  end
+
+  # Integer.parseInt range, checked on the digits before converting so huge inputs stay cheap.
+  defp int?(digits) do
+    significant = String.trim_leading(digits, "0")
+
+    byte_size(significant) <= 10 and
+      (significant == "" or String.to_integer(significant) <= @int_max)
   end
 
   defp decision_cases(%WorkflowTask{decision_cases: nil} = task, type),
