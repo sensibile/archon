@@ -275,7 +275,7 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
 
 ### 5. 하위 워크플로우
 
-- **시작.** SUB_WORKFLOW 태스크가 예약되면 부모 프로세스가 upstream `SubWorkflow.start`를 따른다. 자식 ID는 upstream과
+- **시작.** SUB_WORKFLOW 태스크가 예약되면(`startDelay`가 있으면 그 지연 뒤, 결정 6) 부모 프로세스가 upstream `SubWorkflow.start`를 따른다. 자식 ID는 upstream과
   같은 이름 기반 UUID(`nameUUIDFromBytes("subworkflow:<부모ID>:<태스크ID>:<retryCount>")`, UUID v3)이고, 입력은
   `parentWorkflowId`, `parentWorkflowTaskId`, `taskToDomain`(부모 것 또는 `subWorkflowTaskToDomain`), `priority`,
   `correlationId`, 해석한 하위 워크플로우 정의·입력이다. 자식 생성은 `Archon.Runtime.start_workflow_idempotent/1`
@@ -311,11 +311,18 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
 
 upstream의 decider 큐와 스위퍼, 시스템 태스크 큐의 지연 재평가를 **워크플로우 프로세스의 타이머 하나**로 대신한다.
 
-- 프로세스는 `Process.send_after`로 `:wake` 타이머를 하나만 가진다. 시각은 `Step`이 정하고 새 값이 오면 바꾼다.
+- 프로세스는 `Process.send_after`로 `:wake` 타이머를 하나만 가진다. 시각은 `Step`이 정한다. decide를 한 이벤트는 그
+  결과로 시각을 새로 정하고, decide를 하지 않은 이벤트(`isLazyEvaluateWorkflow`로 건너뛴 갱신, poll 등)는 지금보다 이른
+  시각으로 당기기만 한다. 그래야 관계없는 갱신이 계속 들어와도 타임아웃 판정이 미뤄지지 않는다(upstream decider 큐 메시지는
+  decide만 다시 정하고, poll은 `setUnackTimeoutIfShorter`로 당기기만 한다).
 - 시각은 다음 후보 중 가장 이른 것이다. 후보는 ms 단위로 계산하고 지금보다 최소 1초 뒤로 둔다(upstream
   `Wait.getEvaluationOffset`이 0을 1로 올리는 것과 같은 이유로, 마감 직전에 `:wake`가 연달아 발화하지 않게 한다).
   - upstream `ExecutorUtils.computePostpone`의 후보(맥락의 목록 그대로, 상한 3600초, 후보가 없으면 30초).
-  - 재시도 대기 중인 태스크(`callbackAfterMs`)는 워커 큐 지연으로 처리하므로 후보가 아니다. 지연이 끝나면 큐에서 보인다.
+  - 재시도 대기 중인 워커 태스크(`callbackAfterMs`)는 워커 큐 지연으로 처리하므로 후보가 아니다. 지연이 끝나면 큐에서
+    보인다.
+  - 예약될 때 지연(`callbackAfterMs`, 없으면 `callbackAfterSeconds`)이 있는 비동기 시스템 태스크는 첫 평가(`start`)를
+    `scheduledTime + 지연`까지 미루고, 그 시각이 후보다. upstream은 그 지연을 걸어 시스템 태스크 큐에 넣는다. SUB_WORKFLOW
+    매퍼가 `startDelay`를 `callbackAfterSeconds`에 넣으므로 하위 워크플로우 시작이 그만큼 늦어진다.
 - upstream은 `computePostpone`이 30초와 다를 때만 decider 큐의 unack 타임아웃을 바꾸지만 Archon은 매번 새 시각으로
   바꾼다. 결과가 같은 시각이면 같은 일이다.
 - **워커 poll도 타이머를 당긴다.** poll로 태스크가 `IN_PROGRESS`가 되면 응답 타임아웃(태스크 정의 값, 0이면 태스크 값)이
@@ -331,7 +338,7 @@ upstream의 decider 큐와 스위퍼, 시스템 태스크 큐의 지연 재평�
     `workflow_get_completed_fork`의 JOIN `pollCount` 3(예약 직후, 가지 둘)이 나온다.
   - WAIT: `:wake`. WAIT 매퍼(ADR 0014 2d)는 태스크를 처음부터 `IN_PROGRESS`와 `waitTimeout`으로 만들므로 재평가 시각은
     `computePostpone`의 진행 중 WAIT 후보(마감 시각)다. 외부 완료는 태스크 갱신(결정 7의 `update`)이다.
-  - SUB_WORKFLOW: 결정 5.
+  - SUB_WORKFLOW: 결정 5. 시작은 위 지연 규칙을 따른다.
   - 평가 전 검사는 upstream `AsyncSystemTaskExecutor#execute`를 따른다(태스크가 끝났으면 무시, 워크플로우가 끝났으면
     `CANCELED`, `SCHEDULED`이면 `startTime`을 찍고 `start`). 끝나지 않은 JOIN·WAIT의 `callbackAfterSeconds`는 upstream처럼
     `getEvaluationOffset` 값(JOIN은 위 공식, WAIT은 남은 초)으로 저장한다. GET 응답에 보이는 값이다.
