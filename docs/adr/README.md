@@ -34,4 +34,5 @@ Archon의 합의된 기술·운영 결정을 누적합니다. 파일 이름은 `
 | [0015](0015-script-evaluator.md) | 스크립트 평가기를 격리된 QuickJS-ng 프로세스로 실행 | 승인 |
 | [0016](0016-taeguk-review-order-and-model.md) | 태극 번들 갱신과 로컬 리뷰 순서·모델 변경 | 승인 |
 | [0017](0017-taeguk-dev003-worktree.md) | 태극 번들 갱신과 작업 전용 워크트리 규칙(DEV-003) 적용 | 승인 |
+| [0018](0018-phase3-otp-runtime.md) | Phase 3 OTP 런타임 설계 | 제안 |
 | [0019](0019-taeguk-codex-purpose-context.md) | 태극 번들 갱신과 Codex 리뷰 목적 맥락 적용 | 제안 |
