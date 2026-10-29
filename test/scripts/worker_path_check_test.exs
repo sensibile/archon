@@ -79,6 +79,25 @@ defmodule Archon.Scripts.WorkerPathCheckTest do
     assert out =~ "symlink\ttest/link.exs"
   end
 
+  test "submodules are rejected even when git config hides them", %{tmp_dir: dir} do
+    {sha, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: dir)
+    git!(dir, ["update-index", "--add", "--cacheinfo", "160000,#{String.trim(sha)},test/sub"])
+    git!(dir, ["commit", "--quiet", "-m", "gitlink"])
+    git!(dir, ["config", "diff.ignoreSubmodules", "all"])
+
+    assert {out, 1} = check(dir, "test-gap")
+    assert out =~ "submodule\ttest/sub"
+  end
+
+  test "diff.relative in a subdirectory cannot hide changes elsewhere", %{tmp_dir: dir} do
+    write!(dir, "mix.exs", "x\n")
+    commit!(dir, "outside")
+    git!(dir, ["config", "diff.relative", "true"])
+
+    assert {out, 1} = check(Path.join(dir, "test"), "test-gap")
+    assert out =~ "outside allowlist\tmix.exs"
+  end
+
   test "daily-cleanup allows lib, test and docs but not authority records", %{tmp_dir: dir} do
     write!(dir, "lib/a.ex", "changed")
     write!(dir, "docs/guide.md", "x")

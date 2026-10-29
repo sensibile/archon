@@ -44,15 +44,19 @@ archon 세션에서 예약 시각과 머지 방식을 포함한 계획에 "진�
 auto-merge의 `--match-head-commit`에도 같은 SHA를 쓴다.
 
 ```bash
-git fetch origin
 gh pr view <번호> --json baseRefName,headRefOid   # baseRefName이 main이고 headRefOid가 리뷰한 head SHA인지 확인
-check="$(mktemp)"
-git show origin/main:scripts/worker_path_check.sh > "$check"
-bash "$check" <test-gap|daily-cleanup> origin/main <리뷰한 head SHA>
+check="$(mktemp)" &&
+  git fetch origin &&
+  git show origin/main:scripts/worker_path_check.sh >"$check" &&
+  test -s "$check" &&
+  bash "$check" <test-gap|daily-cleanup> origin/main <리뷰한 head SHA>
+echo "path check exit: $?"
 ```
 
-- 종료 코드 0만 통과다. 1은 허용 밖 변경이 있다는 뜻이고 그 목록을 출력한다. 2는 사용법 오류나 git 오류다.
-- 스크립트는 경로를 `git diff -z`로 그대로 읽는다. 일반 파일 모드(`100644`)가 아닌 변경(심볼릭 링크, 서브모듈,
+- 출력된 `path check exit` 값이 0일 때만 통과다. fetch나 스크립트 꺼내기가 실패해도 0이 아니게 묶여 있다. 스크립트의
+  종료 코드 1은 허용 밖 변경이 있다는 뜻이고 그 목록을 출력한다. 2는 사용법 오류나 git 오류다.
+- 스크립트는 저장소 루트에서 경로를 `git diff -z`로 그대로 읽고, 변경을 숨기는 git 설정(`diff.relative`,
+  `diff.ignoreSubmodules`)을 무시한다. 일반 파일 모드(`100644`)가 아닌 변경(심볼릭 링크, 서브모듈,
   실행 비트)은 경로와 관계없이 허용 밖이다. `docs/adr/`와 `docs/operations.md`는 대소문자를 가리지 않고 막는다.
 
 | 워커 | 허용 경로 | 추가 조건 |

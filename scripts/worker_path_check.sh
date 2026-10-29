@@ -46,13 +46,19 @@ allowed_path() {
   return 1
 }
 
+# Run from the repository root so diff.relative cannot hide paths outside the cwd.
+top="$(git rev-parse --show-toplevel)" || exit 2
+cd "$top" || exit 2
+
 raw_file="$(mktemp)" || exit 2
 numstat_file="$(mktemp)" || exit 2
 trap 'rm -f "$raw_file" "$numstat_file"' EXIT
 
 # -z keeps paths byte for byte; --raw exposes file modes, --numstat removed lines.
-if ! git diff --raw -z --no-renames --no-abbrev "$base...$head" >"$raw_file" ||
-  ! git diff --numstat -z --no-renames "$base...$head" >"$numstat_file"; then
+# The flags override user config that would hide changes (diff.relative, diff.ignoreSubmodules).
+diff_flags=(-z --no-renames --no-relative --ignore-submodules=none)
+if ! git diff --raw --no-abbrev "${diff_flags[@]}" "$base...$head" >"$raw_file" ||
+  ! git diff --numstat "${diff_flags[@]}" "$base...$head" >"$numstat_file"; then
   echo "git diff failed for $base...$head" >&2
   exit 2
 fi
