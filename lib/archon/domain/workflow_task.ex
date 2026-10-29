@@ -6,7 +6,8 @@
 # Derived from conductor-oss common/src/main/java/com/netflix/conductor/common/metadata/workflow/WorkflowTask.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: re-modelled as a recursive Elixir struct with a JSON codec; bean
-# validation annotations ported to validate/1.
+# validation annotations ported to validate/1, which also applies the core
+# WorkflowTaskTypeConstraint (Archon.Domain.TaskTypeConstraint).
 
 defmodule Archon.Domain.WorkflowTask do
   @moduledoc """
@@ -26,6 +27,7 @@ defmodule Archon.Domain.WorkflowTask do
     StateChangeEvent,
     SubWorkflowParams,
     TaskDef,
+    TaskTypeConstraint,
     Validation
   }
 
@@ -133,17 +135,99 @@ defmodule Archon.Domain.WorkflowTask do
     [task | Enum.flat_map(children(task), &collect_tasks/1)]
   end
 
-  defp children(%__MODULE__{type: type} = task) when type in ["DECISION", "SWITCH"] do
-    branches = Map.values(task.decision_cases || %{}) ++ [task.default_case]
-    present(branches)
+  @doc """
+  Upstream `WorkflowTask#has`: whether this task or one nested in it has `ref_name`.
+  """
+  @spec has?(t(), String.t()) :: boolean()
+  def has?(%__MODULE__{} = task, ref_name), do: get(task, ref_name) != nil
+
+  @doc """
+  Upstream `WorkflowTask#get`: this task or the first nested task with `ref_name`, depth first.
+  """
+  @spec get(t(), String.t()) :: t() | nil
+  def get(%__MODULE__{} = task, ref_name) do
+    task |> collect_tasks() |> Enum.find(&(&1.task_reference_name == ref_name))
   end
 
-  defp children(%__MODULE__{type: "FORK_JOIN", fork_tasks: forks}), do: present(forks || [])
-  defp children(%__MODULE__{type: "DO_WHILE", loop_over: body}), do: present([body])
-  defp children(%__MODULE__{}), do: []
+  @doc """
+  Upstream `WorkflowTask#next`: the task to run after `ref_name` inside this task, or `nil`.
+
+  Only `DECISION`, `SWITCH`, `DO_WHILE` and `FORK_JOIN` look inside. Within a branch the task
+  after `ref_name` (or after the nested task containing it) is next. When `ref_name` is the last
+  task of a `DO_WHILE` body, the `DO_WHILE` task itself is returned so the loop can decide on the
+  next iteration. When it ends a `FORK_JOIN` branch, `parent` is asked for the task after the
+  fork, which is how a nested fork reaches its join.
+  """
+  @spec next(t(), String.t(), t() | nil) :: t() | nil
+  def next(%__MODULE__{type: type} = task, ref_name, _parent)
+      when type in ["DECISION", "SWITCH", "DO_WHILE"] do
+    found =
+      Enum.find_value(branches(task), fn branch ->
+        case scan_branch(branch, ref_name, task) do
+          {:next, next} -> next
+          {_stop, [next | _rest]} -> next
+          _other -> nil
+        end
+      end)
+
+    cond do
+      found -> found
+      type == "DO_WHILE" and has?(task, ref_name) -> task
+      true -> nil
+    end
+  end
+
+  def next(%__MODULE__{type: "FORK_JOIN"} = task, ref_name, parent) do
+    Enum.find_value(branches(task), fn branch ->
+      case scan_branch(branch, ref_name, task) do
+        {:next, next} -> next
+        {_stop, [next | _rest]} -> next
+        {:found, []} when parent != nil -> next(parent, task.task_reference_name, parent)
+        _other -> nil
+      end
+    end)
+  end
+
+  def next(%__MODULE__{}, _ref_name, _parent), do: nil
+
+  @doc false
+  # The iterator loop shared by upstream's `next` and `WorkflowDef#getNextTask`: walks `branch`
+  # until `ref_name` (`{:found, rest}`), a nested task that resolves it (`{:next, task}`) or a
+  # nested task containing it (`{:within, rest}`). `rest` holds the tasks after the stop.
+  @spec scan_branch([t() | nil], String.t(), t() | nil) ::
+          {:next, t()} | {:found, [t()]} | {:within, [t()]} | :not_found
+  def scan_branch(branch, ref_name, parent) do
+    branch
+    |> Enum.reject(&is_nil/1)
+    |> do_scan(ref_name, parent)
+  end
+
+  defp do_scan([], _ref_name, _parent), do: :not_found
+
+  defp do_scan([%__MODULE__{task_reference_name: ref_name} | rest], ref_name, _parent),
+    do: {:found, rest}
+
+  defp do_scan([task | rest], ref_name, parent) do
+    case next(task, ref_name, parent) do
+      nil -> if has?(task, ref_name), do: {:within, rest}, else: do_scan(rest, ref_name, parent)
+      next -> {:next, next}
+    end
+  end
+
+  defp children(task), do: task |> branches() |> Enum.concat()
+
+  # Upstream `children()`: the task lists nested in `task`, by type. `nil` lists and elements are
+  # dropped (upstream would throw on them).
+  defp branches(%__MODULE__{type: type} = task) when type in ["DECISION", "SWITCH"] do
+    present(Map.values(task.decision_cases || %{}) ++ [task.default_case])
+  end
+
+  defp branches(%__MODULE__{type: "FORK_JOIN", fork_tasks: forks}), do: present(forks || [])
+  defp branches(%__MODULE__{type: "DO_WHILE", loop_over: body}), do: present([body])
+  defp branches(%__MODULE__{}), do: []
 
   defp present(branches) do
-    branches |> Enum.flat_map(&(&1 || [])) |> Enum.reject(&is_nil/1)
+    branches |> Enum.reject(&is_nil/1) |> Enum.map(&Enum.reject(&1, fn task -> is_nil(task) end))
   end
 
   @doc """
@@ -169,7 +253,8 @@ defmodule Archon.Domain.WorkflowTask do
       decision_case_errors(task.decision_cases) ++
       list_errors(task.default_case, "defaultCase") ++
       fork_errors(task.fork_tasks) ++
-      state_change_errors(task.on_state_change)
+      state_change_errors(task.on_state_change) ++
+      TaskTypeConstraint.errors(task)
   end
 
   defp decision_case_errors(nil), do: []

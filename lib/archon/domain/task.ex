@@ -4,6 +4,7 @@
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
 #
 # Derived from conductor-oss common/src/main/java/com/netflix/conductor/common/metadata/tasks/Task.java
+# and core/src/main/java/com/netflix/conductor/model/TaskModel.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: re-modelled as an Elixir struct with a JSON codec; derived getters
 # became functions; the protobuf `inputMessage`/`outputMessage` fields are not modelled.
@@ -25,6 +26,10 @@ defmodule Archon.Domain.Task do
   getter creates an empty one) and `runtimeMetadata` only when non-empty (`NON_EMPTY`).
 
   The protobuf `inputMessage`/`outputMessage` fields (`@Hidden` upstream) are not modelled.
+
+  `first_scheduled_time`, `wait_timeout`, `loop_task_id` and `callback_after_ms` are internal
+  execution state from upstream's `TaskModel` that the Decider reads (ADR 0014). They are never
+  part of the wire JSON.
   """
 
   alias Archon.Domain.{Codec, ExecutionMetadata, TaskDef, WorkflowTask}
@@ -97,7 +102,11 @@ defmodule Archon.Domain.Task do
     {:execution_metadata, "executionMetadata", {:struct, ExecutionMetadata}, []},
     {:parent_task_id, "parentTaskId", :string, []},
     {:parent_task_reference_name, "parentTaskReferenceName", :string, []},
-    {:runtime_metadata, "runtimeMetadata", :string_map, default: %{}, null: :default}
+    {:runtime_metadata, "runtimeMetadata", :string_map, default: %{}, null: :default},
+    {:first_scheduled_time, "firstScheduledTime", :int, wire: false},
+    {:wait_timeout, "waitTimeout", :int, wire: false},
+    {:loop_task_id, "loopTaskId", :string, wire: false},
+    {:callback_after_ms, "callbackAfterMs", :int, wire: false}
   ]
 
   defstruct Codec.defaults(@fields)
@@ -145,7 +154,11 @@ defmodule Archon.Domain.Task do
           execution_metadata: ExecutionMetadata.t() | nil,
           parent_task_id: String.t() | nil,
           parent_task_reference_name: String.t() | nil,
-          runtime_metadata: %{optional(String.t()) => String.t() | nil}
+          runtime_metadata: %{optional(String.t()) => String.t() | nil},
+          first_scheduled_time: integer(),
+          wait_timeout: integer(),
+          loop_task_id: String.t() | nil,
+          callback_after_ms: integer()
         }
 
   @doc "All task statuses, in upstream declaration order."

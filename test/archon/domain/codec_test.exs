@@ -1,7 +1,7 @@
 defmodule Archon.Domain.CodecTest do
   use ExUnit.Case, async: true
 
-  alias Archon.Domain.{Codec, TaskDef, WorkflowDef, WorkflowTask}
+  alias Archon.Domain.{Codec, Task, TaskDef, Workflow, WorkflowDef, WorkflowTask}
 
   describe "missing keys and explicit null (Jackson defaults)" do
     test "a missing key keeps the field initializer" do
@@ -133,5 +133,41 @@ defmodule Archon.Domain.CodecTest do
     assert {:ok, task} = WorkflowTask.from_json(nested)
     assert length(WorkflowTask.collect_tasks(task)) == 21
     assert {:ok, ^task} = task |> WorkflowTask.to_json() |> WorkflowTask.from_json()
+  end
+
+  describe "internal fields (wire: false)" do
+    test "are never encoded" do
+      task = %Task{
+        task_id: "t1",
+        first_scheduled_time: 10,
+        wait_timeout: 20,
+        loop_task_id: "loop",
+        callback_after_ms: 30
+      }
+
+      json = Task.to_json(task)
+      assert json["taskId"] == "t1"
+
+      for key <- ["firstScheduledTime", "waitTimeout", "loopTaskId", "callbackAfterMs"] do
+        refute Map.has_key?(json, key)
+      end
+
+      workflow = %Workflow{workflow_id: "w1", previous_status: :paused, failed_task_id: "t1"}
+      json = Workflow.to_json(workflow)
+      refute Map.has_key?(json, "previousStatus")
+      refute Map.has_key?(json, "failedTaskId")
+    end
+
+    test "decode to their defaults even when the key is present" do
+      json = %{"firstScheduledTime" => 10, "loopTaskId" => "loop", "callbackAfterMs" => "x"}
+
+      assert {:ok, task} = Task.from_json(json)
+      assert task.first_scheduled_time == 0
+      assert task.loop_task_id == nil
+      assert task.callback_after_ms == 0
+
+      assert {:ok, workflow} = Workflow.from_json(%{"previousStatus" => "PAUSED"})
+      assert workflow.previous_status == nil
+    end
   end
 end

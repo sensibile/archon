@@ -30,3 +30,4 @@ Archon의 합의된 기술·운영 결정을 누적합니다. 파일 이름은 `
 | [0011](0011-local-review-auto-merge.md) | Codex 리뷰 게이트를 없애고 push 전 로컬 리뷰 후 auto-merge | 승인 |
 | [0012](0012-taeguk-pilot-and-bundle-update.md) | 태극 시험 프로젝트 등록과 번들 갱신 | 승인 (일부 0013이 대체) |
 | [0013](0013-taeguk-daily-workers.md) | 태극 데일리 정리와 테스트 보강 워커 적용 | 제안 |
+| [0014](0014-phase2-decider.md) | Phase 2 Decider 설계 | 제안 |

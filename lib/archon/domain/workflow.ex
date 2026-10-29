@@ -4,7 +4,7 @@
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
 #
 # Derived from conductor-oss common/src/main/java/com/netflix/conductor/common/run/Workflow.java
-# and common/.../metadata/Auditable.java
+# common/.../metadata/Auditable.java and core/src/main/java/com/netflix/conductor/model/WorkflowModel.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: re-modelled as an Elixir struct with a JSON codec; derived getters
 # became functions; bean validation annotations ported to validate/1.
@@ -20,6 +20,9 @@ defmodule Archon.Domain.Workflow do
 
   `failedReferenceTaskNames` and `failedTaskNames` are Java `Set`s: decoding drops duplicates
   and their order carries no meaning.
+
+  `previous_status` and `failed_task_id` are internal execution state from upstream's
+  `WorkflowModel` (ADR 0014). They are never part of the wire JSON.
   """
 
   alias Archon.Domain.{AggregateTokenUsage, Codec, Task, Validation, WorkflowDef}
@@ -59,7 +62,9 @@ defmodule Archon.Domain.Workflow do
     {:idempotency_key, "idempotencyKey", :string, []},
     {:rate_limit_key, "rateLimitKey", :string, []},
     {:rate_limited, "rateLimited", :bool, []},
-    {:aggregate_token_usage, "aggregateTokenUsage", {:struct, AggregateTokenUsage}, []}
+    {:aggregate_token_usage, "aggregateTokenUsage", {:struct, AggregateTokenUsage}, []},
+    {:previous_status, "previousStatus", {:enum, @statuses}, wire: false},
+    {:failed_task_id, "failedTaskId", :string, wire: false}
   ]
 
   defstruct Codec.defaults(@fields)
@@ -95,7 +100,9 @@ defmodule Archon.Domain.Workflow do
           idempotency_key: String.t() | nil,
           rate_limit_key: String.t() | nil,
           rate_limited: boolean(),
-          aggregate_token_usage: AggregateTokenUsage.t() | nil
+          aggregate_token_usage: AggregateTokenUsage.t() | nil,
+          previous_status: status() | nil,
+          failed_task_id: String.t() | nil
         }
 
   @doc "All workflow statuses, in upstream declaration order."
