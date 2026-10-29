@@ -320,6 +320,10 @@ defmodule Archon.ScriptTest do
          [7]},
         {"var m = new Map([['a', {get x(){ m.set('b', 9); return 1 }}], ['b', 2]]); m",
          %{"a" => %{"x" => 1}, "b" => 9}},
+        {"var m = new Map(); var k = {get x(){ m.set(k, 9); return 1 }}; m.set(k, 2); m",
+         %{"{x=1}" => 9}},
+        {"var r = {a: 1}; new Proxy(r, {ownKeys(t){ " <>
+           "Promise.resolve().then(() => t.a = 9); return ['a'] }})", %{"a" => 9}},
         {"var r = {get selectedCase(){ var a = {v: 1}; " <>
            "Promise.resolve().then(() => a.v = 9); return a }}; r",
          %{"selectedCase" => %{"v" => 9}}},
