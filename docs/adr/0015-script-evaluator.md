@@ -86,6 +86,13 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
 - 입력은 JS 전역 `$`로 넘긴다. 평가 결과는 마지막 식의 값이다(upstream `context.eval(source)`).
 - 결과 변환은 upstream `getObject`를 따른다. JS 숫자가 정수이고 `long` 범위면 정수, 아니면 실수다.
   `undefined`·`null`은 `null`, 배열은 목록, 그 밖의 객체는 맵이다.
+- JSON이 표현하지 못하는 `NaN`·`Infinity`·`-Infinity`는 upstream에서 Java `Double`로 남아 결과에 영향을 준다
+  (SWITCH는 `String.valueOf`로 `"NaN"`·`"Infinity"` 분기를 고르고, `evalBool`은 `Infinity`를 참으로 본다).
+  그래서 `archon_js`는 이 값을 태그 `{"$archon_number": "NaN" | "Infinity" | "-Infinity"}`로 보내고, Elixir 쪽은
+  평가 결과 안에서 `:nan`·`:infinity`·`:neg_infinity`로 받는다. 호출 지점은 이를 upstream처럼 쓴다. 문자열로는
+  Java `Double#toString`(`"NaN"`, `"Infinity"`, `"-Infinity"`)이 되고, `evalBool`에서는 `Infinity`만 참이다.
+  결과 맵이 태스크 출력으로 저장될 때는 upstream `ObjectMapper`가 이 값을 쓰는 방식을 구현 PR에서 확인해 따른다.
+  이 경계 사례는 결정 7의 오라클 비교에 넣는다.
 - `evalBool`은 upstream `toBoolean`을 따른다.
 - 문구: 시간 초과 `Script not evaluated within <N> seconds, interrupted.`, 스크립트 오류
   ``Error evaluating the script `<메시지>` at line <N>``, 등록 검사 `Expression is not well formatted: <메시지>`,
@@ -112,6 +119,7 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
 - upstream 테스트에서 옮긴다: `ScriptEvaluator`·평가기 테스트, `SwitchTaskMapperTest`의 JavaScript 사례,
   `DecisionTaskMapperTest#getEvaluatedCaseValueUsingExpression`, `WorkflowTaskTypeConstraintTest`의 스크립트 사례.
   `TestDoWhile`은 2e에서 옮긴다.
+- 비유한 숫자(`1/0`, `0/0`, `-1/0`)의 SWITCH 분기·`evalBool`·출력 저장 결과를 오라클과 비교한다.
 - 격리는 따로 테스트한다. `import()`, 무한 루프, 메모리 폭주, 앞선 평가가 남긴 전역 상태, 프로세스 kill 후
   복구를 시험한다.
 
