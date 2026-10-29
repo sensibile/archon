@@ -13,23 +13,24 @@ Running the CLI sends the diff and repository context to OpenAI. On 2026-10-28 B
 
 ## Before running
 
-1. Fix the target as exact SHAs: a range `<base_sha>...<head_sha>` (diff from their merge-base), one commit, or the working tree against HEAD including untracked files. Record the base SHA, head SHA, `git status --short` and a content fingerprint of the working tree, since status and HEAD stay the same when an already modified or untracked file changes again:
+1. Confirm the self-review loop has finished for this exact target (head SHA, or the working-tree content fingerprint): the session's own review agent (for example `taeguk_llm_reviewer`, or a review subagent in Claude Code) reviewed the same range repeatedly, with fixes re-reviewed, until the VER-005 end condition held. BOSS set this order on 2026-10-29. If the loop has not ended, do not run Codex; when the VER-005 escalation condition holds, report to BOSS instead.
+2. Fix the target as exact SHAs: a range `<base_sha>...<head_sha>` (diff from their merge-base), one commit, or the working tree against HEAD including untracked files. Record the base SHA, head SHA, `git status --short` and a content fingerprint of the working tree, since status and HEAD stay the same when an already modified or untracked file changes again:
 
    ```sh
    { git diff HEAD --binary; git ls-files -o --exclude-standard -z | xargs -0 shasum -a 256 --; } | shasum -a 256
    ```
-2. Read the diff that will be sent. If it contains secrets, credentials, tokens or personal data, do not run; report NOT_RUN and the location without repeating the value.
-3. Check `codex --version`. A missing CLI or failed login is NOT_RUN, not a product failure.
+3. Read the diff that will be sent. If it contains secrets, credentials, tokens or personal data, do not run; report NOT_RUN and the location without repeating the value.
+4. Check `codex --version`. A missing CLI or failed login is NOT_RUN, not a product failure.
 
 ## Run
 
 Use a read-only sandbox, no saved session, and save the final message as evidence outside the reviewed tree:
 
 ```sh
-codex exec review -c 'model="gpt-6-astra"' -c 'model_reasoning_effort="medium"' -c 'sandbox_mode="read-only"' --ephemeral -o "$OUT" - < "$PROMPT"
+codex exec review -c 'model="gpt-6-sol"' -c 'model_reasoning_effort="high"' -c 'sandbox_mode="read-only"' --ephemeral -o "$OUT" - < "$PROMPT"
 ```
 
-On 2026-10-28 BOSS set cross and security reviews to `gpt-6-astra` with `medium` effort. The pin lives in this command, not in the role TOML, so roles keep inheriting the session model. Record the model and effort with the result; a run without them does not follow this procedure.
+On 2026-10-29 BOSS set cross and security reviews to `gpt-6-sol` with `high` effort for cost, replacing the 2026-10-28 `gpt-6-astra`/`medium` pin. The pin lives in this command, not in the role TOML, so roles keep inheriting the session model. Record the model and effort with the result; a run without them does not follow this procedure.
 
 In codex-cli 0.164.0 the target flags `--base`, `--commit` and `--uncommitted` cannot be combined with a custom prompt (exit 2, observed 2026-10-28). So state the target inside the prompt file as the exact `git diff` command for the SHAs above, followed by the focus from [review prompts](references/review-prompts.md) and the request, approved requirements and plan version the reviewer needs. Run it in the foreground or as a tracked background command and keep its exit code.
 

@@ -7,7 +7,7 @@
 | Phase 0 아이디어 | 목적 가설과 의도·요구사항 기록(REQ-001, REQ-007) | `taeguk_coordinator` | 요구사항 의미를 BOSS가 확정 |
 | Phase 1 계획 강화 (반복) | 설계와 검증 방안 확보, 부족한 검증 도구의 제작 범위(VER-004) | `taeguk_designer`, `taeguk_verification_builder`, `taeguk_verifier` | verifier가 모든 요구사항을 oracle·검사에 연결한 계획 버전을 확정 |
 | Phase 1.5 구현 | 확정한 계획 버전에 맞춘 구현과 필요한 검증 도구 제작 | `taeguk_implementer`, `taeguk_verification_builder` | 정확한 산출물 버전을 검증·리뷰 역할에 인계 |
-| Phase 2 검증·다각화 리뷰·수정 (반복) | 도구 검사, LLM 리뷰, 로컬 Codex 교차·보안 리뷰, 지적 수정과 영향 검사 재검증 | `taeguk_tool_verifier`, `taeguk_llm_reviewer`, `taeguk_codex_cross_reviewer`, `taeguk_codex_security_reviewer`, `taeguk_implementer` | 필수 검사 PASS, P0·P1 지적 0건, P2 이하는 반영하거나 반영하지 않은 이유를 기록 |
+| Phase 2 검증·다각화 리뷰·수정 (반복) | 도구 검사, LLM 리뷰(자체 리뷰), 로컬 Codex 교차·보안 리뷰, 지적 수정과 영향 검사 재검증. Codex 리뷰는 자체 리뷰 반복이 VER-005로 끝난 대상에만 보내고, Codex 지적으로 바뀐 대상은 자체 리뷰부터 다시 한다(`docs/repository-operations.md` PR 플로우 2단계) | `taeguk_tool_verifier`, `taeguk_llm_reviewer`, `taeguk_codex_cross_reviewer`, `taeguk_codex_security_reviewer`, `taeguk_implementer` | 필수 검사 PASS, P0·P1 지적 0건, P2 이하는 반영하거나 반영하지 않은 이유를 기록 |
 | Phase 3 변경 범위 정리 (반복) | 이번 변경이 만든 임시 코드, 디버그 출력, 이번 변경으로 쓰이지 않게 된 코드와 중복만 정리. 범위 밖 정리와 구조 개선 거리는 후보로 기록(DEV-002) | `taeguk_implementer` | 변경이 생기면 Phase 2로 돌아가 영향받는 검사를 재검증한 뒤 종료 |
 | Phase 4 전달·효과 관측 | 머지·설치 등 전달 뒤 실제 사용자 효과를 목적 가설과 비교(REL-005), 규칙 개정 거리는 제안으로 분리 | `taeguk_outcome_observer`, `taeguk_rule_reviewer` | 관측 결과와 미확인 효과를 기록하고, 새 작업은 Phase 0에서 시작 |
 
@@ -26,5 +26,7 @@ Phase 2의 종료 조건과 상향 조건은 2026-10-28 승인된 VER-005 1.0이
 | 데일리 정리 | 로컬 예약 작업이 매일 시작 | Codex가 필요하다고 동의한 항목만 PR 플로우로 머지까지 자율 진행 | `$taeguk-daily-cleanup` |
 | 구조 개선 | 구조 개선 시그널 관측 | BOSS에게 보고하고 승인을 받은 뒤 Phase 0부터 진행 | `$taeguk-inspect-changeability`, `taeguk_structure_reviewer` |
 | 테스트 보강 | 로컬 예약 작업이 매일 정리 다음에 시작(보고 모드는 BOSS가 수동으로 시작) | 결함 주입으로 확인된 빈 곳에 테스트를 한 번에 3건까지 쓰고, Codex가 필요하다고 동의한 테스트만 PR 플로우로 머지까지 자율 진행 | `$taeguk-test-gap` |
+| 검증 건강도 | 로컬 예약 작업이 매일 정리 전에 시작 | 최신 `main`에서 검증 전체를 돌려 보고만 한다. 코드 수정과 PR 없음 | `$taeguk-validation-health` |
+| 문서 드리프트 | BOSS가 시작(예약 작업 미등록, 등록 시 매주) | 문서·스킬·규칙의 어긋남을 보고만 한다. 문서 서술 드리프트는 데일리 정리 후보로 넘기고, 규칙·승인·권한 관련은 BOSS에게 보고 | `$taeguk-doc-drift` |
 
 정리는 동작, 계약, 책임 경계를 바꾸지 않는 변경이다. 이를 바꾸면 구조 개선으로 분류한다. 구조 개선 시그널의 측정 방법은 아직 정하지 않았다. 연구 과제는 [구조 개선 시그널 연구](https://github.com/sensibile/taeguk/blob/main/docs/research/structure-signal.md)에 있다. 확정 전에는 작업 리뷰, 데일리 정리, 일반 작업에서 DEV-002의 실제 동반 수정 근거가 관측될 때 시그널로 보고한다. 테스트 보강은 커버리지를 빈 곳을 찾는 측정 도구로만 쓰고 수치를 목표로 두지 않는다(2026-10-29 BOSS 확인). 정리와 테스트 보강은 적용 프로젝트에서도 그 프로젝트가 BOSS 승인을 기록한 경우에 돈다(2026-10-29 archon부터). 주기 작업도 각자의 작업 계약과 Phase 2 종료·상향 조건(VER-005)을 따른다.

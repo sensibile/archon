@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk doc-drift"
+  short_description: "Report-only drift check of documents, skills and rules; hands document fixes to the daily cleanup"
+  default_prompt: "Use $taeguk-doc-drift for this week's run."

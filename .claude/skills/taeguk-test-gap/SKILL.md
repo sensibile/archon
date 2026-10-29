@@ -60,9 +60,23 @@ Reinforce mode continues:
 8. Pick at most three confirmed gaps from the top of the ranking. Skip a gap an earlier run recorded as rejected by Codex or waiting for a BOSS answer, unless there is new evidence or the answer arrived.
 9. Create a worktree and a `test/test-gap-<date>` branch from the recorded SHA. Write one test per gap, one commit per gap, in the project's test locations (for Rust, the `#[cfg(test)]` module or `tests/`). The expected value comes from the cited source, not from running the code.
 10. Check each test: it passes on the unmodified product code, and it fails by assertion when the step 6 fault is injected; restore the fault and confirm `git status` is clean. Separately confirm that the cumulative diff from the recorded SHA touches only test code: test files, and inside a source file only lines within its `#[cfg(test)]` module or equivalent test-only block. A test that fails on unmodified code is a suspected defect: drop the test, keep the product code as it is, and report it with the requirement it contradicts. A test that still passes with the fault does not close the gap; drop it. Then run the validation commands that apply.
-11. Ask Codex whether each test is needed: run `/taeguk-codex-local-review` on the branch range with the test adequacy focus from its review prompts together with the cross review focus, and the security review. Remove every test Codex judges unneeded, implementation-derived or not checking the cited requirement, and every test where its judgment is missing or unclear. Record rejections and do not argue them again in the same run. If tests were removed, rerun validation and the review on the new head.
+11. First run the self-review loop of the project's PR flow step 2 (`docs/repository-operations.md` in Taeguk) on the branch range until VER-005 ends it; drop or fix tests it rejects and record each round. Then ask Codex whether each test is needed: run `/taeguk-codex-local-review` on the branch range with the test adequacy focus from its review prompts together with the cross review focus, and the security review. Remove every test Codex judges unneeded, implementation-derived or not checking the cited requirement, and every test where its judgment is missing or unclear. Record rejections and do not argue them again in the same run. If tests were removed, rerun validation, the self-review loop and the Codex review on the new head.
 12. If any test is left, open a PR labeled `test-gap` whose body lists, per test, the gap, the oracle source, the injected fault and its result, and Codex's judgment, and continue with the project's PR flow including auto-merge. Apply VER-005 to review findings.
 13. Write the report to `.taeguk/test-gap/<date>.md`: mode, base SHA, measurements with commands, versions, statuses and threats, every gap with its location, classification and evidence, ranked proposals with their fault check results, tests added, dropped or rejected with reasons, PR number and head SHA after every push, questions for BOSS, cleanup candidates, and suspected defects.
+
+## Scope check
+
+Codex judgment and this skill's text do not stop an out-of-scope change from merging. Before every time auto-merge is enabled, on a new PR or a resumed one, run the scope check on the exact range and head that was reviewed. Run the checker as it is at the recorded base commit, copied outside the PR checkout and started with `python3 -I`, so neither a changed checker nor a module the PR adds next to it can run in its place:
+
+```sh
+checker="$(mktemp -d)/check_worker_scope.py"
+git show <recorded base SHA>:scripts/check_worker_scope.py > "$checker"
+python3 -I "$checker" test-gap --base <recorded base SHA> --head <reviewed head SHA>
+```
+
+Run it from the PR worktree, which only supplies the Git objects. If the base commit has no checker, the result is UNKNOWN.
+
+Enable auto-merge only on exit 0 with status PASS. On FAIL, drop the rejected tests, rerun validation and the step 11 review on the new head, and check again. On UNKNOWN or any other exit, do not enable auto-merge; report the PR to BOSS. The check covers paths, file modes, binary content and, for Rust sources, edits outside the trailing `#[cfg(test)]` module; it does not judge necessity or correctness. In an installed project, use the scope check its delivery document names; without one, open the PR without auto-merge and report it to BOSS.
 
 ## Report
 

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "source_version": "c6b42fb1ced01249d24a8134c5fc0510dd5c3489",
-  "link_pin": "c6b42fb1ced01249d24a8134c5fc0510dd5c3489",
+  "source_version": "f71224ac2e9c93db2b3f2004767e1fcce3579121",
+  "link_pin": "f71224ac2e9c93db2b3f2004767e1fcce3579121",
   "files": {
     ".claude/agents/taeguk-codex-cross-reviewer.md": "e0a3428313b36430adec9f578e066e8e0915bd8cffc4a5f1a67d744f6f3e854a",
     ".claude/agents/taeguk-codex-security-reviewer.md": "74b6e3a0e4ee2e4112a8f36a01908f6678df5a097c8f59fab1ffbac926d56dea",
@@ -15,19 +15,20 @@
     ".claude/agents/taeguk-tool-verifier.md": "1f69b264c85011979ce52e2af17134a00a23f3e928ad37884453774d835a95c6",
     ".claude/agents/taeguk-verification-builder.md": "46b4e6faa3b77163257b859d9af394e22d085d016662c7ff6fec442a185f748f",
     ".claude/agents/taeguk-verifier.md": "9c787a4eec7bd8c88bb83f3d2f94546ff537e5298dce12921a0659193ab545a8",
-    ".claude/skills/taeguk-codex-local-review/SKILL.md": "c29db42913ef775922c3a377502a67702604d7f324c756a124f4a4e9c206fe86",
+    ".claude/skills/taeguk-codex-local-review/SKILL.md": "fdb0cda0b20579d173a10411aa0b3ef1397339225b633df450938c5ca87a0b49",
     ".claude/skills/taeguk-codex-local-review/references/review-prompts.md": "7dbf5825b086d9145f57e4b44ec800c2dc32571d44688ed286b17223fc1e6682",
-    ".claude/skills/taeguk-daily-cleanup/SKILL.md": "df3bb78dfb8c2dce742f5d2f9526f1b6d67c738fb0e93ffcf78ca3cf63349510",
+    ".claude/skills/taeguk-daily-cleanup/SKILL.md": "6be0f85e878c99b94b19f40d8da40e40168ea4792e169f5fb3a70db927bd350a",
+    ".claude/skills/taeguk-doc-drift/SKILL.md": "e695ca9dd8b611d61349e56dec471f7ab5675325a79a3509fa2e8df5bba2d933",
     ".claude/skills/taeguk-implement-small-change/SKILL.md": "a0dc2fe4a0e1b49d2051f21e617721439521b02730fa45ae1e7e4d677336bc93",
     ".claude/skills/taeguk-implement-small-change/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
-    ".claude/skills/taeguk-inspect-changeability/SKILL.md": "cb557d35140f9071218df3ec89a42f18e0b1f088fa7625bb158cd1c67de305b0",
+    ".claude/skills/taeguk-inspect-changeability/SKILL.md": "d9fcd466a76bdf1b9342800075200e6a3d5c9d964760618bbf2a5e4d9aa433ea",
     ".claude/skills/taeguk-inspect-changeability/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
     ".claude/skills/taeguk-investigate-and-reproduce/SKILL.md": "96f5a45129813eda1916a4aed07b894bffb8f2166e62e79f864569aba1cfd113",
     ".claude/skills/taeguk-investigate-and-reproduce/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
     ".claude/skills/taeguk-learn-from-outcome/SKILL.md": "bc709a6a95d0ed5a2fdc37f52636c2287b73a5c1156c485b79a3009ac1de08da",
     ".claude/skills/taeguk-learn-from-outcome/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
     ".claude/skills/taeguk-plan-cross-verification/SKILL.md": "fea3d1668edef605584d42df35b17959b037db06bbc6b90645d10e3cb56dd9ca",
-    ".claude/skills/taeguk-plan-cross-verification/references/check-selection.md": "c3a1889e32b608b74b69435bdd25e6b3c5c3c9c6b96592ad7c8332af2e1b5348",
+    ".claude/skills/taeguk-plan-cross-verification/references/check-selection.md": "70b65f1df21b56cc8d3350aa936e1910a554dfa28f63f222995377ea6c49c5d0",
     ".claude/skills/taeguk-plan-cross-verification/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
     ".claude/skills/taeguk-plan-cross-verification/references/reverification.md": "e042b77dcc74b538184e39f3667d53c9575af95d270372dbbbfb7e006d1dd6e1",
     ".claude/skills/taeguk-plan-cross-verification/scripts/run_exclusive.py": "e0b9bbae390729865817bd32d51910fe8d2fd8c77ac702935b9c3a70f4292030",
@@ -37,7 +38,8 @@
     ".claude/skills/taeguk-resume-with-evidence/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
     ".claude/skills/taeguk-self-improve/SKILL.md": "93f2756343c391fd2bab4f06eab77dbeceb6f5f1061d01e064bade2ccd89224c",
     ".claude/skills/taeguk-self-improve/references/cycle.md": "74bb3bba93fd949a681dd7070c677b27dee6daa63233abb26c8660a8cba2393a",
-    ".claude/skills/taeguk-test-gap/SKILL.md": "43cf525a747b2e4a319e1e6a49c44d8a326b045e2011b47c7f6a272cef1b4f99",
+    ".claude/skills/taeguk-test-gap/SKILL.md": "bfd1cc076b98a9a35dd5d17d70d9e4a1c59a452b518e8a5fea694dc5b03be5df",
+    ".claude/skills/taeguk-validation-health/SKILL.md": "a145f351162905cdfe8d90b503114e093e36cac2cda066a3bb21b6677b5ce93c",
     ".claude/skills/taeguk-verify-delivery-effect/SKILL.md": "357bdce83e38c6836859a19ef7d842cfc790cc31d63d11b82d98898ed6d70c2b",
     ".claude/skills/taeguk-verify-delivery-effect/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
     ".claude/skills/taeguk-verify-measurement/SKILL.md": "11f145ee913a0da9ec0528f138ecec7d48abb7bbf6758b1352cde4ffdd473f8d",
@@ -47,6 +49,6 @@
     ".claude/skills/taeguk-work-contract/references/completion-review.md": "32529530df205125b022fe9d9b12cbf10ef7c631d288804cae6a306b40a7f4cd",
     ".claude/skills/taeguk-work-contract/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
     ".claude/skills/taeguk-work-contract/references/intent-requirement-records.md": "aa43bb20c9e4ec59ad2580507090c5ff5d266cea4abe6bceb4c04f96b23af3e5",
-    ".claude/skills/taeguk-work-contract/references/phases.md": "0811a2732a06694b3c2fe4149db37a07521a9fca7cc77761699bff230ddba65f"
+    ".claude/skills/taeguk-work-contract/references/phases.md": "5d1f8afeac589734cc4638bccdacb22859594899da0cb43c0b1b9c9bb15d0594"
   }
 }
