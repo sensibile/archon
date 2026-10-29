@@ -16,7 +16,9 @@ upstream은 `core/.../events/ScriptEvaluator.java`에서 GraalVM Polyglot 25.0.2
 
 - 프로세스 전체가 `Engine` 하나를 공유하고, 스크립트 원문을 키로 `Source`를 캐시한다(기본 1,024개).
   `Context`는 호출마다 새로 만든다. 컨텍스트 풀은 옵션이고 기본은 꺼져 있다.
-- 입력은 deep copy해서 JS 전역 `$`로 넘기고, 별도 스레드풀에서 실행한다. 기본 4초가 지나면
+- 입력은 JS 전역 `$`로 넘기고 별도 스레드풀에서 실행한다. deep copy는 SWITCH 평가기
+  (`JavascriptEvaluator`·`GraalJSEvaluator`)만 한다. DECISION은 태스크 입력 맵을, DO_WHILE은 실제 태스크 출력
+  맵을 담은 입력을 그대로 넘기므로, 스크립트가 Java `Map` 메서드로 그 맵을 고치면 원래 데이터도 바뀐다. 기본 4초가 지나면
   `Script not evaluated within N seconds, interrupted.`로 실패한다. 설정은 환경 변수
   `CONDUCTOR_SCRIPT_MAX_EXECUTION_SECONDS` 등으로 한다.
 - 결과는 `getObject`가 변환한다. 숫자는 `int`→`long`→`double` 중 들어맞는 것, 배열은 `List`, 객체는 `Map`이다.
@@ -66,7 +68,7 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
   메시지는 `{:packet, 4}` 길이 접두 JSON이다.
   - 요청: `{"op": "eval" | "parse", "script": ..., "input": ...}`
   - 응답: `{"ok": <타입 붙은 값>}` 또는 `{"error": kind, "message": ..., "line": ...}`
-  - 요청의 `input`은 일반 JSON이다. 입력은 Archon의 JSON 값이므로 비유한 숫자가 없다.
+  - 요청의 `input`은 일반 JSON이다. 워크플로우 상태에는 비유한 숫자가 들어가지 않으므로(결정 4) 입력에도 없다.
   - 응답의 값은 모든 노드에 타입을 붙인 2원소 배열이다. `["null"]`, `["bool", true]`, `["int", "<10진수>"]`,
     `["float", <JSON 숫자>]`, `["nonfinite", "NaN" | "Infinity" | "-Infinity"]`, `["str", "..."]`,
     `["list", [값...]]`, `["map", [[키 값, 값]...]]`. 사용자 객체가 어떤 모양이든 태그와 겹치지 않고,
@@ -83,8 +85,14 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
 - ADR 0014 결정 2의 `Context`에 `evaluate_script :: (op, script, input -> {:ok, json} | {:error, ScriptError.t()})`를
   더한다. `new_id`·`jitter`처럼 Decider가 받는 비결정적 입력이다. 기본값은 풀을 부르는 함수이고, 테스트는 실제
   풀이나 고정 함수를 넣는다.
-- Decider와 매퍼는 프로세스를 직접 다루지 않는다. "부수효과 없음"의 의미(ADR 0014 결정 2)는 유지한다. 스크립트
-  실행은 바깥 OS 프로세스에서 일어나지만 Decider의 결과는 주입한 함수의 결과에만 달려 있다.
+- Decider와 매퍼는 프로세스를 직접 다루지 않는다.
+- 기본 `evaluate_script`는 풀에 프로세스 메시지를 보내고 Port 응답을 기다린다. 이는 ADR 0014 결정 2의 "부수효과
+  없음"(I/O·영속성·큐·프로세스 메시지 없음) 정의에 어긋나므로, 그 정의에 예외를 하나 둔다. 주입받은
+  `evaluate_script` 호출은 허용한다. 이 호출은 영속 상태를 바꾸지 않는 계산 요청이고, 결과는 스크립트·입력·
+  시간 상한으로만 정해진다. ADR 0014 결정 2에 이 예외를 연결한다.
+- 평가를 Decider 밖으로 빼는 방식(평가가 필요하면 Decider가 멈추고 런타임이 평가한 뒤 다시 부르기)은 쓰지 않는다.
+  SWITCH 안의 SWITCH처럼 매퍼가 이어서 예약하는 경로(ADR 0014 결정 5) 중간에서 평가가 일어나기 때문에, 그 방식은
+  Decider를 재개 가능한 상태 기계로 바꿔야 한다.
 
 ### 4. upstream과 같게 지키는 것
 
@@ -97,8 +105,10 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
   `:nan`·`:infinity`·`:neg_infinity`로 받는다. 같은 모양의 사용자 객체는 `["map", ...]`이므로 섞이지 않는다.
   호출 지점은 이를 upstream처럼 쓴다. 문자열로는
   Java `Double#toString`(`"NaN"`, `"Infinity"`, `"-Infinity"`)이 되고, `evalBool`에서는 `Infinity`만 참이다.
-  결과 맵이 태스크 출력으로 저장될 때는 upstream `ObjectMapper`가 이 값을 쓰는 방식을 구현 PR에서 확인해 따른다.
-  이 경계 사례는 결정 7의 오라클 비교에 넣는다.
+  결과 맵이 태스크 출력에 들어갈 때는 그 자리에서 upstream이 저장할 때 쓰는 형태로 바꾼다. Jackson 설정에 따라
+  문자열 `"NaN"` 등이 될 것으로 보이며, 구현 PR에서 upstream `ObjectMapperProvider`의 실제 출력으로 확인한다.
+  따라서 워크플로우 상태(태스크 출력, 이후 `${...}`로 참조되는 값)에는 비유한 숫자가 남지 않고, 다음 평가의
+  입력도 일반 JSON으로 충분하다. 이 경계 사례는 결정 7의 오라클 비교에 넣는다.
 - `evalBool`은 upstream `toBoolean`을 따른다.
 - 문구: 시간 초과 `Script not evaluated within <N> seconds, interrupted.`, 스크립트 오류
   ``Error evaluating the script `<메시지>` at line <N>``, 등록 검사 `Expression is not well formatted: <메시지>`,
@@ -136,6 +146,11 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
 - `$`는 JS 일반 객체다. upstream은 Java `Map`을 호스트 객체로 넘기므로 `$.get('x')` 같은 Java 메서드 호출이
   되지만 Archon에서는 되지 않는다. 그 밖에 `Object.keys($)`·`JSON.stringify($)`처럼 호스트 객체와 일반 객체가
   다르게 동작하는 경우가 있다. GraalJS 오라클로 확인한 차이를 구현 PR에서 이 절에 더한다.
+- 스크립트는 입력의 사본만 본다. upstream DECISION·DO_WHILE에서 스크립트가 Java `Map` 메서드로 입력 맵(DO_WHILE은
+  실제 태스크 출력)을 고치면 원래 데이터가 바뀌지만, Archon에서는 프로세스 경계 때문에 바뀌지 않는다.
+  스크립트가 워크플로우 상태를 고치는 경로는 막는 편이 맞으므로 재현하지 않는다.
+- 비유한 숫자가 태스크 출력에 들어가면 바로 저장 형태로 바뀐다. upstream은 같은 decide 안에서는 메모리의
+  `Double`을 쓰다가 저장 후 다시 읽을 때 바뀌므로, 같은 decide 안에서 그 값을 다시 참조하는 드문 경우만 다를 수 있다.
 - 스크립트 오류 메시지 본문(`<메시지>` 부분)은 엔진마다 다르다. 감싸는 형식만 upstream과 같다.
 - 지원하는 ECMAScript 판과 내장 객체 세부(날짜 문자열 해석, 정규식 확장, 숫자 출력)는 QuickJS-ng를 따른다.
 - 메모리 상한이 있다. upstream은 메모리 제한이 없다.
