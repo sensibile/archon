@@ -31,7 +31,9 @@ defmodule Archon.Domain.TaskTypeConstraint do
 
   alias Archon.Domain.{Codec, WorkflowTask}
 
-  @duration ~r/^\s*(?:(\d+)\s*(?:days?|d))?\s*(?:(\d+)\s*(?:hours?|hrs?|h))?\s*(?:(\d+)\s*(?:minutes?|mins?|m))?\s*(?:(\d+)\s*(?:seconds?|secs?|s))?\s*\z/i
+  # Upstream's DURATION_PATTERN with possessive quantifiers: whitespace and digits can never be
+  # shared between neighbouring parts, so this accepts the same strings without backtracking.
+  @duration ~r/^\s*+(?:(\d++)\s*+(?:days?|d))?\s*+(?:(\d++)\s*+(?:hours?|hrs?|h))?\s*+(?:(\d++)\s*+(?:minutes?|mins?|m))?\s*+(?:(\d++)\s*+(?:seconds?|secs?|s))?\s*+\z/i
   @date ~r/^\d+-\d+-\d+(?: \d+:\d+(?: \S+)?)?\z/
 
   @int_max 2_147_483_647

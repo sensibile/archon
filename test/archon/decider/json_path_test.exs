@@ -58,6 +58,8 @@ defmodule Archon.Decider.JsonPathTest do
     assert JsonPath.read(@doc_json, "a['\\uZZZZ']") == nil
     assert JsonPath.read(@doc_json, "a['\\u12']") == nil
     assert JsonPath.read(@doc_json, "a['\\u']") == nil
+    assert JsonPath.read(@doc_json, "a['\\u-001']") == nil
+    assert JsonPath.read(@doc_json, "a['\\u+041']") == nil
   end
 
   test "paths that do not resolve read as nil" do

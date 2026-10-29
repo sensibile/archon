@@ -263,6 +263,35 @@ defmodule Archon.Domain.TaskTypeConstraintTest do
       assert messages(wait.(%{"until" => "tomorrow"})) == ["Unable to parse date "]
     end
 
+    test "WAIT duration validation does not backtrack on long whitespace runs" do
+      task =
+        sample(
+          type: "WAIT",
+          input_parameters: %{"duration" => String.duplicate(" ", 5_000) <> "!"}
+        )
+
+      {micros, messages} = :timer.tc(fn -> messages(task) end)
+      assert messages == ["Either date or duration is passed as null "]
+      assert micros < 100_000
+    end
+
+    test "the possessive duration pattern accepts exactly what upstream's pattern accepts" do
+      upstream =
+        ~r/^\s*(?:(\d+)\s*(?:days?|d))?\s*(?:(\d+)\s*(?:hours?|hrs?|h))?\s*(?:(\d+)\s*(?:minutes?|mins?|m))?\s*(?:(\d+)\s*(?:seconds?|secs?|s))?\s*\z/i
+
+      alphabet = ["1", " ", "d", "h", "m", "s", "y", "x"]
+
+      for length <- 1..5, text <- words(alphabet, length), String.trim(text) != "" do
+        expected =
+          if Regex.match?(upstream, text),
+            do: [],
+            else: ["Either date or duration is passed as null "]
+
+        assert messages(sample(type: "WAIT", input_parameters: %{"duration" => text})) == expected,
+               inspect(text)
+      end
+    end
+
     test "type violations of nested tasks carry the task's path" do
       fork =
         sample(
@@ -280,5 +309,11 @@ defmodule Archon.Domain.TaskTypeConstraintTest do
                    "subWorkflowParam field is required for taskType: SUB_WORKFLOW taskName: encode"}
                 ]}
     end
+  end
+
+  defp words(_alphabet, 0), do: [""]
+
+  defp words(alphabet, length) do
+    for prefix <- words(alphabet, length - 1), char <- alphabet, do: prefix <> char
   end
 end

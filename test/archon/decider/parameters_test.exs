@@ -532,8 +532,11 @@ defmodule Archon.Decider.ParametersTest do
 
   describe "beyond the upstream tests" do
     test "a malformed path resolves to nil instead of raising" do
-      assert Parameters.replace(%{"v" => "${a['\\uZZZZ']}", "w" => "x${a[}"}, %{"a" => 1}) == %{
+      input = %{"v" => "${a['\\uZZZZ']}", "u" => "${a['\\u-001']}", "w" => "x${a[}"}
+
+      assert Parameters.replace(input, %{"a" => 1}) == %{
                "v" => nil,
+               "u" => nil,
                "w" => "xnull"
              }
     end

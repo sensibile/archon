@@ -126,10 +126,9 @@ defmodule Archon.Decider.JsonPath do
   defp unescape(<<char::utf8, rest::binary>>, acc), do: unescape(rest, [<<char::utf8>> | acc])
 
   defp hex(digits) do
-    case Integer.parse(digits, 16) do
-      {code, ""} when byte_size(digits) == 4 -> {:ok, code}
-      _other -> :error
-    end
+    if Regex.match?(~r/\A[0-9a-fA-F]{4}\z/, digits),
+      do: {:ok, String.to_integer(digits, 16)},
+      else: :error
   end
 
   defp code_point(high, <<"\\u", hex::binary-size(4), rest::binary>>)
