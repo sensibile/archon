@@ -168,7 +168,9 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
 
 `WorkflowServer`는 `Step.run`을 부르고, `pre`를 순서대로 실행하고, `Commit`을 저장소에 쓰고(write-through), 그다음
 `post`를 순서대로 실행한 뒤 `reply`로 응답한다. `pre`가 하나라도 실패하면 아무것도 Commit하지 않고 결정 1의 예외 격리
-규칙으로 처리한다. JOIN 평가처럼 한 이벤트가 이어서 일으키는 일은 같은 `Step.run` 안에서 끝낸다. 자기 자신에게
+규칙으로 처리한다. post Effect의 결과가 상태를 바꿔야 하면(지금은 하위 워크플로우 시작뿐, 결정 5) `WorkflowServer`가 같은
+메시지 처리 안에서 그 결과를 이벤트로 `Step.run`에 다시 넣고 같은 순서(pre → Commit → post)를 한 번 더 돈 뒤 응답한다.
+이 되먹임 횟수에도 결정 4의 반복 상한이 적용된다. JOIN 평가처럼 한 이벤트가 이어서 일으키는 일은 같은 `Step.run` 안에서 끝낸다. 자기 자신에게
 메시지를 보내 나중에 처리하지 않으므로, 응답을 받은 호출자가 읽는 저장소 상태에 그 결과가 이미 들어 있다.
 
 Effect를 실행하다 프로세스가 죽거나 Effect가 실패하면 다음 규칙으로 메운다.
@@ -274,7 +276,8 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
 - **시작 결과 기록.** 자식 시작은 부모 Commit 뒤의 `post` Effect이므로 그 결과(실제 자식 ID와 상태, 또는 오류)는 같은
   메시지 처리 안에서 `{:sub_workflow_started, task_id, result}` 이벤트로 `Step.run`에 다시 넣어 두 번째 Commit으로 저장한
   뒤 응답한다. 저장 내용은 upstream `attachToSubWorkflow`와 같다: `subWorkflowId`와 출력 `subWorkflowId`(무작위 ID로 다시
-  시작했으면 그 ID), `reasonForIncompletion`·`subWorkflowLaunchError` 지우기, 자식 상태에 따른 태스크 상태(`updateTaskStatus`).
+  시작했으면 그 ID), `reasonForIncompletion`·`subWorkflowLaunchError` 지우기, 자식 상태에 따른 태스크 상태(`updateTaskStatus`). 그 뒤 태스크가 `SCHEDULED`가 아니면 decide한다(upstream
+  `AsyncSystemTaskExecutor`가 `start` 뒤에 하는 일. 이미 끝난 자식에 붙어 태스크가 끝나는 경우가 있다).
   두 Commit 사이에 프로세스가 죽으면 태스크는 자식 ID 없는 `SCHEDULED`로 남고, 복구 검사가 같은 결정적 ID로 시작을 다시
   해서(멱등) 기존 자식에 붙는다.
 - **진행 반영.** 자식이 종료 상태가 되면 자식 프로세스가 부모에게 `{:child_changed, task_id, child}`를 `cast`한다.
