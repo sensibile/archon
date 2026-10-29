@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk test-gap"
+  short_description: "Coverage-located test gaps, judged against requirements; daily fault-checked tests"
+  default_prompt: "Use $taeguk-test-gap for today's reinforce run."

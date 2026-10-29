@@ -1,6 +1,6 @@
 # Review prompts
 
-Start the prompt file with the target, then one focus below (cleanup necessity is combined with cross review), then the request summary, approved requirement IDs, plan version and any area the assigner named. Keep it to what the reviewer needs; do not paste secrets.
+Start the prompt file with the target, then one focus below (cleanup necessity and test adequacy are combined with cross review), then the request summary, approved requirement IDs, plan version and any area the assigner named. Keep it to what the reviewer needs; do not paste secrets.
 
 ## Target
 
@@ -46,4 +46,19 @@ For each item, answer whether it is needed now: needed, not needed, or not
 enough evidence, with the reason. Mark any item that changes behavior, a
 contract, a public interface, dependencies or CI workflows as not cleanup.
 Do not suggest further cleanup beyond the listed items. Do not modify files.
+```
+
+## Test adequacy
+
+Use with the cross review focus for `$taeguk-test-gap` reinforce runs.
+
+```text
+This change adds tests, each listed below with the gap it closes, the
+requirement or contract it cites as the expected value, and the fault that
+makes it fail. For each test, answer whether it is needed now: needed, not
+needed, or not enough evidence, with the reason. Mark a test as not needed
+when its expected value comes from the current implementation rather than the
+cited source, when it would still pass with the cited behavior broken, or when
+it changes product code. Do not suggest further tests beyond the listed ones.
+Do not modify files.
 ```

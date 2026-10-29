@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "source_version": "9119a54c4ead760e8620df57765dc6b8799ab478",
-  "link_pin": "9119a54c4ead760e8620df57765dc6b8799ab478",
+  "source_version": "c6b42fb1ced01249d24a8134c5fc0510dd5c3489",
+  "link_pin": "c6b42fb1ced01249d24a8134c5fc0510dd5c3489",
   "files": {
     ".codex/agents/taeguk_codex_cross_reviewer.toml": "fa65d5f2aa89deb504b05df1c7676faa1fb1278b4848f140b797abc4ec965845",
     ".codex/agents/taeguk_codex_security_reviewer.toml": "d69b1c43e1704c611ad5813d1a330a182cb32bd2c0ccb8a16b9ecb619082368b",
@@ -17,8 +17,8 @@
     ".codex/agents/taeguk_verifier.toml": "559bc532fd5aa005369928fd10150ee83b571028083dfa96208697047a0437de",
     ".agents/skills/taeguk-codex-local-review/SKILL.md": "c29db42913ef775922c3a377502a67702604d7f324c756a124f4a4e9c206fe86",
     ".agents/skills/taeguk-codex-local-review/agents/openai.yaml": "a6175d8bfdfe516a4894c247cef5352bfdd9b828f494d4ad2f72b1f2a5b8c881",
-    ".agents/skills/taeguk-codex-local-review/references/review-prompts.md": "3542390151bb5518eb8fbc19a2450b5023684934aabda8c0a1508da26c3c2847",
-    ".agents/skills/taeguk-daily-cleanup/SKILL.md": "d6ab84ea153659b5dda7dbd6b06e1c0b989a23d8bb38b67083cebba1951e5db8",
+    ".agents/skills/taeguk-codex-local-review/references/review-prompts.md": "495b5590fbbb8c9a05ff22c9afc4f61bb43372579cbfc8e4b0db0386e3b7492c",
+    ".agents/skills/taeguk-daily-cleanup/SKILL.md": "35aba0c49875198c93039d0a25225810568b30a9db5c7a56a891836e1b8d447b",
     ".agents/skills/taeguk-daily-cleanup/agents/openai.yaml": "0825e18dce1074ac0b0318edbaee8f8a1ad76f15ffddfb922fbbe75bd5b48c47",
     ".agents/skills/taeguk-implement-small-change/SKILL.md": "8a9d313ac989b6f742faea1519bf3e43352b7958cb11ac25b8103133da3026d9",
     ".agents/skills/taeguk-implement-small-change/agents/openai.yaml": "87f03e509d9562766420dda6fb417abab4e795aec780424dd4be0eabaeaa4701",
@@ -47,6 +47,8 @@
     ".agents/skills/taeguk-self-improve/SKILL.md": "93f2756343c391fd2bab4f06eab77dbeceb6f5f1061d01e064bade2ccd89224c",
     ".agents/skills/taeguk-self-improve/agents/openai.yaml": "591922d43c6213fdad6a793c6381ec0b849bfa67258085d6f09719610c62512c",
     ".agents/skills/taeguk-self-improve/references/cycle.md": "74bb3bba93fd949a681dd7070c677b27dee6daa63233abb26c8660a8cba2393a",
+    ".agents/skills/taeguk-test-gap/SKILL.md": "02e0a0e3b4e23150732ec378ffb1e67b190625bf0e593edd155c2a4d320a724c",
+    ".agents/skills/taeguk-test-gap/agents/openai.yaml": "9becd077c3fc0e7dfba2a8b74cfdecae9ff600f1bf3cd9e12cc6bfcf9b463ebf",
     ".agents/skills/taeguk-verify-delivery-effect/SKILL.md": "357bdce83e38c6836859a19ef7d842cfc790cc31d63d11b82d98898ed6d70c2b",
     ".agents/skills/taeguk-verify-delivery-effect/agents/openai.yaml": "417789d2b3f45cd76a9224cc328634463410b59a46b8e91ac41dc23693045b30",
     ".agents/skills/taeguk-verify-delivery-effect/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
@@ -59,6 +61,6 @@
     ".agents/skills/taeguk-work-contract/references/completion-review.md": "32529530df205125b022fe9d9b12cbf10ef7c631d288804cae6a306b40a7f4cd",
     ".agents/skills/taeguk-work-contract/references/evidence-packet.md": "3bd056a442f254dbb50b6d65301666e84df1d54f38abc1c3218b0002c713353f",
     ".agents/skills/taeguk-work-contract/references/intent-requirement-records.md": "aa43bb20c9e4ec59ad2580507090c5ff5d266cea4abe6bceb4c04f96b23af3e5",
-    ".agents/skills/taeguk-work-contract/references/phases.md": "ae7c57811603c7a7616d3b57804cb35c2a517938cbf54c1eccfe3536998d7adc"
+    ".agents/skills/taeguk-work-contract/references/phases.md": "e5b36ddb5b055aba93a3f7e56c9796ae08912b1e0bbb51e122ff1ff2a525726f"
   }
 }
