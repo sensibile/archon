@@ -1,7 +1,7 @@
 # ADR 0018: Phase 3 OTP 런타임 설계
 
 - 상태: 제안
-- 날짜: 2026-10-30
+- 날짜: 2026-10-30, 갱신 2026-10-30(조각 3b: 결정 2의 이벤트·Env·Effect 목록, 결정 8 (a)의 출력)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 
 ## 맥락
@@ -169,9 +169,16 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
 - `Event`는 프로세스가 받은 일이다: `{:start, input}`, `{:poll, task_id, worker_id}`, `{:update, TaskResult}`,
   `:wake`(타이머), `{:child_changed, task_id, child}`, `{:terminate, reason}`, `{:cancel_by_parent, reason}`·`{:sub_workflow_started, task_id, result}`(결정 5), 복구 검사 `:recover`(활성화 직후와 예외 격리 뒤.
   상태를 바꾸지 않은 `:wake`도 같은 검사를 한다), 그리고 결정 9의 생명주기 요청.
+  (3b 갱신) 하위 워크플로우의 멱등 시작은 `{:start_idempotent, workflow}`로 따로 둔다. 기록을 만들기만 하고 decide하지 않으며,
+  기록이 있으면 결정 5의 소유자 확인 결과로 답한다. 첫 decide는 이어서 보내는 `:wake`가 한다. 실패 워크플로우 시작이
+  실패한 결과는 `{:failure_workflow_started, {:error, reason}}`로 되먹인다(결정 8 (a)). `{:start, workflow}`·`{:start_idempotent, workflow}`의
+  `workflow`는 호출자가 만든 새 인스턴스(upstream `createWorkflowModel`)다.
 - `Env`는 바깥 값이다: `now`, `new_id`, `jitter`, `evaluate_script`, 태스크 정의, 최신 워크플로우 버전, 도메인별
   마지막 poll 시각(`getActiveDomain`용), 태스크 정의별 진행 중 개수(동시 실행 한도용), 큐에 메시지가 있는지(복구용),
   설정값. Decider `Context`는 `Env`에서 만든다. `WorkflowServer`가 이벤트마다 저장소·큐·메타데이터를 읽어 채운다.
+  (3b 갱신) `Env.workflows`는 `Step`이 읽는 다른 워크플로우(진행 중 SUB_WORKFLOW의 자식, 부모, 실패 워크플로우)를 ID로
+  담는다. 값이 `nil`이면 저장소에 없다는 뜻이고, 키가 없으면 읽지 않았다는 뜻이라 그 값이 필요한 검사를 건너뛴다. 3e가
+  자식을 읽어 채우면 `:wake`·`:recover`의 자식 반영(결정 5의 30초 재평가)이 동작한다.
 - `reply`는 호출자에게 돌려줄 값이다: 시작한 workflowId, poll로 내줄 태스크(건너뛰면 `nil`), 갱신한 태스크,
   `{:error, :conflict | :not_found | ...}`.
 - 반환하는 `Workflow`는 **저장한 뒤의 상태**다. upstream이 메모리에서만 바꾸고 저장하지 않은 값은 넣지 않는다
@@ -185,6 +192,9 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
 - `Effect`는 바깥에 하는 일이다: 태스크 큐 push(지연 포함)·remove·postpone·ack, 하위 워크플로우 시작·종료 요청,
   부모 알림, 실패 워크플로우 시작, 다음 재평가 타이머(`{:wake_at, ms}`). 대부분은 저장 뒤에 실행하는 `post`이고,
   `pre`는 Commit 전에 끝나야 하는 일이다. 지금 `pre`에 들어가는 것은 종료 처리의 자식 종료 요청뿐이다(결정 8).
+  (3b 갱신) decide하지 않은 이벤트가 타이머를 당기기만 하는 일(결정 6)은 `{:wake_before, ms}`다. ack는 poll한 묶음 전체를
+  아는 `Archon.Runtime.Tasks`(3d)가 하므로 `Step`의 Effect가 아니다. poll한 태스크가 워크플로우에 없으면 `Step`은
+  `{:error, :not_found}`로 답하고, 그 큐 메시지는 호출자가 지운다.
 
 `WorkflowServer`는 `Step.run`을 부르고, `pre`를 순서대로 실행하고, `Commit`을 저장소에 쓰고(write-through), 그다음
 `post`를 순서대로 실행한 뒤 `reply`로 응답한다. `pre`가 하나라도 실패하면 아무것도 Commit하지 않고 결정 1의 예외 격리
@@ -416,7 +426,9 @@ upstream의 두 종료 경로를 그대로 나눈다. 둘 다 순서는 "남은 
 
 - 워크플로우가 아직 종료 상태가 아니면 `termination.status`로 바꾼다. `termination.task`가 있고 `failed_task_id`가
   비어 있으면 그 ID를 넣고 그 태스크를 저장한다.
-- 출력은 `outcome.workflow.output`(Decider가 채운 값)을 쓴다. 실패 태스크(`FAILED`, `FAILED_WITH_TERMINAL_ERROR`)의
+- 출력은 (b)와 같이 `Archon.Decider.Retry.update_output/2`로 다시 계산한다. upstream `terminateWorkflow`가 Decider가 채운
+  값 위에 `updateWorkflowOutput(workflow, null)`을 다시 부르기 때문이다(3b 갱신. 처음에는 `outcome.workflow.output`을
+  쓴다고 적었다). 실패 태스크(`FAILED`, `FAILED_WITH_TERMINAL_ERROR`)의
   참조명·정의명을 `failedReferenceTaskNames`·`failedTaskNames`에 더하고, `reasonForIncompletion`에 사유를 넣는다.
 - 남은 태스크를 `CANCELED`로 바꾸고 시스템 태스크는 `cancel`한다(SUB_WORKFLOW는 결정 5). 모든 태스크를 큐에서 지운다.
   부모가 있으면 결정 5로 알린다.
