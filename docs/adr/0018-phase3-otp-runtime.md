@@ -121,7 +121,7 @@ Archon.Supervisor (one_for_one)
   결정 5의 규칙(소유자 확인 뒤 기존 기록을 쓰거나 새 무작위 ID로 다시 시작)으로 답하고, 수명은 아래 일반 규칙을 따른다
   (실행 중이면 끝나지 않는다). 기록이 없는 상태에서 `{:start}`의 생성이 실패한(conflict 포함) 프로세스는 오류로 답하고 바로 끝난다.
   `{:start}` 처리 중 예외는 예외 격리 대신 upstream `startWorkflow`처럼 처리한다. Commit 전이면 오류로 답하고 끝나고,
-  기록을 만든 뒤(첫 decide나 Effect 중)이면 `Store.remove_workflow`로 워크플로우와 태스크를 지우고 `WorkflowServer`가 이미
+  기록을 만든 뒤(첫 decide나 Effect 중)이면 `Store.remove_workflow`로 워크플로우와 태스크를 먼저 지우고 그다음 `WorkflowServer`가 이미
   넣은 태스크마다 `Queue.remove`를 한 뒤(둘을 합친 것이 upstream `ExecutionDAOFacade.removeWorkflow`) 오류로 답하고 끝난다.
   최상위 `{:start}`는 하위 워크플로우 시작 Effect를 응답 뒤 `{:continue, ...}`로 미루므로(upstream에서도 SUB_WORKFLOW는
   `startWorkflow`가 답한 뒤 시스템 태스크 큐에서 시작된다) 지운 부모의 자식은 생기지 않는다. 호출자가 ID를 받지 못한 워크플로우가 계속 실행되지 않게 한다. 지우기
@@ -190,7 +190,9 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
 규칙으로 처리한다. post Effect의 결과가 상태를 바꿔야 하면(지금은 하위 워크플로우 시작뿐, 결정 5) `WorkflowServer`가 같은
 메시지 처리 안에서 그 결과를 이벤트로 `Step.run`에 다시 넣고 같은 순서(pre → Commit → post)를 한 번 더 돈 뒤 응답한다.
 이 되먹임 횟수에도 결정 4의 반복 상한이 적용된다. JOIN 평가처럼 한 이벤트가 이어서 일으키는 일은 같은 `Step.run` 안에서 끝낸다. 자기 자신에게
-메시지를 보내 나중에 처리하지 않으므로, 응답을 받은 호출자가 읽는 저장소 상태에 그 결과가 이미 들어 있다.
+메시지를 보내 나중에 처리하지 않으므로, 응답을 받은 호출자가 읽는 저장소 상태에 그 결과가 이미 들어 있다. 예외는 최상위 `{:start}`의 하위 워크플로우 시작으로, 응답 뒤
+`{:continue, ...}`에서 한다(결정 1). 호출자가 이미 ID를 받았으므로 그 continue의 예외는 기록 삭제가 아니라 일반 예외 격리를
+따른다.
 
 Effect를 실행하다 프로세스가 죽거나 Effect가 실패하면 다음 규칙으로 메운다.
 
@@ -201,7 +203,7 @@ Effect를 실행하다 프로세스가 죽거나 Effect가 실패하면 다음 �
   저장되었으면 자식 종료는 이미 끝났다. 완료 경로는 upstream처럼 완료 뒤에 남은 태스크를 취소하지만, 취소한 태스크
   상태(`CANCELED`)는 완료와 같은 Commit에 넣고 자식 종료 요청만 `post`로 보낸다. 그래서 Commit 뒤 자식 종료 전에 죽어도
   부모 태스크는 이미 `CANCELED`이고, 자식의 복구 검사는 부모가 종료 상태이고 자기 부모 태스크가 `CANCELED`이면 스스로
-  종료한다. 부모 기록이 저장소에 없을 때도(시작 실패로 지워진 경우) 스스로 종료한다.
+  종료한다. `parentWorkflowId`가 있는데 그 기록이 저장소에 없을 때도(시작 실패로 지워진 경우) 스스로 종료한다.
 - 실패 워크플로우 시작 Effect: 결정 8 (a).
 - 부모 알림 Effect: 부모의 30초 재평가(결정 5)가 저장소에서 자식을 읽어 메운다.
 
@@ -389,7 +391,7 @@ upstream의 decider 큐와 스위퍼, 시스템 태스크 큐의 지연 재평�
     넣고(지연은 저장된 `updateTime`(0이면 `scheduledTime`)에 `callbackAfterMs`, 없으면 `callbackAfterSeconds`를 더한
     시각까지 남은 시간. 워커가 `IN_PROGRESS`와 `callbackAfterSeconds`로 미룬 태스크가 일찍 다시 나가지 않게 한다. upstream
     스위퍼는 `callbackAfterSeconds` 전체를 다시 걸지만 Archon은 남은 시간만 건다), 진행 중 SUB_WORKFLOW의 자식이 이미 끝났으면 반영하고, 부모가 종료 상태이고 자기 부모 태스크가 `CANCELED`이면
-    (또는 부모 기록이 없으면) 스스로 종료하고, decide한 뒤 타이머를 건다. 실행 중인데 끝나지 않은 태스크가 없으면 upstream처럼 마지막 태스크를
+    (또는 `parentWorkflowId`가 있는데 그 기록이 없으면) 스스로 종료하고, decide한 뒤 타이머를 건다. 실행 중인데 끝나지 않은 태스크가 없으면 upstream처럼 마지막 태스크를
     미실행으로 되돌려 다시 decide한다.
   - `Archon.Runtime.Recovery`는 애플리케이션 시작 때와 `rest_for_one`으로 다시 뜰 때 `Store.running_workflow_ids/0`의
     워크플로우를 모두 활성화한다. 워크플로우가 많을 때의 지연 활성화(저장소의 다음 재평가 시각으로 필요할 때만 띄우기)는
