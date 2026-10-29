@@ -61,4 +61,13 @@ defmodule Archon.Runtime.QueueTest do
     Memory.push(ctx.server, "wait", "b", 0, 0)
     assert Elixir.Task.await(second, 6_000) == ["b"]
   end
+
+  test "a waiting pop gets a message that became visible before a newer pop", ctx do
+    Memory.push(ctx.server, "wait", "a", 0, 60_000)
+    first = Elixir.Task.async(fn -> Memory.pop(ctx.server, "wait", 1, 5_000) end)
+    Process.sleep(50)
+    ctx.advance.(60_000)
+    assert Memory.pop(ctx.server, "wait", 1, 0) == []
+    assert Elixir.Task.await(first, 6_000) == ["a"]
+  end
 end

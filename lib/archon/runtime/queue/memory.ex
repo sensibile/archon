@@ -133,6 +133,9 @@ defmodule Archon.Runtime.Queue.Memory do
   end
 
   def handle_call({:pop, queue, count, timeout_ms}, {pid, _tag} = from, state) do
+    # Messages that became visible before their tick was handled go to earlier waiting pops first.
+    state = serve(state, queue)
+
     case take(state, queue, count) do
       {[], state} when timeout_ms > 0 ->
         ref = make_ref()
