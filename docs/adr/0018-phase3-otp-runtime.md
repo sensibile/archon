@@ -121,10 +121,11 @@ Archon.Supervisor (one_for_one)
   결정 5의 규칙(소유자 확인 뒤 기존 기록을 쓰거나 새 무작위 ID로 다시 시작)으로 답하고, 수명은 아래 일반 규칙을 따른다
   (실행 중이면 끝나지 않는다). 기록이 없는 상태에서 `{:start}`의 생성이 실패한(conflict 포함) 프로세스는 오류로 답하고 바로 끝난다.
   `{:start}` 처리 중 예외는 예외 격리 대신 upstream `startWorkflow`처럼 처리한다. Commit 전이면 오류로 답하고 끝나고,
-  기록을 만든 뒤(첫 decide나 Effect 중)이면 `Store.remove_workflow`로 워크플로우와 태스크를 먼저 지우고 그다음 `WorkflowServer`가 이미
+  기록을 만든 뒤(첫 decide나 큐가 아닌 Effect 중)이면 `Store.remove_workflow`로 워크플로우와 태스크를 먼저 지우고 그다음 `WorkflowServer`가 이미
   넣은 태스크마다 `Queue.remove`를 한 뒤(둘을 합친 것이 upstream `ExecutionDAOFacade.removeWorkflow`) 오류로 답하고 끝난다.
   최상위 `{:start}`는 하위 워크플로우 시작 Effect를 응답 뒤 `{:continue, ...}`로 미루므로(upstream에서도 SUB_WORKFLOW는
-  `startWorkflow`가 답한 뒤 시스템 태스크 큐에서 시작된다) 지운 부모의 자식은 생기지 않는다. 호출자가 ID를 받지 못한 워크플로우가 계속 실행되지 않게 한다. 지우기
+  `startWorkflow`가 답한 뒤 시스템 태스크 큐에서 시작된다) 지운 부모의 자식은 생기지 않는다. 워커 큐 push 실패는 시작
+  실패가 아니다. upstream `scheduleTask`처럼 기록하고 넘어가며, 결정 2의 복구 검사가 다시 넣는다. 호출자가 ID를 받지 못한 워크플로우가 계속 실행되지 않게 한다. 지우기
   전에 프로세스가 죽으면 기록이 남아 복구된다(upstream도 서버가 그 사이에 죽으면 같다). 하위 워크플로우의 멱등 시작은
   기록을 만든 뒤 바로 답하므로 이 규칙이 아니라 일반 예외 격리를 따른다.
 - **호출이 프로세스 종료와 겹칠 때.** 종료 직후 `:normal`로 끝나는 프로세스나 레지스트리에 남은 죽은 pid로 보낸
@@ -263,7 +264,8 @@ behaviour마다 공통 계약 시험(결정 10)을 두어 Phase 4 구현이 같�
    (`adjustStateIfSubWorkflowChanged`, 결정 9의 재시도와 함께 구현).
 3. `Decider.decide/2`를 부른다.
    - `complete?`면 `endExecution`: `terminate_task`가 있으면 그 입력의 `terminationStatus`로 `FAILED`·`TERMINATED`면
-     결정 8 (a)로 종료, 아니면 완료. 완료는 `outcome.workflow.output`, `COMPLETED`, `endTime`, 실패 태스크 이름 집합을
+     결정 8 (a)로 종료, 아니면 완료. TERMINATE 태스크로 완료하면 `reasonForIncompletion`에 그 입력의 `terminationReason`을,
+     비어 있으면 upstream 문구 `Workflow is <terminationStatus> by TERMINATE task: <taskId>`를 넣는다(결정 8 (a)의 사유도 같다). 완료는 `outcome.workflow.output`, `COMPLETED`, `endTime`, 실패 태스크 이름 집합을
      저장한다. 끝난 태스크(Decider가 `executed` 등을 바꾼 것)는 저장하지 않고, 끝나지 않은 태스크만 `CANCELED`로 바꿔
      같은 Commit에 넣는다(upstream `cancelNonTerminalTasks`). 자식 종료 요청은 `post`다.
    - `{:terminate, termination, outcome}`이면 결정 8 (a).
@@ -315,7 +317,10 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   활성 하위 워크플로우 규칙과 같은 간격).
 - **취소.** 부모가 종료되면 남은 SUB_WORKFLOW 태스크마다 자식 프로세스에 `{:cancel_by_parent, reason}`을 `call`한다
   (upstream `SubWorkflow.cancel`). 이 이벤트는 결정 8 (b)와 달리 자식 상태와 관계없이(`COMPLETED`여도) `TERMINATED`로
-  바꾸고, 사유는 upstream 문구 그대로이며, 실패 워크플로우를 띄우지 않는다. 이미 `TERMINATED`면 아무것도 하지 않는다. 자식은 부모를 동기 호출하지 않으므로 교착이 없다. 이 `call`의 타임아웃은 `:infinity`가 아니라
+  바꾸고, 사유는 upstream 문구 그대로이며, 실패 워크플로우를 띄우지 않는다. 이미 `TERMINATED`면 아무것도 하지 않는다.
+  자식이 아직 없으면(시작 지연 중이거나 시작이 일시적 오류로 실패한 경우) 활성화가 `:not_found`를 돌려주는데, 이것은 취소
+  성공으로 본다(upstream `SubWorkflow.cancel`도 자식이 없으면 그냥 돌아간다). 부모 태스크는 `CANCELED`가 되고 부모 종료는
+  막히지 않는다. 자식은 부모를 동기 호출하지 않으므로 교착이 없다. 이 `call`의 타임아웃은 `:infinity`가 아니라
   설정값(기본 30초)이고, 시간이 넘으면 결정 1의 예외 격리 규칙으로 부모 종료를 실패로 처리한다. Decider 종료(결정 8 (a))는 다음 decide에서
   같은 종료가 다시 나오므로 다시 시도되고, 종료 요청(결정 8 (b))은 호출자가 오류를 받고 끝난다(upstream도 같다).
 - **실패 워크플로우.** 결정 8 (a).
