@@ -680,6 +680,22 @@ defmodule Archon.DeciderTest do
       assert original.output_data == %{"result" => "stale"}
     end
 
+    test "retry input resolves against the failed task without its subWorkflowId" do
+      task =
+        failed("t1", reference_task_name: "t", input_data: %{"subWorkflowId" => "stale-child"})
+
+      workflow = %{
+        default_workflow()
+        | workflow_definition: %WorkflowDef{schema_version: 2},
+          tasks: [task]
+      }
+
+      wt = %WorkflowTask{input_parameters: %{"previous" => "${t.input.subWorkflowId}"}}
+
+      assert {:retry, retried, _original} = Retry.retry(%TaskDef{}, wt, task, workflow, context())
+      assert Map.fetch!(retried.input_data, "previous") == nil
+    end
+
     test "a terminating retry sets the workflow output from the failed task" do
       workflow = %{default_workflow() | tasks: [%Task{output_data: %{"last" => 1}}]}
       task = failed("t1", output_data: %{"failed" => true})

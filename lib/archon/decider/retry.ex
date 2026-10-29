@@ -146,6 +146,12 @@ defmodule Archon.Decider.Retry do
     rescheduled =
       case {workflow_task, workflow.workflow_definition} do
         {%WorkflowTask{} = wt, %WorkflowDef{schema_version: version}} when version > 1 ->
+          # Upstream resolves against the workflow that holds the (mutated) original task.
+          workflow = %{
+            workflow
+            | tasks: Enum.map(workflow.tasks, &if(&1 == task, do: original, else: &1))
+          }
+
           resolved = Parameters.task_input(wt.input_parameters, workflow, task_id, task_def)
           %{rescheduled | input_data: Map.merge(rescheduled.input_data, resolved)}
 
