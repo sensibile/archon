@@ -53,6 +53,10 @@ check="$(mktemp)" &&
 echo "path check exit: $?"
 ```
 
+- 태극 데일리 정리·테스트 보강 스킬의 "Scope check"는 이 경로 검사다(ADR 0016 결정 5). 스킬에 적힌 태극의
+  `scripts/check_worker_scope.py`는 archon에 없으므로 쓰지 않는다. 스킬이 auto-merge 조건으로 말하는
+  "exit 0 with status PASS"는 이 검사의 `path check exit` 0이다. 스킬이 자체 리뷰를 "project's PR flow step 2"로
+  가리키는 곳은 archon에서는 AGENTS.md "PR과 머지" 1단계(자체 리뷰 반복 후 Codex 리뷰)다.
 - 출력된 `path check exit` 값이 0일 때만 통과다. fetch나 스크립트 꺼내기가 실패해도 0이 아니게 묶여 있다. 스크립트의
   종료 코드 1은 허용 밖 변경이 있다는 뜻이고 그 목록을 출력한다. 2는 사용법 오류나 git 오류다.
 - 스크립트는 저장소 루트에서 경로를 `git diff -z`로 그대로 읽고, 변경을 숨기는 git 설정(`diff.relative`,

@@ -3,8 +3,9 @@
 - 상태: 제안
 - 날짜: 2026-10-29
 - 태극 원본: sensibile/taeguk `f71224ac2e9c93db2b3f2004767e1fcce3579121`
-- 대체: [ADR 0011](0011-local-review-auto-merge.md) 결정 3의 리뷰 설정 "`gpt-6-astra`, `medium` effort". ADR 0011의
-  나머지 결정은 그대로 유효하다.
+- 대체: [ADR 0011](0011-local-review-auto-merge.md) 결정 3의 리뷰 순서("PR 누적 범위를 태극
+  `taeguk-codex-local-review` 절차로 리뷰한다" 앞에 자체 리뷰 반복을 더함)와 리뷰 설정 "`gpt-6-astra`, `medium`
+  effort". ADR 0011의 나머지 결정은 그대로 유효하다.
 
 ## 맥락
 
@@ -29,18 +30,27 @@ archon에 설치된 번들은 `c6b42fb`(ADR 0013)다. 그 사이 태극에는 #3
    서브에이전트)가 PR 누적 범위를 VER-005 종료 조건까지 반복 리뷰한다. 그 head에 대해 Codex 교차 리뷰(항상)와
    보안 리뷰(실행 동작에 영향을 주는 변경)를 돌린다. Codex 지적으로 head가 바뀌면 자체 리뷰부터 다시 한다.
    절차는 AGENTS.md "PR과 머지"에 둔다.
-4. **새로 들어온 워커 스킬은 archon에서 돌리지 않는다.** 이번 번들에 들어온 `taeguk-validation-health`와
-   `taeguk-doc-drift`는 설치 프로젝트에서는 그 프로젝트가 BOSS 승인(예약·보고 위치)을 기록해야 돈다.
-   `taeguk-doc-drift`의 스캔 스크립트는 번들에 들어 있지 않다. archon은 승인을 기록하지 않았으므로 두 워커를 예약하지 않는다.
+4. **새로 들어온 워커 스킬은 archon에서 돌리지 않는다.**
+   - `taeguk-validation-health`는 설치 프로젝트가 BOSS 승인(예약·보고 위치)을 기록해야 돈다. archon은 기록하지 않았다.
+   - `taeguk-doc-drift`는 태극 저장소에서만 돈다. 설치 프로젝트 예외가 없고, 스캔 스크립트도 번들에 들어 있지 않다.
+5. **워커의 범위 검사(#34)는 archon의 경로 검사로 연결한다.** #34는 데일리 정리·테스트 보강 스킬에
+   "Scope check" 절을 넣었다. auto-merge는 범위 검사가 "exit 0 with status PASS"일 때만 켜고, 설치 프로젝트는
+   자기 전달 문서가 지정한 검사를 쓰되 지정이 없으면 auto-merge 없이 PR을 열고 보고한다. 또 두 스킬은 자체 리뷰를
+   "project's PR flow step 2"로 가리킨다. archon에서는 [운영 문서](../operations.md)에 다음을 적는다.
+   - 스킬의 Scope check는 `scripts/worker_path_check.sh` 경로 검사다. 태극의 `scripts/check_worker_scope.py`는
+     archon에 없으므로 쓰지 않는다. 이 검사의 종료 코드 0이 PASS다.
+   - 자체 리뷰 루프는 AGENTS.md "PR과 머지" 1단계다.
 
 ## 대안
 
 - **번들 갱신 없이 AGENTS.md만 고치기:** 스킬 명령의 모델 설정은 번들 안에 있고, 설치본을 직접 고치지 않는
   원칙(ADR 0007)과 맞지 않는다.
-- **이번 변경(#36)만 골라 설치:** 설치기는 원본 커밋 하나를 통째로 설치한다. #31~#35는 태극 쪽 워커·도구 변경이고,
-  archon에서는 결정 4대로 새 워커를 돌리지 않으므로 동작에 영향이 없다.
+- **이번 변경(#36)만 골라 설치:** 설치기는 원본 커밋 하나를 통째로 설치한다. #31·#33은 결정 4대로 archon에서 돌지
+  않는 새 워커이고, #35는 `taeguk graph` 보조 안내다. #34는 archon 워커의 auto-merge 조건을 바꾸므로 결정 5로 연결한다.
 
 ## 결과
 
-- Codex가 archon 세션에서 새 모델 설정을 실제로 따르는지는 이 PR의 로컬 리뷰 실행 로그로만 확인했다.
-- 실행 중인 데일리 정리·테스트 보강 예약 작업은 다음 실행부터 새 스킬 절차(자체 리뷰 후 Codex)를 따른다.
+- Codex가 archon 세션에서 새 모델 설정을 실제로 따르는지는 이 PR의 로컬 리뷰 실행 로그(모델·effort)로 확인한다.
+  결과는 PR 본문에 적는다.
+- 데일리 정리·테스트 보강 예약 작업은 다음 실행부터 새 스킬을 읽는다. 결정 5의 연결대로 범위 검사를 PASS로 보고
+  auto-merge를 켜는지는 관측하지 않았다. 다음 실행 보고(`.taeguk/daily-cleanup/`, `.taeguk/test-gap/`)로 확인한다.
