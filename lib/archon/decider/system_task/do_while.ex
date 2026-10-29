@@ -25,7 +25,8 @@ defmodule Archon.Decider.SystemTask.DoWhile do
     * not all terminal, or a successor inside the body not scheduled yet - nothing changes.
     * all done - the iteration's outputs are stored under its number and `loopCondition` is
       evaluated with the context's `evaluate_script`. True starts the next iteration, false
-      completes the task, and a script error fails it with `FAILED_WITH_TERMINAL_ERROR`.
+      completes the task, and a script error, or a termination while mapping the next iteration,
+      fails it with `FAILED_WITH_TERMINAL_ERROR`.
 
   The result is a `t:t/0`. `changed?` is upstream's return value. `tasks_to_be_scheduled` are the
   tasks of the next iteration (upstream `WorkflowExecutorOps#scheduleNextIteration`: the first
@@ -57,8 +58,9 @@ defmodule Archon.Decider.SystemTask.DoWhile do
   @int_max 2_147_483_647
 
   @doc """
-  Upstream `DoWhile#execute` of `task` in `workflow`. A termination comes from mapping the next
-  iteration, where upstream's `TerminateWorkflowException` ends the decide.
+  Upstream `DoWhile#execute` of `task` in `workflow`. A termination comes from mapping the first
+  iteration, where upstream's `TerminateWorkflowException` ends the decide. Mapping a later
+  iteration fails the loop task instead, as upstream catches it with the condition's errors.
   """
   @spec execute(Workflow.t(), Task.t(), Context.t()) :: {:ok, t()} | {:terminate, Termination.t()}
   def execute(%Workflow{} = workflow, %Task{task_type: "DO_WHILE"} = task, %Context{} = context) do
@@ -73,6 +75,7 @@ defmodule Archon.Decider.SystemTask.DoWhile do
       {:ok, changed(%{add_output(task, "iteration", 0) | status: :completed})}
     else
       task = add_output(%{task | iteration: 1}, "iteration", 1)
+      workflow = replace(workflow, task)
       next_iteration(workflow, inject_loop_variables(workflow, task), context, [])
     end
   end
@@ -104,23 +107,39 @@ defmodule Archon.Decider.SystemTask.DoWhile do
 
         case continue?(workflow, task, context) do
           {:ok, true} ->
-            task =
-              add_output(%{task | iteration: task.iteration + 1}, "iteration", task.iteration + 1)
-
-            next_iteration(workflow, inject_loop_variables(workflow, task), context, removed)
+            advance(workflow, task, context, removed)
 
           {:ok, false} ->
             {:ok, changed(%{task | status: :completed}, removed)}
 
           {:error, error} ->
-            reason =
-              "Unable to evaluate condition #{java(task.workflow_task.loop_condition)}, " <>
-                "exception #{Exception.message(error)}"
+            reason = condition_failure(task, Exception.message(error))
 
             {:ok, changed(failed(task, :failed_with_terminal_error, reason), removed)}
         end
     end
   end
+
+  # The next iteration after a true condition. Upstream maps it inside the try around the
+  # condition, so a termination while mapping fails the loop task like a condition error; only the
+  # first iteration (start/3) lets it end the decide.
+  defp advance(workflow, task, context, removed) do
+    task = add_output(%{task | iteration: task.iteration + 1}, "iteration", task.iteration + 1)
+    workflow = replace(workflow, task)
+    task = inject_loop_variables(workflow, task)
+
+    case next_iteration(workflow, task, context, removed) do
+      {:terminate, %Termination{reason: reason}} ->
+        failure = condition_failure(task, reason)
+        {:ok, changed(failed(task, :failed_with_terminal_error, failure), removed)}
+
+      result ->
+        result
+    end
+  end
+
+  defp condition_failure(%Task{workflow_task: wt}, message),
+    do: "Unable to evaluate condition #{java(wt.loop_condition)}, exception #{message}"
 
   # The body tasks of the current iteration, the latest retry of each reference name, in the
   # order their names first appear in the workflow.

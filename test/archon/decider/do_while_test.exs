@@ -402,6 +402,24 @@ defmodule Archon.Decider.DoWhileTest do
                DoWhile.execute(workflow([loop]), loop, context())
     end
 
+    test "a termination while mapping a later iteration fails the loop task instead" do
+      wt = %{
+        counter_wt("true")
+        | loop_over: [%WorkflowTask{name: "nope", task_reference_name: "x", type: "CUSTOM"}]
+      }
+
+      loop = loop_task(wt, 1, %{"iteration" => 1})
+      result = execute(workflow([loop, body_task("x", 1)]), loop)
+
+      assert {result.changed?, result.task.status, result.task.iteration} ==
+               {true, :failed_with_terminal_error, 2}
+
+      assert result.task.reason_for_incompletion =~
+               ~r/^Unable to evaluate condition true, exception Invalid task specified\. /
+
+      assert {result.task.output_data["iteration"], result.tasks_to_be_scheduled} == {2, []}
+    end
+
     test "an empty loopOver fails the task instead of looping forever" do
       wt = %{counter_wt("true") | loop_over: [nil]}
       loop = loop_task(wt, 0)

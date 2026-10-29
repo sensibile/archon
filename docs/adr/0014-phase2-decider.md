@@ -176,8 +176,11 @@ MVP 정의에서 쓰는 경로는 위 부분집합 안에 있다.
     `WorkflowExecutorOps#scheduleNextIteration`: 첫 `loopOver` 태스크를 루프 태스크의 `retryCount`로 매핑하고
     참조명에 `__<iteration>`을 붙인다)와, `keepLastN`이 더는 남기지 않는 반복의 본문 태스크 ID(upstream
     `removeIterations`가 저장소에서 지우는 것)를 담는다. 지울 태스크는 `changed?`와 상관없이 돌려준다. upstream도
-    `execute`가 `false`를 돌려주는 호출에서 지우기 때문이다. 다음 반복을 매핑하다 종료가 나면
+    `execute`가 `false`를 돌려주는 호출에서 지우기 때문이다. 첫 반복을 매핑하다 종료가 나면
     `{:terminate, termination}`을 돌려준다(upstream은 `TerminateWorkflowException`이 decide까지 올라간다).
+    두 번째 반복부터는 upstream이 조건 평가와 같은 `try`에서 매핑하고 예외를 잡으므로, 루프 태스크가
+    `FAILED_WITH_TERMINAL_ERROR`와 `Unable to evaluate condition <loopCondition>, exception <종료 문구>`로 끝나고
+    워크플로우는 종료되지 않는다.
   - 조건 평가와 다음 반복 매핑은 갱신한 루프 태스크(새 `iteration`, 출력, `loopIndex`·`loopItem`)를 워크플로우에
     넣은 뒤에 한다. upstream은 워크플로우 안의 같은 객체를 고치므로 `${loop.output.iteration}` 같은 입력이 새 값을
     본다.
@@ -263,7 +266,8 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
 - `javascript`·`graaljs`·`python` 평가기, DECISION `caseExpression`, DO_WHILE은 별도 ADR 전까지 동작하지
   않는다. DECISION `caseExpression`은 upstream에서 스크립트가 실패할 때와 같은 문구로 종료한다.
   (비고: [ADR 0015](0015-script-evaluator.md)로 `javascript`·`graaljs`·`caseExpression`은 동작한다. 그
-  평가기의 차이는 ADR 0015에 적는다. DO_WHILE은 2e에서 동작한다.)
+  평가기의 차이는 ADR 0015에 적는다. DO_WHILE은 2e에서 동작한다. `loopCondition` 평가 실패 문구의
+  `exception` 뒤 부분도 ADR 0015의 오류 문구이며 GraalJS `getMessage`와 본문이 다를 수 있다.)
 - DO_WHILE의 `keepLastN` 입력 파라미터가 Java `int`가 아니면(문자열, 실수, `int` 범위 밖 정수, `${...}` 표현식)
   upstream은 `(Integer)` 캐스트에서 `ClassCastException`을 던져 decide가 매번 실패하고 워크플로우가 멈춘다.
   `keepLastN`은 해석하지 않은 원래 입력 파라미터에서 읽기 때문에 표현식도 같다. Archon은 DO_WHILE 태스크를
