@@ -71,6 +71,7 @@ Decider가 이 필드를 읽는다(`TaskModel.firstScheduledTime`, `waitTimeout`
 
 `new_id`와 `jitter`는 Decider가 받는 입력 중 결정적이지 않은 값이다. 테스트에서는 결정적 생성기를 넣으므로
 같은 입력에 같은 결과가 나온다. "부수효과 없음"은 I/O·영속성·큐·프로세스 메시지가 없다는 뜻으로 쓴다.
+(비고: [ADR 0015](0015-script-evaluator.md) 결정 3이 주입받은 스크립트 평가 함수 호출을 이 정의의 예외로 둔다.)
 
 외부 payload 저장소는 [ADR 0001](0001-api-contract-scope.md)에서 Later로 분류했다. Archon은
 `externalOutputPayloadStoragePath`를 만들지 않으므로 Phase 2 Decider는 그 필드를 보지 않는다.
