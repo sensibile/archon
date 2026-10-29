@@ -147,8 +147,8 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
 ```
 
 - `Event`는 프로세스가 받은 일이다: `{:start, input}`, `{:poll, task_id, worker_id}`, `{:update, TaskResult}`,
-  `:wake`(타이머), `{:child_changed, task_id, child}`, `{:terminate, reason}`, 활성화 직후의 `:recover`, 그리고
-  결정 9의 생명주기 요청.
+  `:wake`(타이머), `{:child_changed, task_id, child}`, `{:terminate, reason}`, `{:cancel_by_parent, reason}`(결정 5), 복구 검사 `:recover`(활성화 직후와 예외 격리 뒤.
+  상태를 바꾸지 않은 `:wake`도 같은 검사를 한다), 그리고 결정 9의 생명주기 요청.
 - `Env`는 바깥 값이다: `now`, `new_id`, `jitter`, `evaluate_script`, 태스크 정의, 최신 워크플로우 버전, 도메인별
   마지막 poll 시각(`getActiveDomain`용), 태스크 정의별 진행 중 개수(동시 실행 한도용), 큐에 메시지가 있는지(복구용),
   설정값. Decider `Context`는 `Env`에서 만든다. `WorkflowServer`가 이벤트마다 저장소·큐·메타데이터를 읽어 채운다.
@@ -279,7 +279,8 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
 - **취소.** 부모가 종료되면 남은 SUB_WORKFLOW 태스크마다 자식 프로세스에 `{:cancel_by_parent, reason}`을 `call`한다
   (upstream `SubWorkflow.cancel`). 이 이벤트는 결정 8 (b)와 달리 자식 상태와 관계없이(`COMPLETED`여도) `TERMINATED`로
   바꾸고, 사유는 upstream 문구 그대로이며, 실패 워크플로우를 띄우지 않는다. 이미 `TERMINATED`면 아무것도 하지 않는다. 자식은 부모를 동기 호출하지 않으므로 교착이 없다. 이 `call`의 타임아웃은 `:infinity`가 아니라
-  설정값(기본 30초)이고, 시간이 넘으면 결정 1의 예외 격리 규칙으로 부모 종료를 실패로 처리해 다음 재평가에서 다시 한다.
+  설정값(기본 30초)이고, 시간이 넘으면 결정 1의 예외 격리 규칙으로 부모 종료를 실패로 처리한다. Decider 종료(결정 8 (a))는 다음 decide에서
+  같은 종료가 다시 나오므로 다시 시도되고, 종료 요청(결정 8 (b))은 호출자가 오류를 받고 끝난다(upstream도 같다).
 - **실패 워크플로우.** 결정 8 (a).
 
 ### 6. 타이머와 재평가
