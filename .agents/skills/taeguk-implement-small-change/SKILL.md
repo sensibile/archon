@@ -5,7 +5,7 @@ description: "Implement an agreed single-intent change with behavior preservatio
 
 # taeguk-implement-small-change
 
-Apply the repository worktree instructions. Preserve unrelated changes. Compare the smallest adequate fix with keeping current behavior. Write the relevant regression check and patch. Run checks on the exact artifact, including affected integration and failure boundaries. Return a patch/evidence packet. Do not expand to a framework or silently adjust criteria.
+Before the first edit, work in a dedicated worktree and task branch per DEV-003 (`.taeguk/rules/development.md` in installed projects, `docs/rules/development.md` in Taeguk); a project AGENTS.md worktree convention overrides its defaults. Preserve unrelated changes. Compare the smallest adequate fix with keeping current behavior. Write the relevant regression check and patch. Run checks on the exact artifact, including affected integration and failure boundaries. Return a patch/evidence packet. Do not expand to a framework or silently adjust criteria.
 
 For work using a verifier plan, record its exact version alongside the design and starting artifact. Implement against the plan's approved oracle and expected results; do not derive or relax criteria to fit the patch. If a planned check misstates the real boundary, return evidence, affected requirement/check IDs and impact for verifier correction. Record implementation checks and repairs by those IDs, then hand the exact final artifact version to tool and LLM reviewers. Your own checks do not replace their conclusions.
 

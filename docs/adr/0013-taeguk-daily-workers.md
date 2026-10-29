@@ -1,6 +1,6 @@
 # ADR 0013: 태극 데일리 정리와 테스트 보강 워커 적용
 
-- 상태: 제안
+- 상태: 승인
 - 날짜: 2026-10-29
 - 태극 원본: sensibile/taeguk `c6b42fb1ced01249d24a8134c5fc0510dd5c3489`
 - 대체: [ADR 0012](0012-taeguk-pilot-and-bundle-update.md) 결정 3("데일리 정리는 archon에 적용하지 않는다").

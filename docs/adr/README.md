@@ -29,7 +29,8 @@ Archon의 합의된 기술·운영 결정을 누적합니다. 파일 이름은 `
 | [0010](0010-codex-gate-status-only.md) | Codex 리뷰 게이트를 판정 전용으로 줄이고 요청·머지는 세션이 맡기 | 대체됨 (0011) |
 | [0011](0011-local-review-auto-merge.md) | Codex 리뷰 게이트를 없애고 push 전 로컬 리뷰 후 auto-merge | 승인 (일부 0016이 대체) |
 | [0012](0012-taeguk-pilot-and-bundle-update.md) | 태극 시험 프로젝트 등록과 번들 갱신 | 승인 (일부 0013이 대체) |
-| [0013](0013-taeguk-daily-workers.md) | 태극 데일리 정리와 테스트 보강 워커 적용 | 제안 |
-| [0014](0014-phase2-decider.md) | Phase 2 Decider 설계 | 제안 |
-| [0015](0015-script-evaluator.md) | 스크립트 평가기를 격리된 QuickJS-ng 프로세스로 실행 | 제안 |
-| [0016](0016-taeguk-review-order-and-model.md) | 태극 번들 갱신과 로컬 리뷰 순서·모델 변경 | 제안 |
+| [0013](0013-taeguk-daily-workers.md) | 태극 데일리 정리와 테스트 보강 워커 적용 | 승인 |
+| [0014](0014-phase2-decider.md) | Phase 2 Decider 설계 | 승인 |
+| [0015](0015-script-evaluator.md) | 스크립트 평가기를 격리된 QuickJS-ng 프로세스로 실행 | 승인 |
+| [0016](0016-taeguk-review-order-and-model.md) | 태극 번들 갱신과 로컬 리뷰 순서·모델 변경 | 승인 |
+| [0017](0017-taeguk-dev003-worktree.md) | 태극 번들 갱신과 작업 전용 워크트리 규칙(DEV-003) 적용 | 제안 |
