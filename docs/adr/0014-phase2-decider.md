@@ -1,7 +1,7 @@
 # ADR 0014: Phase 2 Decider 설계
 
 - 상태: 제안
-- 날짜: 2026-10-29 (2b에서 결정 1·2·5 갱신)
+- 날짜: 2026-10-29 (2b에서 결정 1·2·5, 2c에서 결정 5·6 갱신)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 
 ## 맥락
@@ -133,6 +133,18 @@ MVP 정의에서 쓰는 경로는 위 부분집합 안에 있다.
 - MVP 매퍼: SIMPLE, SWITCH(`DECISION` 포함), FORK_JOIN, JOIN, DO_WHILE, SUB_WORKFLOW, WAIT.
 - SWITCH·JOIN·DO_WHILE의 "실행" 단계(upstream `WorkflowSystemTask.execute`)에서 상태만 판정하는 부분은
   순수 함수로 Phase 2에 둔다. 하위 워크플로우 시작처럼 바깥과 통신하는 부분은 Phase 3에서 붙인다.
+- 2c에서 정한 세부:
+  - 다른 태스크를 이어서 예약하는 매퍼(SWITCH·DECISION·FORK_JOIN)는 upstream처럼
+    `Decider.tasks_to_be_scheduled/5`를 다시 부른다(`Mapper.Context.tasks_to_be_scheduled/3`). 안쪽 종료는
+    그 문구 그대로 매퍼의 종료 값이 된다.
+  - 실행 단계는 `Archon.Decider.SystemTask.execute(workflow, task) :: {boolean(), Task.t()}`이다. upstream
+    `execute`의 반환값과 바뀐 태스크를 함께 돌려준다. SWITCH·DECISION은 `COMPLETED`, FORK는 기본
+    `execute`(변화 없음), JOIN은 `SystemTask.Join`이다.
+  - 언제 `execute`를 부르는지(SWITCH·DECISION·FORK는 decide 루프 안에서 동기, JOIN은 시스템 태스크 큐에서
+    비동기)와, JOIN 대상 가지 태스크가 성공했을 때 decide를 건너뛰는 `isLazyEvaluateWorkflow`, JOIN의
+    재평가 간격(`getEvaluationOffset`)은 큐·저장과 묶여 있으므로 Phase 3 런타임이 맡는다.
+  - JOIN은 upstream의 에이전트 워크플로우 출력 가공(정의 `metadata`의 `agent_sdk`·`agentDef`)도 옮긴다.
+    `metadata`는 Phase 1 `WorkflowDef`에 이미 있는 계약 필드다.
 
 ### 6. 평가기는 `value-param`만 먼저 구현한다
 
@@ -141,6 +153,12 @@ MVP 정의에서 쓰는 경로는 위 부분집합 안에 있다.
   어떻게 들일지 정하는 별도 ADR에서 다룬다. 그 전까지 SWITCH에서 이 평가기를 쓰면 upstream
   `SwitchTaskMapper`가 등록되지 않은 평가기에 쓰는 문구(`No evaluator registered for type: <type>`)로
   워크플로우를 종료시킨다. DO_WHILE은 2e 전까지 매퍼를 등록하지 않는다.
+- DECISION의 `caseExpression`도 스크립트다. 평가기 ADR 전까지는 upstream `DecisionTaskMapper`가 스크립트
+  평가에 실패했을 때의 문구(`Error while evaluating script: <expression>`)로 워크플로우를 종료시킨다.
+  `caseValueParam`만 쓰는 DECISION은 upstream과 같게 동작한다.
+- 평가기는 `Archon.Decider.Evaluator.evaluate/3`가 고른다. upstream 테스트가 주입하는 임의 평가기는 받지
+  않는다. 평가 결과가 `selectedCase` 키를 가진 맵이면 그 키로 분기하고 맵을 출력에 복사하는 upstream
+  분기는 `value-param` 결과에도 그대로 적용한다.
 
 ### 7. 정의 탐색과 타입 제약
 
@@ -182,7 +200,10 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
   upstream은 이름이 일치하는 서버 환경 변수를 그대로 태스크 입력에 넣는데, 이는 서버 비밀을 워크플로우
   정의로 꺼낼 수 있는 경로다. 정의 등록 시 `${...}` 참조 검사(ADR 0002의 `WorkflowDef.validate/2`)는
   upstream처럼 환경 변수 존재를 참조 유효성으로 인정하므로, 그런 정의는 등록되지만 실행 시 값은 `null`이다.
-- `javascript`·`graaljs`·`python` 평가기와 DO_WHILE은 별도 ADR 전까지 동작하지 않는다.
+- `javascript`·`graaljs`·`python` 평가기, DECISION `caseExpression`, DO_WHILE은 별도 ADR 전까지 동작하지
+  않는다. DECISION `caseExpression`은 upstream에서 스크립트가 실패할 때와 같은 문구로 종료한다.
+- FORK_JOIN의 가지 목록 중 빈 가지가 있으면 upstream은 `IndexOutOfBoundsException`을 낸다. Archon은 그
+  가지를 건너뛴다. 정의 검증(`TaskTypeConstraint`)은 upstream처럼 `forkTasks` 자체가 비었는지만 본다.
 - 완료 직전 permissive 태스크 실패가 여럿이면 upstream은 `HashMap` 순회 순서(Java 해시)로 메시지를
   잇는다. Archon은 워크플로우의 태스크 순서로 잇는다. 실패가 하나면 같다.
 - 정의의 모든 태스크가 SKIPPED여서 시작할 태스크가 없으면 upstream은 `NullPointerException`을 낸다.
@@ -208,9 +229,15 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
 ## 결과
 
 - 2a(결정 3의 필드, 결정 4, 결정 7)를 첫 PR로 구현했다. 2b(결정 1, 2, SIMPLE·USER_DEFINED 매퍼)를 두 번째
-  PR로 구현했다. 2c~2e는 아직 구현하지 않았다. 조각마다 PR을 올리고, 마지막 조각이 머지되면 이 ADR을
-  `승인`으로 바꾼다.
-- 2b의 재현 테스트(`test/archon/decider/simple_replay_test.exs`)는 런타임 역할을 테스트 안에서 흉내 낸다.
+  PR로 구현했다. 2c(SWITCH `value-param`·DECISION `caseValueParam`·FORK_JOIN·JOIN 매퍼, 결정 5의
+  SWITCH·DECISION·JOIN 실행 판정)를 세 번째 PR로 구현했다. 2d~2e는 아직 구현하지 않았다. 조각마다 PR을
+  올리고, 마지막 조각이 머지되면 이 ADR을 `승인`으로 바꾼다.
+- 재현 테스트(`test/archon/decider/simple_replay_test.exs`, 2c의 `system_task_replay_test.exs`)는 런타임
+  역할을 `test/support/decider_replay.ex`에서 흉내 낸다. 2c에서 decide 루프의 동기 시스템 태스크 실행,
+  JOIN 비동기 실행, `isLazyEvaluateWorkflow`를 더했다. FORK_JOIN 픽스처에서 가지 태스크와 JOIN이
+  `executed: false`로 남는 것은 가지 완료 때 decide를 건너뛰고, JOIN 완료 뒤의 decide가 태스크를 저장하지
+  않고 워크플로우를 끝내기 때문이다. JOIN의 `pollCount` 3은 예약 직후와 가지 완료마다 한 번씩 평가한 결과다.
+  2b에서 정리한 규칙은 다음과 같다.
   시작 시 태스크 정의 박아 넣기, `seq`·`firstScheduledTime` 부여, `tasks_to_be_updated`와 새 태스크만 저장,
   완료 시 태스크를 갱신하지 않고 상태·출력만 저장하는 동작은 upstream `WorkflowExecutorOps`를 따랐고,
   Phase 3 런타임이 같은 규칙을 지켜야 픽스처와 같아진다. 마지막 태스크의 `executed: false`가 그 결과다.

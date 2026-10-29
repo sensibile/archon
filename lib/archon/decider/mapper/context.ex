@@ -66,6 +66,26 @@ defmodule Archon.Decider.Mapper.Context do
     }
   end
 
+  @doc """
+  Upstream `getDeciderService().getTasksToBeScheduled(workflow, wt, retryCount, retryTaskId)`,
+  as a mapper uses it to schedule a nested task. A termination comes back as its reason, the
+  mapper's own termination value.
+  """
+  @spec tasks_to_be_scheduled(t(), WorkflowTask.t(), String.t() | nil) ::
+          {:ok, [Task.t()]} | {:terminate, String.t()}
+  def tasks_to_be_scheduled(%__MODULE__{} = context, %WorkflowTask{} = wt, retry_task_id) do
+    case Archon.Decider.tasks_to_be_scheduled(
+           context.workflow,
+           wt,
+           context.retry_count,
+           retry_task_id,
+           context.decider
+         ) do
+      {:ok, tasks} -> {:ok, tasks}
+      {:terminate, %Archon.Decider.Termination{reason: reason}} -> {:terminate, reason}
+    end
+  end
+
   @doc "Upstream `getTaskInputV2` of the `WorkflowTask` inputs for this task ID and `task_def`."
   @spec task_input(t(), TaskDef.t() | nil) :: Codec.json_object()
   def task_input(%__MODULE__{} = context, task_def) do
