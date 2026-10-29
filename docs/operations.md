@@ -45,17 +45,19 @@ auto-merge의 `--match-head-commit`에도 같은 SHA를 쓴다.
 
 ```bash
 git fetch origin
+gh pr view <번호> --json baseRefName,headRefOid   # baseRefName이 main이고 headRefOid가 리뷰한 head SHA인지 확인
 check="$(mktemp)"
 git show origin/main:scripts/worker_path_check.sh > "$check"
 bash "$check" <test-gap|daily-cleanup> origin/main <리뷰한 head SHA>
 ```
 
 - 종료 코드 0만 통과다. 1은 허용 밖 변경이 있다는 뜻이고 그 목록을 출력한다. 2는 사용법 오류나 git 오류다.
-- 스크립트는 경로를 `git diff -z`로 그대로 읽는다. 심볼릭 링크와 서브모듈 변경은 경로와 관계없이 허용 밖이다.
+- 스크립트는 경로를 `git diff -z`로 그대로 읽는다. 일반 파일 모드(`100644`)가 아닌 변경(심볼릭 링크, 서브모듈,
+  실행 비트)은 경로와 관계없이 허용 밖이다. `docs/adr/`와 `docs/operations.md`는 대소문자를 가리지 않고 막는다.
 
 | 워커 | 허용 경로 | 추가 조건 |
 |---|---|---|
-| 테스트 보강(`test-gap`) | `test/` 아래 | 삭제 없음 |
+| 테스트 보강(`test-gap`) | `test/` 아래 | 추가만. 파일 삭제와 지운 줄이 없어야 하고, 바이너리는 안 된다 |
 | 데일리 정리(`daily-cleanup`) | `lib/`, `test/`, `docs/` 아래와 `README.md`. 단 `docs/adr/`, `docs/operations.md`는 제외 | 없음 |
 
 - 그 밖의 경로는 모두 허용 밖이다. 예: `.github/`, `mix.exs`, `mix.lock`, `config/`, `priv/`(외부 계약 포함),
@@ -64,6 +66,8 @@ bash "$check" <test-gap|daily-cleanup> origin/main <리뷰한 head SHA>
 - 허용 밖 경로가 하나라도 있으면 그 PR에 `no-auto-merge` label을 붙이고, 해당 경로와 이유를 실행 보고에 남긴 뒤
   BOSS에게 보고한다. 그 경로를 빼서 다시 리뷰하는 것은 허용한다.
 - head가 바뀌면(새 커밋, `gh pr update-branch`) auto-merge를 다시 켜기 전에 이 검사도 다시 한다.
+- 이 검사는 워커 자신이 실행한다. 서버가 강제하지 않으므로, 프롬프트 주입 등으로 워커가 절차를 건너뛰는 경우는
+  막지 못한다. 남는 위험은 [ADR 0013](adr/0013-taeguk-daily-workers.md) 결과에 적었다.
 
 ## 공통
 

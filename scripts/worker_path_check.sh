@@ -23,6 +23,14 @@ case "$worker" in
 esac
 
 allowed_path() {
+  # Protected records are matched case-insensitively: on a case-insensitive
+  # checkout docs/ADR/x.md lands next to the real ADRs.
+  local lower
+  lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$lower" in
+    docs/adr/* | docs/operations.md) return 1 ;;
+  esac
+
   case "$worker" in
     test-gap)
       case "$1" in
@@ -31,7 +39,6 @@ allowed_path() {
       ;;
     daily-cleanup)
       case "$1" in
-        docs/adr/* | docs/operations.md) return 1 ;;
         lib/* | test/* | docs/* | README.md) return 0 ;;
       esac
       ;;
@@ -40,10 +47,12 @@ allowed_path() {
 }
 
 raw_file="$(mktemp)" || exit 2
-trap 'rm -f "$raw_file"' EXIT
+numstat_file="$(mktemp)" || exit 2
+trap 'rm -f "$raw_file" "$numstat_file"' EXIT
 
-# -z keeps paths byte for byte; --raw exposes file modes for symlinks and submodules.
-if ! git diff --raw -z --no-renames --no-abbrev "$base...$head" >"$raw_file"; then
+# -z keeps paths byte for byte; --raw exposes file modes, --numstat removed lines.
+if ! git diff --raw -z --no-renames --no-abbrev "$base...$head" >"$raw_file" ||
+  ! git diff --numstat -z --no-renames "$base...$head" >"$numstat_file"; then
   echo "git diff failed for $base...$head" >&2
   exit 2
 fi
@@ -65,6 +74,8 @@ while IFS= read -r -d '' meta; do
     reason="symlink"
   elif [ "$new_mode" = "160000" ] || [ "$old_mode" = "160000" ]; then
     reason="submodule"
+  elif [ "$new_mode" != "100644" ] && [ "$new_mode" != "000000" ]; then
+    reason="file mode $new_mode"
   elif ! allowed_path "$path"; then
     reason="outside allowlist"
   fi
@@ -74,6 +85,24 @@ while IFS= read -r -d '' meta; do
     violations=$((violations + 1))
   fi
 done <"$raw_file"
+
+# Test reinforcement only adds tests, so it may not remove a line from any file.
+if [ "$worker" = "test-gap" ]; then
+  while IFS= read -r -d '' entry; do
+    added="${entry%%$'\t'*}"
+    rest="${entry#*$'\t'}"
+    removed="${rest%%$'\t'*}"
+    path="${rest#*$'\t'}"
+
+    if [ "$added" = "-" ] || [ "$removed" = "-" ]; then
+      printf '%s\t%s\t%s\n' "M" "binary" "$path"
+      violations=$((violations + 1))
+    elif [ "$removed" != "0" ]; then
+      printf '%s\t%s\t%s\n' "M" "removed lines" "$path"
+      violations=$((violations + 1))
+    fi
+  done <"$numstat_file"
+fi
 
 if [ "$violations" -gt 0 ]; then
   exit 1

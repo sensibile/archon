@@ -11,23 +11,50 @@ defmodule Archon.Scripts.WorkerPathCheckTest do
     git!(dir, ["init", "--quiet", "--initial-branch=main"])
     git!(dir, ["config", "user.email", "test@example.com"])
     git!(dir, ["config", "user.name", "test"])
-    write!(dir, "lib/a.ex", "a")
-    write!(dir, "test/a_test.exs", "a")
+    write!(dir, "lib/a.ex", "a\n")
+    write!(dir, "test/a_test.exs", "a\n")
     commit!(dir, "base")
     git!(dir, ["switch", "--quiet", "-c", "work"])
     :ok
   end
 
-  test "test-gap passes when only test files are added or changed", %{tmp_dir: dir} do
-    write!(dir, "test/b_test.exs", "b")
-    write!(dir, "test/a_test.exs", "changed")
+  test "test-gap passes when tests are only added", %{tmp_dir: dir} do
+    write!(dir, "test/b_test.exs", "b\n")
+    write!(dir, "test/a_test.exs", "a\nnew test\n")
     commit!(dir, "tests")
 
     assert {"", 0} = check(dir, "test-gap")
   end
 
+  test "test-gap rejects emptying or rewriting an existing test", %{tmp_dir: dir} do
+    write!(dir, "test/a_test.exs", "")
+    commit!(dir, "emptied")
+
+    assert {out, 1} = check(dir, "test-gap")
+    assert out =~ "removed lines\ttest/a_test.exs"
+  end
+
+  test "an executable bit is rejected", %{tmp_dir: dir} do
+    write!(dir, "test/b_test.exs", "b\n")
+    File.chmod!(Path.join(dir, "test/b_test.exs"), 0o755)
+    commit!(dir, "exec")
+
+    assert {out, 1} = check(dir, "test-gap")
+    assert out =~ "file mode 100755\ttest/b_test.exs"
+  end
+
+  test "protected records are matched without regard to case", %{tmp_dir: dir} do
+    write!(dir, "docs/ADR/0099-fake.md", "x")
+    write!(dir, "docs/Operations.md", "x")
+    commit!(dir, "case")
+
+    assert {out, 1} = check(dir, "daily-cleanup")
+    assert out =~ "outside allowlist\tdocs/ADR/0099-fake.md"
+    assert out =~ "outside allowlist\tdocs/Operations.md"
+  end
+
   test "test-gap rejects product code and test deletions", %{tmp_dir: dir} do
-    write!(dir, "lib/a.ex", "changed")
+    write!(dir, "lib/a.ex", "a\nmore\n")
     File.rm!(Path.join(dir, "test/a_test.exs"))
     commit!(dir, "mixed")
 
