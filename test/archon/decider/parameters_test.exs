@@ -58,6 +58,16 @@ defmodule Archon.Decider.ParametersTest do
 
     # The document is given already expanded, as JsonUtils.expand would leave it. `$..` (deep
     # scan) is not supported (ADR 0014) and the upstream test does not assert it.
+    # replace(Map, Object) parses a String document as JSON text before resolving.
+    test "a serialized JSON document is parsed first" do
+      assert Parameters.replace(%{"x" => "${a}", "y" => "${b[1]}"}, ~s({"a":1,"b":[2,3]})) == %{
+               "x" => 1,
+               "y" => 3
+             }
+
+      assert_raise ArgumentError, fn -> Parameters.replace(%{"x" => "${a}"}, "not json") end
+    end
+
     test "testReplaceWithArrayExpand" do
       doc = [
         %{

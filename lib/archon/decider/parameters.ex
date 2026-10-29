@@ -86,9 +86,19 @@ defmodule Archon.Decider.Parameters do
   def workflow_input(_definition, input), do: input
 
   @doc """
-  Upstream `replace(Map, Object)`: resolves `input` against an arbitrary decoded JSON document.
+  Upstream `replace(Map, Object)`: resolves `input` against an arbitrary JSON document.
+
+  A string document is parsed as JSON text first, as upstream does with `JsonPath.parse(String)`;
+  text that is not JSON raises `ArgumentError`, where upstream throws `InvalidJsonException`.
   """
   @spec replace(Codec.json_object(), json()) :: Codec.json_object()
+  def replace(input, document) when is_binary(document) do
+    case JSON.decode(document) do
+      {:ok, decoded} -> replace_map(input, decoded, nil)
+      {:error, reason} -> raise ArgumentError, "invalid JSON document: #{inspect(reason)}"
+    end
+  end
+
   def replace(input, document), do: replace_map(input, document, nil)
 
   @doc """
