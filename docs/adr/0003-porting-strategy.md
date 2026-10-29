@@ -26,7 +26,7 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
    | Phase 0 | 계약 고정: JSON 스키마, OpenAPI 스냅샷, 범위 분류, 골든 픽스처 | [ADR 0001](0001-api-contract-scope.md) |
    | Phase 1 | 도메인 모델: 계약을 통과하는 struct와 JSON 코덱 | [ADR 0002](0002-domain-model-representation.md) |
    | Phase 2 | Decider를 부수효과 없는 순수 함수로 | [ADR 0014](0014-phase2-decider.md) |
-   | Phase 3 | OTP 런타임: 워크플로우 인스턴스당 GenServer, 레지스트리, DynamicSupervisor | 미작성 |
+   | Phase 3 | OTP 런타임: 워크플로우 인스턴스당 GenServer, 레지스트리, DynamicSupervisor | [ADR 0018](0018-phase3-otp-runtime.md) |
    | Phase 4 | 영속성과 큐: PostgreSQL 우선 | 미작성 |
    | Phase 5 | Phoenix REST: MVP 엔드포인트부터 | 미작성 |
 
