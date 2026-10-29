@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk validation-health"
+  short_description: "Daily report-only full validation of main to catch toolchain drift and flaky tests"
+  default_prompt: "Use $taeguk-validation-health for today's run."

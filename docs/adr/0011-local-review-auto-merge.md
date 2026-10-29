@@ -1,6 +1,6 @@
 # ADR 0011: Codex 리뷰 게이트를 없애고 push 전 로컬 리뷰 후 auto-merge
 
-- 상태: 승인
+- 상태: 승인 (결정 3의 리뷰 모델·effort는 [ADR 0016](0016-taeguk-review-order-and-model.md)이 대체)
 - 날짜: 2026-10-29
 - 대체: [ADR 0010](0010-codex-gate-status-only.md) 전체, [ADR 0008](0008-codex-review-gate-hardening.md) 전체,
   [ADR 0006](0006-merge-policy.md) 결정 2의 필수 체크 중 `codex-review`와 결정 5의 "머지 게이트는 필수 체크와 Codex 리뷰".
