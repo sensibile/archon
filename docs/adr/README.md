@@ -23,7 +23,7 @@ Archon의 합의된 기술·운영 결정을 누적합니다. 파일 이름은 `
 | [0004](0004-license-and-attribution.md) | 라이선스와 upstream 출처 표기 | 승인 |
 | [0005](0005-static-analysis.md) | CodeQL 대신 쓰는 정적 분석 | 승인 |
 | [0006](0006-merge-policy.md) | 머지 정책과 Codex 리뷰 게이트 | 승인 (일부 0008, 0011이 대체) |
-| [0007](0007-taeguk-adoption.md) | 태극 개발 구성 채택 | 승인 (일부 0012가 대체) |
+| [0007](0007-taeguk-adoption.md) | 태극 개발 구성 채택 | 승인 (일부 0012, 0017이 대체) |
 | [0008](0008-codex-review-gate-hardening.md) | Codex 리뷰 게이트 보강 | 대체됨 (0010, 0011) |
 | [0009](0009-codex-review-time-rule.md) | Codex 판정이 오지 않을 때의 시간 기준 규칙 | 대체됨 (0010) |
 | [0010](0010-codex-gate-status-only.md) | Codex 리뷰 게이트를 판정 전용으로 줄이고 요청·머지는 세션이 맡기 | 대체됨 (0011) |

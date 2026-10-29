@@ -3,6 +3,9 @@
 - 상태: 제안
 - 날짜: 2026-10-29
 - 태극 원본: sensibile/taeguk `a820b4a7027813368fd41d3a1b619f19e6f063a1`
+- 대체: [ADR 0007](0007-taeguk-adoption.md) 결정 2의 "문구는 다른 저장소와 같다"(archon 태극 줄은 태극 설치 안내의
+  새 문구를 쓰며, 다른 저장소는 각자의 설치 갱신 때 따라온다)와 결정 4의 "규칙은 명시적으로 지정된 작업에
+  적용"(DEV-003은 모든 저장소 편집에 적용). ADR 0007의 나머지 결정은 그대로 유효하다.
 
 ## 맥락
 
@@ -25,7 +28,8 @@ archon 세션에서 BOSS가 dry-run 결과를 보고 "적용하고 문구도 교
    `.taeguk/rules/development.md`) to all repository edits."를 붙인다. 이 문장이 없으면 태극 스킬 밖의 일반 개발 작업이
    DEV-003을 읽지 않을 수 있다. CLAUDE.md는 `@AGENTS.md`를 불러오므로 따로 고치지 않는다.
 3. **archon은 별도 워크트리 규약을 두지 않고 DEV-003 기본값을 쓴다.**
-   - 위치: checkout 바깥의 `../archon-worktrees/<slug>`. [운영 문서](../operations.md)의 워커 작업 위치와 같다.
+   - 위치: checkout 바깥의 `../archon-worktrees/<slug>`. DEV-003 기본값 "`<저장소 이름>-worktrees/<slug>`"를 형제
+     디렉터리로 해석한 것이며, [운영 문서](../operations.md)의 워커 작업 위치와 같다.
    - 브랜치: `type/slug`. AGENTS.md "PR과 머지"의 이름 규칙과 같다.
    - base: 원격에서 확인한 `main` SHA.
    - 데스크톱 앱이 세션용으로 만든 워크트리(`.claude/worktrees/…`)는 DEV-003대로 작업 브랜치를 만든 뒤 그 작업의
