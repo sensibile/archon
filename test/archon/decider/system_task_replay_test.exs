@@ -5,7 +5,7 @@
 defmodule Archon.Decider.SystemTaskReplayTest do
   @moduledoc """
   Replays the captured SWITCH and FORK_JOIN scenarios through `Archon.Decider.decide/2` and
-  `Archon.Decider.SystemTask.execute/2` and compares the workflow with what the upstream server
+  `Archon.Decider.SystemTask.execute/3` and compares the workflow with what the upstream server
   returned (ADR 0014, decision 8, slice 2c). The runtime is played by `Archon.DeciderReplay`.
 
   In the FORK_JOIN scenario the branch updates skip the decide (`isLazyEvaluateWorkflow`) and the

@@ -4,30 +4,33 @@
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
 #
 # Ported from conductor-oss core/src/test/java/com/netflix/conductor/core/execution/mapper/SwitchTaskMapperTest.java,
-# DecisionTaskMapperTest.java, ForkJoinTaskMapperTest.java and JoinTaskMapperTest.java
-# at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
+# DecisionTaskMapperTest.java, ForkJoinTaskMapperTest.java, JoinTaskMapperTest.java,
+# SubWorkflowTaskMapperTest.java and WaitTaskMapperTest.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: rewritten as ExUnit tests that schedule through
 # Archon.Decider.tasks_to_be_scheduled/5 instead of a mocked DeciderService; cases that need a
-# script or custom evaluator use value-param inputs that reach the same branch (ADR 0014).
+# script or custom evaluator use value-param inputs that reach the same branch, and mocked
+# ParametersUtils results are replaced by inputs that resolve to them (ADR 0014).
 
 defmodule Archon.Decider.MapperTest do
   use ExUnit.Case, async: true
 
   alias Archon.Decider
   alias Archon.Decider.{Context, Termination}
-  alias Archon.Domain.{Task, TaskDef, Workflow, WorkflowDef, WorkflowTask}
+  alias Archon.Domain.{SubWorkflowParams, Task, TaskDef, Workflow, WorkflowDef, WorkflowTask}
 
   @now 1_800_000_000_000
 
-  defp context do
+  defp context(opts) do
     counter = :counters.new(1, [])
 
     Context.new(
-      now: @now,
-      new_id: fn ->
-        :counters.add(counter, 1, 1)
-        "id-#{:counters.get(counter, 1)}"
-      end
+      [
+        now: @now,
+        new_id: fn ->
+          :counters.add(counter, 1, 1)
+          "id-#{:counters.get(counter, 1)}"
+        end
+      ] ++ opts
     )
   end
 
@@ -51,7 +54,8 @@ defmodule Archon.Decider.MapperTest do
     )
   end
 
-  defp schedule(workflow, wt), do: Decider.tasks_to_be_scheduled(workflow, wt, 0, nil, context())
+  defp schedule(workflow, wt, opts \\ []),
+    do: Decider.tasks_to_be_scheduled(workflow, wt, 0, nil, context(opts))
 
   defp refs({:ok, tasks}), do: Enum.map(tasks, & &1.reference_task_name)
 
@@ -253,6 +257,242 @@ defmodule Archon.Decider.MapperTest do
       assert {:ok, [%Task{task_type: "JOIN"} = task]} = schedule(workflow([wt], %{}), wt)
       assert task.input_data == %{"joinOn" => ["t3", "t2"]}
       assert task.workflow_task.join_mode == :sync
+    end
+  end
+
+  describe "SUB_WORKFLOW" do
+    defp sub_workflow(params, extra \\ []) do
+      struct!(
+        %WorkflowTask{
+          name: "sub",
+          task_reference_name: "sub_ref",
+          type: "SUB_WORKFLOW",
+          sub_workflow_param: params
+        },
+        extra
+      )
+    end
+
+    # SubWorkflowTaskMapperTest#getMappedTasks
+    test "schedules a SUB_WORKFLOW task with the resolved parameters" do
+      params = %SubWorkflowParams{
+        name: "${workflow.input.name}",
+        version: 2,
+        task_to_domain: %{"*" => "${workflow.input.domain}"}
+      }
+
+      wt =
+        sub_workflow(params, start_delay: 30, input_parameters: %{"a" => "${workflow.input.a}"})
+
+      workflow = workflow([wt], %{"name" => "FooWorkFlow", "domain" => "unittest", "a" => 1})
+
+      assert {:ok, [%Task{} = task]} = schedule(workflow, wt)
+
+      assert {task.status, task.task_type, task.callback_after_seconds} ==
+               {:scheduled, "SUB_WORKFLOW", 30}
+
+      assert task.input_data == %{
+               "subWorkflowName" => "FooWorkFlow",
+               "priority" => nil,
+               "subWorkflowVersion" => 2,
+               "subWorkflowTaskToDomain" => %{"*" => "unittest"},
+               "subWorkflowDefinition" => nil,
+               "idempotencyKey" => nil,
+               "idempotencyStrategy" => nil,
+               "workflowInput" => %{"a" => 1}
+             }
+    end
+
+    # SubWorkflowTaskMapperTest#testTaskToDomain
+    test "without taskToDomain the input holds null" do
+      wt = sub_workflow(%SubWorkflowParams{name: "Foo", version: 2})
+
+      assert {:ok, [%Task{status: :scheduled, task_type: "SUB_WORKFLOW"} = task]} =
+               schedule(workflow([wt], %{}), wt)
+
+      assert task.input_data["subWorkflowTaskToDomain"] == nil
+    end
+
+    # SubWorkflowTaskMapperTest#getExceptionWhenNoSubWorkflowParamsPassed
+    test "a task without subWorkflowParams terminates the workflow" do
+      wt = %{sub_workflow(nil) | name: "FooWorkFLow"}
+
+      assert {:terminate, %Termination{reason: reason}} = schedule(workflow([wt], %{}), wt)
+
+      assert reason ==
+               "Task FooWorkFLow is defined as sub-workflow and is missing subWorkflowParams. " <>
+                 "Please check the workflow definition"
+    end
+
+    # SubWorkflowTaskMapperTest#workflowDefinitionStringExpressionIsResolvedToRuntimeValue
+    test "a workflowDefinition expression resolves to the referenced value" do
+      inline = %{"name" => "dynamic_plan_wf", "version" => 1, "tasks" => []}
+
+      plan = %Task{
+        reference_task_name: "planTask",
+        task_type: "SIMPLE",
+        status: :completed,
+        output_data: %{"result" => inline}
+      }
+
+      params = %SubWorkflowParams{
+        name: "dynamic_plan_wf",
+        version: 1,
+        workflow_definition: "${planTask.output.result}"
+      }
+
+      wt = sub_workflow(params)
+      workflow = workflow([wt], %{}, tasks: [plan])
+
+      assert {:ok, [%Task{task_type: "SUB_WORKFLOW"} = task]} = schedule(workflow, wt)
+      assert task.input_data["subWorkflowDefinition"] == inline
+      # SubWorkflowTaskMapper skips the version with a definition.
+      assert task.input_data["subWorkflowVersion"] == nil
+    end
+
+    test "an inline definition is copied as JSON without resolving its expressions" do
+      definition = %WorkflowDef{
+        name: "inline_wf",
+        version: 3,
+        tasks: [simple("t", "t")],
+        input_parameters: ["${workflow.input.x}"]
+      }
+
+      wt = sub_workflow(%SubWorkflowParams{name: "ignored", workflow_definition: definition})
+
+      assert {:ok, [task]} = schedule(workflow([wt], %{"x" => 1}), wt)
+      assert task.input_data["subWorkflowName"] == "inline_wf"
+      assert task.input_data["subWorkflowDefinition"] == WorkflowDef.to_json(definition)
+      assert task.input_data["subWorkflowVersion"] == nil
+    end
+
+    test "without a version the latest one in the context is used" do
+      wt = sub_workflow(%SubWorkflowParams{name: "Foo"})
+      workflow = workflow([wt], %{})
+
+      assert {:ok, [task]} = schedule(workflow, wt, latest_workflow_versions: %{"Foo" => 7})
+      assert task.input_data["subWorkflowVersion"] == 7
+
+      assert {:terminate, %Termination{reason: reason}} = schedule(workflow, wt)
+
+      assert reason ==
+               "The Task Foo defined as a sub-workflow has no workflow definition available "
+    end
+
+    test "a numeric priority overrides the workflow priority; an expression only the input" do
+      wt = sub_workflow(%SubWorkflowParams{name: "Foo", version: 1, priority: 5})
+      assert {:ok, [task]} = schedule(workflow([wt], %{}, priority: 1), wt)
+      assert {task.workflow_priority, task.input_data["priority"]} == {5, 5}
+
+      wt =
+        sub_workflow(%SubWorkflowParams{name: "Foo", version: 1, priority: "${workflow.input.p}"})
+
+      assert {:ok, [task]} = schedule(workflow([wt], %{"p" => 9}, priority: 1), wt)
+      assert {task.workflow_priority, task.input_data["priority"]} == {1, 9}
+    end
+
+    test "the idempotency key resolves and the strategy keeps its upstream name" do
+      params = %SubWorkflowParams{
+        name: "Foo",
+        version: 1,
+        idempotency_key: "${workflow.input.key}",
+        idempotency_strategy: :return_existing
+      }
+
+      wt = sub_workflow(params)
+      assert {:ok, [task]} = schedule(workflow([wt], %{"key" => "k1"}), wt)
+
+      assert {task.input_data["idempotencyKey"], task.input_data["idempotencyStrategy"]} ==
+               {"k1", "RETURN_EXISTING"}
+    end
+
+    test "a name that resolves to null terminates the workflow" do
+      wt = sub_workflow(%SubWorkflowParams{name: "${workflow.input.missing}", version: 1})
+
+      assert {:terminate, %Termination{reason: reason}} = schedule(workflow([wt], %{}), wt)
+
+      assert reason ==
+               "Task sub is defined as sub-workflow and its subWorkflowParams name resolved to null"
+    end
+  end
+
+  describe "WAIT" do
+    defp wait(input, extra \\ []) do
+      struct!(
+        %WorkflowTask{
+          name: "Wait_task",
+          task_reference_name: "wait_ref",
+          type: "WAIT",
+          input_parameters: input
+        },
+        extra
+      )
+    end
+
+    defp schedule_wait(wt, input \\ %{}) do
+      assert {:ok, [%Task{task_type: "WAIT"} = task]} = schedule(workflow([wt], input), wt)
+      task
+    end
+
+    # WaitTaskMapperTest#getMappedTasks and #testWaitForever
+    test "without duration or until the task waits forever" do
+      task = schedule_wait(wait(%{}))
+
+      assert {task.status, task.start_time, task.output_data} == {:in_progress, @now, %{}}
+      assert {task.callback_after_seconds, task.wait_timeout} == {2_147_483_647, 0}
+    end
+
+    # WaitTaskMapperTest#testWaitUntil: an until in the past waits 0 seconds.
+    test "until sets the wait timeout to that time" do
+      task = schedule_wait(wait(%{"until" => "2022-12-12 10:00"}))
+      assert {task.status, task.callback_after_seconds} == {:in_progress, 0}
+      assert task.wait_timeout == 1_670_839_200_000
+
+      # @now is 2027-01-15 08:00 UTC.
+      task =
+        schedule_wait(wait(%{"until" => "${workflow.input.until}"}), %{
+          "until" => "2027-01-15 08:30"
+        })
+
+      assert {task.wait_timeout, task.callback_after_seconds} == {@now + 1_800_000, 1800}
+    end
+
+    # WaitTaskMapperTest#testWaitDuration
+    test "duration sets the wait timeout from now" do
+      task = schedule_wait(wait(%{"duration" => "1s"}))
+
+      assert {task.status, task.callback_after_seconds, task.wait_timeout} ==
+               {:in_progress, 1, @now + 1000}
+    end
+
+    # WaitTaskMapperTest#testInvalidWaitConfig
+    test "both duration and until fail the task" do
+      task = schedule_wait(wait(%{"duration" => "1s", "until" => "2022-12-12"}))
+      assert task.status == :failed_with_terminal_error
+
+      assert task.reason_for_incompletion ==
+               "Both 'duration' and 'until' specified. Please provide only one input"
+    end
+
+    test "an until that does not parse fails the task with upstream's reason" do
+      task = schedule_wait(wait(%{"until" => "2022-12-12 10:00 KST"}))
+      assert task.status == :failed_with_terminal_error
+
+      assert task.reason_for_incompletion ==
+               "Invalid/Unsupported Wait Until format.  Provided: 2022-12-12 10:00 KST"
+    end
+
+    test "a duration that does not parse fails the task where upstream throws" do
+      task = schedule_wait(wait(%{"duration" => "${workflow.input.d}"}), %{"d" => "5.0s"})
+      assert task.status == :failed_with_terminal_error
+      assert task.reason_for_incompletion == "Not valid duration: 5.0s"
+    end
+
+    test "the input is resolved with the task ID and the isolation group comes from the definition" do
+      wt = wait(%{"id" => "${CPEWF_TASK_ID}"}, task_definition: %TaskDef{isolation_group_id: "g"})
+      task = schedule_wait(wt)
+      assert task.input_data == %{"id" => task.task_id}
+      assert task.isolation_group_id == "g"
     end
   end
 end

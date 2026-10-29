@@ -134,7 +134,7 @@ defmodule Archon.DeciderReplay do
       }
     else
       {workflow, started?} = persist(workflow, outcome, now)
-      {workflow, executed?} = execute_sync(workflow, outcome.tasks_to_be_scheduled)
+      {workflow, executed?} = execute_sync(workflow, outcome.tasks_to_be_scheduled, now)
       if started? or executed?, do: decide(workflow, clock), else: workflow
     end
   end
@@ -164,12 +164,12 @@ defmodule Archon.DeciderReplay do
       else: task
   end
 
-  defp execute_sync(workflow, scheduled) do
+  defp execute_sync(workflow, scheduled, now) do
     scheduled
     |> Enum.filter(&(sync_system_task?(&1) and not Task.terminal?(&1.status)))
     |> Enum.reduce({workflow, false}, fn %Task{task_id: id}, {workflow, changed?} ->
       task = Enum.find(workflow.tasks, &(&1.task_id == id))
-      {executed?, task} = SystemTask.execute(workflow, task)
+      {executed?, task} = SystemTask.execute(workflow, task, now)
       if executed?, do: {replace(workflow, task), true}, else: {workflow, changed?}
     end)
   end
@@ -185,7 +185,7 @@ defmodule Archon.DeciderReplay do
         now = tick(clock)
         task = Enum.find(workflow.tasks, &(&1.task_id == id))
         task = %{task | poll_count: task.poll_count + 1}
-        {_changed?, task} = SystemTask.execute(workflow, task)
+        {_changed?, task} = SystemTask.execute(workflow, task, now)
 
         if Task.terminal?(task.status),
           do: {replace(workflow, %{task | end_time: now, update_time: now}), true},

@@ -29,14 +29,9 @@ defmodule Archon.Domain.TaskTypeConstraint do
   out-of-range values is not reproduced.
   """
 
-  alias Archon.Domain.{Codec, WorkflowTask}
+  alias Archon.Domain.{Codec, DateTimeUtils, WorkflowTask}
 
-  # Upstream's DURATION_PATTERN with possessive quantifiers: whitespace and digits can never be
-  # shared between neighbouring parts, so this accepts the same strings without backtracking.
-  @duration ~r/^\s*+(?:(\d++)\s*+(?:days?|d))?\s*+(?:(\d++)\s*+(?:hours?|hrs?|h))?\s*+(?:(\d++)\s*+(?:minutes?|mins?|m))?\s*+(?:(\d++)\s*+(?:seconds?|secs?|s))?\s*+\z/i
   @date ~r/^\d+-\d+-\d+(?: \d+:\d+(?: \S+)?)?\z/
-
-  @int_max 2_147_483_647
 
   @termination_statuses ["COMPLETED", "FAILED", "TERMINATED"]
 
@@ -155,7 +150,9 @@ defmodule Archon.Domain.TaskTypeConstraint do
   defp wait_parse_errors(duration, until) do
     cond do
       not blank?(duration) and not String.starts_with?(duration, "${") ->
-        if duration?(duration), do: [], else: ["Either date or duration is passed as null "]
+        if DateTimeUtils.parse_duration(duration) != :error,
+          do: [],
+          else: ["Either date or duration is passed as null "]
 
       not blank?(until) and not String.starts_with?(until, "${") ->
         if Regex.match?(@date, until), do: [], else: ["Unable to parse date "]
@@ -163,26 +160,6 @@ defmodule Archon.Domain.TaskTypeConstraint do
       true ->
         []
     end
-  end
-
-  # DateTimeUtils.parseDuration: the pattern must match and each number must fit an `int`
-  # (`Integer.parseInt` throws `NumberFormatException`, an `IllegalArgumentException`).
-  defp duration?(text) do
-    case Regex.run(@duration, text, capture: :all_but_first) do
-      nil ->
-        false
-
-      numbers ->
-        numbers |> Enum.reject(&(&1 == "")) |> Enum.all?(&int?/1)
-    end
-  end
-
-  # Integer.parseInt range, checked on the digits before converting so huge inputs stay cheap.
-  defp int?(digits) do
-    significant = String.trim_leading(digits, "0")
-
-    byte_size(significant) <= 10 and
-      (significant == "" or String.to_integer(significant) <= @int_max)
   end
 
   defp decision_cases(%WorkflowTask{decision_cases: nil} = task, type),
