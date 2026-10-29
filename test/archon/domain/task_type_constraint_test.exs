@@ -7,7 +7,8 @@
 # WorkflowTaskTypeConstraintTest.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: rewritten as ExUnit tests; the HTTP, KAFKA_PUBLISH and JSON_JQ_TRANSFORM
 # cases are not ported because those rules are not implemented yet (ADR 0014), and the
-# setType executable-validation case has no Elixir counterpart.
+# setType executable-validation case has no Elixir counterpart. Script syntax checks run on the
+# archon_js pool (ADR 0015).
 
 defmodule Archon.Domain.TaskTypeConstraintTest do
   use ExUnit.Case, async: true
@@ -89,6 +90,52 @@ defmodule Archon.Domain.TaskTypeConstraintTest do
 
       assert messages(task) == [
                "decisionCases should have atleast one task for taskType: DECISION taskName: encode"
+             ]
+    end
+
+    test "testSwitchJavascriptExpressionWithRuntimeBoundVariableIsAccepted" do
+      # Only the syntax is checked: running it would throw, $.items being unresolved.
+      task =
+        sample(
+          type: "SWITCH",
+          evaluator_type: "javascript",
+          expression: "$.items.filter(i => i > 10).length > 0 ? 'big' : 'small'",
+          decision_cases: %{"big" => [sample(type: "SIMPLE")]},
+          input_parameters: %{"items" => "${workflow.input.items}"}
+        )
+
+      assert messages(task) == []
+    end
+
+    test "testSwitchJavascriptExpressionWithSyntaxErrorIsRejected" do
+      task =
+        sample(
+          type: "SWITCH",
+          evaluator_type: "javascript",
+          expression: "$.inputValue > 10 ? 'big' :",
+          decision_cases: %{"big" => [sample(type: "SIMPLE")]}
+        )
+
+      assert [message] = messages(task)
+
+      assert message =~
+               ~r/^Expression is not well formatted: SyntaxError: .+, taskType: SWITCH taskName encode$/s
+
+      # graaljs expressions are not checked at registration, as upstream.
+      assert messages(%{task | evaluator_type: "graaljs"}) == []
+    end
+
+    test "a DECISION caseExpression with a syntax error is rejected" do
+      task =
+        sample(
+          type: "DECISION",
+          case_expression: "$.valueCheck == null ? 'true' :",
+          decision_cases: %{"true" => [sample(type: "SIMPLE")]}
+        )
+
+      assert messages(task) == [
+               "Expression is not well formatted: SyntaxError: unexpected token in expression: " <>
+                 "'', taskType: DECISION taskName encode"
              ]
     end
 

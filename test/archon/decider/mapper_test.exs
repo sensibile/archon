@@ -7,9 +7,10 @@
 # DecisionTaskMapperTest.java, ForkJoinTaskMapperTest.java, JoinTaskMapperTest.java,
 # SubWorkflowTaskMapperTest.java and WaitTaskMapperTest.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: rewritten as ExUnit tests that schedule through
-# Archon.Decider.tasks_to_be_scheduled/5 instead of a mocked DeciderService; cases that need a
-# script or custom evaluator use value-param inputs that reach the same branch, and mocked
-# ParametersUtils results are replaced by inputs that resolve to them (ADR 0014).
+# Archon.Decider.tasks_to_be_scheduled/5 instead of a mocked DeciderService; JavaScript cases run
+# on the archon_js pool (ADR 0015), cases that need a custom evaluator use value-param inputs that
+# reach the same branch, and mocked ParametersUtils results are replaced by inputs that resolve
+# to them (ADR 0014).
 
 defmodule Archon.Decider.MapperTest do
   use ExUnit.Case, async: true
@@ -127,7 +128,7 @@ defmodule Archon.Decider.MapperTest do
     end
 
     test "an evaluator that is not registered terminates the workflow" do
-      for type <- ["javascript", "graaljs", nil] do
+      for type <- ["python", nil] do
         wt = switch(type, "$.route == 'even' ? 'even' : 'odd'")
 
         assert {:terminate, %Termination{reason: reason, status: :failed}} =
@@ -135,6 +136,117 @@ defmodule Archon.Decider.MapperTest do
 
         assert reason == "No evaluator registered for type: #{type || "null"}"
       end
+    end
+
+    # SwitchTaskMapperTest#getMappedTasks
+    test "a javascript or graaljs expression picks the case" do
+      expression =
+        "if ($.Id == null) 'bad input'; else if ( ($.Id != null && $.Id % 2 == 0)) 'even'; " <>
+          "else 'odd'; "
+
+      for type <- ["javascript", "graaljs"] do
+        wt = switch(type, expression, input_parameters: %{"Id" => "${workflow.input.Id}"})
+        workflow = workflow([wt], %{"Id" => "22"})
+
+        assert {:ok, [sw, %Task{reference_task_name: "t2"}]} = schedule(workflow, wt)
+        assert sw.status == :in_progress
+        assert sw.input_data == %{"Id" => "22", "case" => "even", "hasChildren" => "true"}
+        assert sw.output_data == %{"evaluationResult" => ["even"], "selectedCase" => "even"}
+      end
+    end
+
+    # SwitchTaskMapperTest#getMappedTasksWithEmptyMatchedCase, with the upstream script
+    test "a script naming a case with no tasks schedules nothing" do
+      wt = switch("javascript", "'true'", decision_cases: %{"true" => []})
+      assert {:ok, [%Task{status: :in_progress}]} = schedule(workflow([wt], %{}), wt)
+    end
+
+    # SwitchTaskMapperTest#getMappedTasksWhenEvaluatorThrowsException
+    test "a script that fails leaves the SWITCH task FAILED and schedules nothing" do
+      wt = switch("javascript", "undefinedVariable")
+
+      assert {:ok, [sw]} = schedule(workflow([wt], %{"route" => "even"}), wt)
+      assert %Task{reference_task_name: "switchTask", task_type: "SWITCH", status: :failed} = sw
+      assert sw.start_time == @now
+      assert sw.input_data == %{"route" => "even"}
+      assert sw.output_data == %{}
+
+      assert sw.reason_for_incompletion ==
+               "Error evaluating the script `ReferenceError: undefinedVariable is not defined` " <>
+                 "at line 1"
+    end
+
+    test "the script result is routed by its Java string, non-finite numbers included" do
+      # GraalJS 25.0.2 oracle: String.valueOf of 1/0, 0/0, -0 and 1e21 after getObject.
+      for {expression, case_name} <- [
+            {"1/0", "Infinity"},
+            {"0/0", "NaN"},
+            {"-1/0", "-Infinity"},
+            {"-0", "-0.0"},
+            {"1e21", "1.0E21"},
+            {"$.n * 2", "4"},
+            {"[1, 'a', null]", "[1, a, null]"}
+          ] do
+        wt =
+          switch("javascript", expression,
+            input_parameters: %{"n" => "${workflow.input.n}"},
+            decision_cases: %{case_name => [simple("T", "t")]}
+          )
+
+        assert {:ok, [sw, %Task{reference_task_name: "t"}]} =
+                 schedule(workflow([wt], %{"n" => 2}), wt)
+
+        assert sw.output_data["selectedCase"] == case_name
+      end
+    end
+
+    test "a script result map is stored as upstream stores it" do
+      # GraalJS 25.0.2 + Jackson 2.18.8 oracle: the non-finite doubles serialize as strings, and
+      # a user object shaped like a protocol tag stays a plain list.
+      wt =
+        switch(
+          "graaljs",
+          "({selectedCase: 'even', x: 0/0, y: [1/0, -0], tag: ['nonfinite', 'NaN']})"
+        )
+
+      assert {:ok, [sw, _t2]} = schedule(workflow([wt], %{}), wt)
+
+      assert sw.output_data == %{
+               "selectedCase" => "even",
+               "evaluationResult" => ["even"],
+               "x" => "NaN",
+               "y" => ["Infinity", -0.0],
+               "tag" => ["nonfinite", "NaN"]
+             }
+    end
+
+    test "the script sees a copy of the input" do
+      wt =
+        switch("javascript", "$.data.newKey = 'new value'; $.data.newKey",
+          input_parameters: %{"data" => "${workflow.input.data}"}
+        )
+
+      assert {:ok, [sw, _default]} =
+               schedule(workflow([wt], %{"data" => %{"original" => "value"}}), wt)
+
+      assert sw.input_data["data"] == %{"original" => "value"}
+      assert sw.output_data["selectedCase"] == "new value"
+    end
+
+    test "the script runs through the context's evaluate_script" do
+      parent = self()
+
+      evaluate = fn op, script, input ->
+        send(parent, {:evaluated, op, script, input})
+        {:ok, "even"}
+      end
+
+      wt = switch("javascript", "anything")
+
+      assert refs(schedule(workflow([wt], %{"route" => "x"}), wt, evaluate_script: evaluate)) ==
+               ["switchTask", "t2"]
+
+      assert_received {:evaluated, :eval, "anything", %{"route" => "x"}}
     end
 
     test "a case task already in progress is not scheduled again" do
@@ -179,9 +291,38 @@ defmodule Archon.Decider.MapperTest do
       assert refs(schedule(workflow([wt], %{"case" => "0"}), wt)) == ["decisionTask", "t1"]
     end
 
+    # DecisionTaskMapperTest#getEvaluatedCaseValueUsingExpression
+    test "a caseExpression is a script whose Java string picks the case" do
+      expression =
+        "if ($.Id == null) 'bad input'; else if ( ($.Id != null && $.Id % 2 == 0)) 'even'; " <>
+          "else 'odd'; "
+
+      wt =
+        decision(
+          case_expression: expression,
+          input_parameters: %{"Id" => "${workflow.input.Id}"},
+          decision_cases: %{"even" => [simple("Test2", "t2")], "odd" => [simple("Test3", "t3")]}
+        )
+
+      assert {:ok, [task, %Task{reference_task_name: "t2"}]} =
+               schedule(workflow([wt], %{"Id" => "22"}), wt)
+
+      assert task.input_data == %{"case" => "even", "hasChildren" => "true"}
+      assert task.output_data == %{"caseOutput" => ["even"]}
+
+      wt = decision(case_expression: "$.case == null ? null : 1/0")
+      assert {:ok, [task, _t1]} = schedule(workflow([wt], %{}), wt)
+      assert task.input_data["case"] == "null"
+      assert {:ok, [task, _t1]} = schedule(workflow([wt], %{"case" => 1}), wt)
+      assert task.input_data["case"] == "Infinity"
+    end
+
     # DecisionTaskMapperTest#getEvaluatedCaseValueException
-    test "a caseExpression terminates the workflow without a script evaluator" do
-      expression = "if ($.Id == null) 'bad input'; else 'odd';"
+    test "a caseExpression that fails terminates the workflow" do
+      expression =
+        "if ($Id == null) 'bad input'; else if ( ($Id != null && $Id % 2 == 0)) 'even'; " <>
+          "else 'odd'; "
+
       wt = decision(case_expression: expression)
 
       assert {:terminate, %Termination{reason: reason}} = schedule(workflow([wt], %{}), wt)

@@ -6,3 +6,14 @@ This product includes software derived from Conductor OSS
 Copyright Conductor Authors, licensed under the Apache License, Version 2.0.
 
 Conductor was originally developed at Netflix, Inc.
+
+This product includes QuickJS-ng (https://github.com/quickjs-ng/quickjs), vendored unmodified
+in c_src/quickjs-ng/ (version and checksums in c_src/quickjs-ng/VERSION), licensed under the
+MIT License:
+
+  Copyright (c) 2017-2026 Fabrice Bellard
+  Copyright (c) 2017-2024 Charlie Gordon
+  Copyright (c) 2023-2026 Ben Noordhuis
+  Copyright (c) 2023-2026 Saúl Ibarra Corretgé
+
+  The full license text is in c_src/quickjs-ng/LICENSE.
