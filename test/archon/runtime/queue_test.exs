@@ -70,4 +70,29 @@ defmodule Archon.Runtime.QueueTest do
     assert Memory.pop(ctx.server, "wait", 1, 0) == []
     assert Elixir.Task.await(first, 6_000) == ["a"]
   end
+
+  # Upstream POP_QUERY orders equal priorities and delivery times by created_on; postpone (remove
+  # and push) makes a new row. A clock that stands still gives equal delivery times.
+  test "equal delivery times pop in the order added, and postpone goes behind" do
+    server = start_supervised!({Memory, name: nil, clock: fn -> 1_000 end}, id: :frozen)
+
+    for id <- ~w(a b c), do: Memory.push(server, "order", id, 0, 0)
+    assert Memory.pop(server, "order", 3, 0) == ~w(a b c)
+
+    for id <- ~w(a b c), do: Memory.postpone(server, "order", id, 0, 0)
+    Memory.postpone(server, "order", "a", 0, 0)
+    Memory.push(server, "order", "b", 0, 0)
+    assert Memory.pop(server, "order", 3, 0) == ~w(b c a)
+  end
+
+  test "a push to another queue does not strand a waiting pop", ctx do
+    Memory.push(ctx.server, "a", "m", 0, 60_000)
+    waiting = Elixir.Task.async(fn -> Memory.pop(ctx.server, "a", 1, 2_000) end)
+    Process.sleep(50)
+    ctx.advance.(60_000)
+    Memory.push(ctx.server, "b", "other", 0, 0)
+    {elapsed, popped} = :timer.tc(fn -> Elixir.Task.await(waiting, 3_000) end)
+    assert popped == ["m"]
+    assert elapsed < 1_500_000
+  end
 end

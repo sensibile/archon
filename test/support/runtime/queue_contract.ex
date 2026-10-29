@@ -241,7 +241,9 @@ defmodule Archon.Runtime.QueueContract do
         end
 
         # POP_QUERY: ORDER BY priority DESC, deliver_on, created_on.
-        test "equal priorities pop by visible time, then by the order they were added", ctx do
+        # The order among equal delivery times (created_on) needs a clock that does not move with
+        # real time, so it is checked in the memory implementation's own tests.
+        test "equal priorities pop by delivery time", ctx do
           q(ctx, :push, ["order", "late", 0, 2_000])
           q(ctx, :push, ["order", "early", 0, 1_000])
           q(ctx, :push, ["order", "first", 0, 3_000])
@@ -250,7 +252,7 @@ defmodule Archon.Runtime.QueueContract do
           assert q(ctx, :pop, ["order", 4, 0]) == ["early", "late", "first", "second"]
         end
 
-        test "postpone puts the message behind its equals", ctx do
+        test "a postponed message comes after messages already due", ctx do
           q(ctx, :push, ["order", "a", 0, 0])
           q(ctx, :push, ["order", "b", 0, 0])
           ctx.advance.(1)

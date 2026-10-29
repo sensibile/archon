@@ -280,21 +280,20 @@ defmodule Archon.Runtime.Queue.Memory do
     %{state | waiters: waiters, waiting: waiting}
   end
 
-  # One timer for the earliest time a hidden message of a queue with waiting pops becomes visible.
+  # One timer for the earliest time a message of a queue with waiting pops is visible. A message
+  # already visible there (the clock passed it before a tick was handled) fires the timer at once.
   defp schedule_tick(state) do
     if state.tick, do: Process.cancel_timer(state.tick)
-    now = state.clock.()
 
-    hidden =
+    times =
       for queue <- Map.keys(state.waiting),
           {_id, %{visible_at: at}} <- Map.get(state.queues, queue, %{}),
-          at > now,
           do: at
 
     tick =
-      case hidden do
+      case times do
         [] -> nil
-        times -> Process.send_after(self(), :tick, Enum.min(times) - now)
+        times -> Process.send_after(self(), :tick, max(Enum.min(times) - state.clock.(), 0))
       end
 
     %{state | tick: tick}
