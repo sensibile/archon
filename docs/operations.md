@@ -33,6 +33,42 @@ archon 세션에서 예약 시각과 머지 방식을 포함한 계획에 "진�
   돌려주는 값을 기대값으로 쓰지 않는다.
 - 현재 코드에서 실패하는 테스트는 결함 의심으로 BOSS에게 보고하고, 제품 코드는 고치지 않는다.
 
+## auto-merge 전 경로 검사
+
+워커 PR이 바꿀 수 있는 범위는 문서와 모델 판단만으로 지키지 않는다. auto-merge를 켜기 직전에 리뷰한 head에서 아래
+명령을 실행해, 바뀐 경로가 모두 허용 목록 안에 있는지 기계적으로 확인한다. Codex가 동의했더라도 이 검사를
+통과하지 못하면 auto-merge를 켜지 않는다.
+
+아래 명령은 허용 밖 경로를 출력한다. 출력이 비어 있어야 통과다. 판정은 출력으로 한다(`grep`은 출력이 없을 때
+종료 코드 1을 낸다). `git diff`가 오류를 내면 통과로 보지 않는다.
+비교 기준은 최신 `origin/main`이므로, 실행 전에 `git fetch origin`을 한다.
+
+테스트 보강:
+
+```bash
+git diff --name-status --no-renames origin/main...HEAD | awk '$1 == "D" || $2 !~ /^test\//'
+```
+
+데일리 정리:
+
+```bash
+git diff --name-only --no-renames origin/main...HEAD \
+  | grep -Ev '^(lib/|test/|docs/|README\.md$)|^$' ; \
+git diff --name-only --no-renames origin/main...HEAD | grep -E '^docs/(adr/|operations\.md$)'
+```
+
+| 워커 | 허용 경로 | 추가 조건 |
+|---|---|---|
+| 테스트 보강(`test-gap`) | `test/` 아래 | 삭제(`D`) 없음 |
+| 데일리 정리(`daily-cleanup`) | `lib/`, `test/`, `docs/` 아래와 `README.md`. 단 `docs/adr/`, `docs/operations.md`는 제외 | 없음 |
+
+- 그 밖의 경로는 모두 허용 밖이다. 예: `.github/`, `mix.exs`, `mix.lock`, `config/`, `priv/`(외부 계약 포함),
+  `AGENTS.md`, `.gitignore`, 태극 설치본(`.taeguk/`, `.claude/`, `.codex/`, `.agents/`).
+  워커는 자기 권한 기록(이 문서, ADR, AGENTS.md)을 바꿀 수 없다.
+- 허용 밖 경로가 하나라도 있으면 그 PR에 `no-auto-merge` label을 붙이고, 해당 경로와 이유를 실행 보고에 남긴 뒤
+  BOSS에게 보고한다. 그 경로를 빼서 다시 리뷰하는 것은 허용한다.
+- head가 바뀌면(새 커밋, `gh pr update-branch`) auto-merge를 다시 켜기 전에 이 검사도 다시 한다.
+
 ## 공통
 
 - 검증 명령은 AGENTS.md "검증"의 여섯 가지다.

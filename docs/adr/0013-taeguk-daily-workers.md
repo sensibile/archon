@@ -26,6 +26,10 @@ archon 작업의 로컬 Codex 전송은 같은 날 상시 허용됐다.
    - 예약: 이 Mac의 로컬 Claude 예약 작업. 정리는 매일 09:01, 테스트 보강은 매일 10:01.
    - 머지 권한: Codex가 필요하다고 동의한 항목만 AGENTS.md "PR과 머지" 절차로 head를 고정해 auto-merge한다.
      Codex가 필요 없다고 보거나 판단이 불분명한 항목은 뺀다.
+   - 경로 허용 목록: auto-merge를 켜기 직전에, 바뀐 경로가 워커별 허용 목록 안에 있는지 `git diff`로 기계적으로
+     검사한다. 테스트 보강은 `test/`만 허용하고 삭제는 없어야 한다. 데일리 정리는 `lib/`, `test/`, `docs/`,
+     `README.md`만 허용하되 ADR과 운영 문서는 뺀다. 허용 밖 경로가 있으면 auto-merge를 켜지 않고 BOSS에게 보고한다.
+     목록과 절차는 운영 문서에 있다.
    - Codex 전송: archon diff를 로컬 Codex CLI로 보내는 것은 상시 허용이다.
 3. **coverage는 측정 도구로만 쓴다.** 측정 명령은 `mix test --cover`다. `mix.exs`에
    `test_coverage: [summary: [threshold: 0]]`을 두어, 통과한 suite가 커버리지 임계값(Elixir 기본 90%) 때문에
@@ -35,6 +39,8 @@ archon 작업의 로컬 Codex 전송은 같은 날 상시 허용됐다.
 ## 대안
 
 - **보고 모드만 적용:** BOSS가 자동 머지까지 고른 기본값과 맞지 않아 채택하지 않았다.
+- **서버 측 경로 보호(CODEOWNERS 필수 승인, ruleset 경로 제한):** 1인 저장소에서 BOSS 승인을 필수로 하면
+  워커가 auto-merge하는 의미가 없어진다. 우선 auto-merge 직전의 경로 검사로 범위를 막는다. 우회가 관측되면 다시 검토한다.
 - **GitHub Actions 예약 실행:** 로컬 Codex CLI와 로그인 상태가 필요해 이 Mac의 로컬 예약 작업으로 둔다.
 
 ## 결과
@@ -43,6 +49,9 @@ archon 작업의 로컬 Codex 전송은 같은 날 상시 허용됐다.
   그래서 임계값 0 설정이 없으면 측정 실행이 실패로 끝났을 것으로 본다. 이 부분은 추정이며 재현하지 않았다.
 - 예약 작업은 저장소 밖(`~/.claude/scheduled-tasks/`)에 있다. 이 Mac이 꺼져 있거나 Codex CLI 로그인이 풀리면
   실행은 NOT_RUN으로 보고된다.
+- 경로 검사도 워커가 실행하는 절차다. 서버가 강제하지 않는다. 공개 PR 댓글이나 upstream 소스에 섞인 지시문이
+  워커 판단을 흐릴 수 있다(로컬 보안 리뷰 F1·F2, 재현하지 않음). 허용 목록은 그런 경우에도 바꿀 수 있는 범위를
+  `lib/`, `test/`, `docs/`로 묶어 둔다. 권한 기록(운영 문서, ADR, AGENTS.md)은 워커가 바꿀 수 없다.
 - hoplites, acropolis, thesmothetai에는 적용하지 않는다. 그 프로젝트들에 적용하려면 Codex 전송 허용을 넓힌다는
   BOSS 확인이 먼저 필요하다.
 - 이 ADR은 구현 PR이 머지된 뒤 다음 PR에서 승인으로 바꾼다.
