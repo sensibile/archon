@@ -50,13 +50,21 @@ defmodule Archon.Runtime.Metadata.Memory do
 
   @impl Metadata
   @spec create_workflow_def(GenServer.server(), WorkflowDef.t()) :: :ok | {:error, :conflict}
-  def create_workflow_def(server \\ __MODULE__, %WorkflowDef{} = definition) do
+  def create_workflow_def(
+        server \\ __MODULE__,
+        %WorkflowDef{name: name, version: version} = definition
+      )
+      when is_binary(name) and is_integer(version) do
     GenServer.call(server, {:create_workflow_def, definition})
   end
 
   @impl Metadata
   @spec update_workflow_def(GenServer.server(), WorkflowDef.t()) :: :ok
-  def update_workflow_def(server \\ __MODULE__, %WorkflowDef{} = definition) do
+  def update_workflow_def(
+        server \\ __MODULE__,
+        %WorkflowDef{name: name, version: version} = definition
+      )
+      when is_binary(name) and is_integer(version) do
     GenServer.call(server, {:update_workflow_def, definition})
   end
 

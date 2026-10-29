@@ -99,8 +99,12 @@ defmodule Archon.Runtime.Store.Memory do
   # Upstream ExecutionDAO#createTasks rejects these before writing; a bad commit is a bug in the
   # caller, so it raises there instead of crashing the store.
   defp check_commit!(workflow_id, %Commit{create: create, workflow: workflow} = commit) do
-    for %Workflow{workflow_id: id} <- [create, workflow], id != workflow_id do
-      raise ArgumentError, "commit for #{workflow_id} carries workflow #{inspect(id)}"
+    for %Workflow{workflow_id: id, status: status} <- [create, workflow] do
+      if id != workflow_id,
+        do: raise(ArgumentError, "commit for #{workflow_id} carries workflow #{inspect(id)}")
+
+      if status not in Workflow.statuses(),
+        do: raise(ArgumentError, "workflow #{id} has status #{inspect(status)}")
     end
 
     created_tasks = if create, do: create.tasks, else: []
@@ -194,14 +198,18 @@ defmodule Archon.Runtime.Store.Memory do
   end
 
   def handle_call({:put_poll_data, poll_data}, _from, state) do
-    key = {poll_data.queue_name, poll_data.domain}
+    key = {poll_data.queue_name, poll_key(poll_data.domain)}
     {:reply, :ok, %{state | poll_data: Map.put(state.poll_data, key, poll_data)}}
   end
 
   def handle_call({:get_poll_data, task_type, domain}, _from, state) do
-    reply = Map.fetch(state.poll_data, {task_type, domain})
+    reply = Map.fetch(state.poll_data, {task_type, poll_key(domain)})
     {:reply, if(reply == :error, do: {:error, :not_found}, else: reply), state}
   end
+
+  # SqlitePollDataDAO stores a nil domain under "DEFAULT".
+  defp poll_key(nil), do: "DEFAULT"
+  defp poll_key(domain), do: domain
 
   defp apply_commit(state, workflow_id, %Commit{} = commit) do
     with {:ok, state} <- apply_create(state, workflow_id, commit.create),

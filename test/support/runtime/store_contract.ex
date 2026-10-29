@@ -393,6 +393,12 @@ defmodule Archon.Runtime.StoreContract do
 
           assert s(ctx, :get_poll_data, ["taskDef", "domain2"]) == {:error, :not_found}
 
+          # SqlitePollDataDAO keys a nil domain as "DEFAULT".
+          s(ctx, :put_poll_data, ["taskDef", "DEFAULT", "workerId3", 25])
+
+          assert {:ok, %{domain: "DEFAULT", worker_id: "workerId3"}} =
+                   s(ctx, :get_poll_data, ["taskDef", nil])
+
           s(ctx, :put_poll_data, ["taskDef", nil, "workerId2", 30])
 
           assert {:ok, %{worker_id: "workerId2", last_poll_time: 30}} =

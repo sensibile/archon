@@ -15,13 +15,15 @@ defmodule Archon.Runtime.Queue.Memory do
 
   One GenServer holds every queue. A `pop/4` that finds nothing visible is answered later: when a
   push makes a message visible, when a delayed or unacked message becomes visible, or with `[]`
-  at `timeout_ms`. Waiting pops on one queue are served in arrival order. Data is lost when the
+  at `timeout_ms`. Waiting pops on one queue are served in arrival order (this implementation's
+  choice; the behaviour does not promise it). Messages are kept in a map per queue and sorted on
+  each pop, which is enough for development and tests. Data is lost when the
   process stops. Each function takes an optional first argument, the server (this module's name by
   default); the arities without it are the behaviour callbacks.
 
   A popped message that is not acked becomes visible again `:unack_timeout` after the pop.
   Upstream `SqliteQueueDAO` makes it visible 60 seconds after its original delivery time, checked
-  by a sweep every 60 seconds, so there it reappears somewhere between at once and 60 seconds
+  by a sweep every 60 seconds, so there it reappears somewhere between at once and about 120 seconds
   after the pop. It keeps its place by original delivery time either way.
 
   Options of `start_link/1`:
@@ -171,7 +173,7 @@ defmodule Archon.Runtime.Queue.Memory do
 
   @impl GenServer
   def handle_info(:tick, state) do
-    state = Enum.reduce(Map.keys(state.waiting), %{state | tick: nil}, &serve(&2, &1))
+    state = Enum.reduce(Map.keys(state.waiting), state, &serve(&2, &1))
     {:noreply, schedule_tick(state)}
   end
 
@@ -253,6 +255,8 @@ defmodule Archon.Runtime.Queue.Memory do
             state
 
           {ids, state} ->
+            # A caller that died before its :DOWN arrived loses these IDs until the unack timeout,
+            # the same window as upstream between pop and ack.
             GenServer.reply(waiter.from, ids)
             state |> drop_waiter(ref) |> serve(queue)
         end

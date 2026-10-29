@@ -23,7 +23,8 @@ defmodule Archon.Runtime.Queue do
       only its visible time changes to the new delay and its popped mark is cleared; the priority
       and place among equal messages stay (`SqliteQueueDAO#pushMessage`).
     * `c:pop/3` - pops up to `count` visible messages, highest priority first, then earliest
-      visible time, then the order they were added. With none visible it waits up to `timeout_ms`
+      delivery time (`deliver_on`: set by push and postpone, not by pop or unack), then the order
+      they were added. With none visible it waits up to `timeout_ms`
       and answers as soon as at least one is (upstream issue 142); `count <= 0` answers `[]` at once.
       A popped message is still in the queue (`c:size/1`, `c:contains?/2`) and becomes visible again
       if it is not acked within the unack timeout (60 seconds by default).
@@ -33,6 +34,9 @@ defmodule Archon.Runtime.Queue do
       `QueueDAO#postpone` default), so the message also goes behind its equals.
     * `c:contains?/2` - whether the ID is in the queue, popped or not.
     * `c:size/1` - messages in the queue, popped or not (`SqliteQueueDAO#getSize`).
+
+  The contract tests move time with an injected clock, so an implementation computes visibility
+  from an application-side clock rather than a database `now()`.
   """
 
   @callback push(

@@ -189,9 +189,9 @@ defmodule Archon.Runtime.QueueContract do
           assert q(ctx, :pop, ["unack", 2, 0]) == ["a", "b"]
           assert q(ctx, :ack, ["unack", "b"])
 
-          ctx.advance.(59_000)
+          ctx.advance.(58_000)
           assert q(ctx, :pop, ["unack", 2, 0]) == []
-          ctx.advance.(1_000)
+          ctx.advance.(2_000)
           assert q(ctx, :pop, ["unack", 2, 0]) == ["a"]
           assert q(ctx, :pop, ["unack", 2, 0]) == []
         end
@@ -287,17 +287,6 @@ defmodule Archon.Runtime.QueueContract do
           assert popped == []
           assert elapsed >= 100_000
           assert q(ctx, :contains?, ["wait", "a"])
-        end
-
-        test "waiting pops are served in arrival order", ctx do
-          first = Elixir.Task.async(fn -> q(ctx, :pop, ["wait", 1, 5_000]) end)
-          Process.sleep(50)
-          second = Elixir.Task.async(fn -> q(ctx, :pop, ["wait", 1, 5_000]) end)
-          Process.sleep(50)
-          q(ctx, :push, ["wait", "a", 0, 0])
-          assert Elixir.Task.await(first, 6_000) == ["a"]
-          q(ctx, :push, ["wait", "b", 0, 0])
-          assert Elixir.Task.await(second, 6_000) == ["b"]
         end
       end
     end

@@ -31,7 +31,11 @@ defmodule Archon.Runtime.Store do
     * `c:in_progress_count/1` - tasks with this task definition name (`Task.task_def_name/1`) in
       `IN_PROGRESS` (upstream `getInProgressTaskCount`).
     * `c:put_poll_data/4`, `c:get_poll_data/2` - the last poll per task type and domain (upstream
-      `PollDataDAO`; a `nil` domain is its own key, upstream's `DEFAULT`).
+      `PollDataDAO`; a `nil` domain shares the key of the domain `"DEFAULT"`, as in
+      `SqlitePollDataDAO`, and the returned value keeps the domain it was written with).
+
+  Unlike upstream `ExecutionDAO#createTasks`, a commit does not skip tasks whose reference name
+  and retry count already exist; `Archon.Runtime.Step` deduplicates them (`dedupAndAddTasks`).
   """
 
   alias Archon.Domain.{Task, Workflow}
