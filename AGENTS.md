@@ -57,3 +57,10 @@ mix deps.audit
   해소를 요구하므로, 판정해 반영하거나 이유를 답한 뒤 해소합니다.
 - PR 제목·본문·댓글에는 `@codex` 문자열을 쓰지 않습니다. 백틱 안에 있어도 멘션으로 읽혀 리뷰 대신
   Codex 클라우드 작업이 호출됩니다(PR #11, 태극 PR #13~#16). 가리킬 때는 "Codex 리뷰 요청"처럼 풀어 씁니다.
+
+## 태극 설치본과 정기 작업
+
+- `.taeguk/rules/`, `.taeguk/receipts/`, `.claude/agents/taeguk-*`, `.claude/skills/taeguk-*`, `.codex/agents/taeguk_*`, `.agents/skills/taeguk-*`는
+  태극 설치기가 배치한 사본입니다. 직접 고치지 않고 태극 원본을 고친 뒤 재설치합니다([ADR 0007](docs/adr/0007-taeguk-adoption.md)).
+  이 사본의 스킬·역할 문서는 태극 규약에 따라 영어이므로 한국어로 바꾸지 않습니다. 이 저장소의 사람용 문서와 PR은 한국어입니다.
+- 데일리 정리와 테스트 보강은 매일 로컬 예약 작업으로 돕니다. 승인 기록과 실행 방법은 [운영 문서](docs/operations.md)에 있습니다.

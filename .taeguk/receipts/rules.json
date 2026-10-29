@@ -1,17 +1,18 @@
 {
   "schema_version": 1,
-  "source_version": "9119a54c4ead760e8620df57765dc6b8799ab478",
-  "link_pin": "9119a54c4ead760e8620df57765dc6b8799ab478",
+  "source_version": "c6b42fb1ced01249d24a8134c5fc0510dd5c3489",
+  "link_pin": "c6b42fb1ced01249d24a8134c5fc0510dd5c3489",
   "files": {
-    ".taeguk/rules/approvals.md": "8a1dd9af23afe709be9e0c26925b2cd358d147f5518ebb356d9547ae449d1135",
+    ".taeguk/rules/approvals.md": "712944775c3484d979ae4a26dad1d945c512a416b01105303a504cc100b3b768",
     ".taeguk/rules/delivery.md": "66a66923fb3296d7f286d8845883c5678375b578e9fc00d0b7bc6bb7df80c68d",
     ".taeguk/rules/governance.md": "98adb27880316ba215426c136e80335b00e1673fc41228330ec3141b30be0ffc",
     ".taeguk/rules/index.md": "1014a23c145c0c5817e815a45d0b1a790e929e5c59c991df69f55cc1d9f4bb38",
-    ".taeguk/rules/mechanical-checks.md": "e8c3fe3961858913f66e7de4e6e9a820b7b9a0e81e2e42803bfd62b32e90969d",
+    ".taeguk/rules/mechanical-checks.md": "f75cdb1728f8f8a1804a58b8cf68c09000ed217432da534e7210e13363b8c74d",
     ".taeguk/rules/proposals/archon-pilot.md": "17a04d16047ccb26dec8ac056f522ba2726bb08936bf448e1d1840fa7c5b4170",
-    ".taeguk/rules/proposals/index.md": "e354b20edde6a36f37e9316e03fe7e3d69c197440f0590c0d66a6932cb70e19c",
+    ".taeguk/rules/proposals/coverage-as-instrument.md": "ff17cbf44e058a01015f7387a56f2494c560535f33ba46294dbf2f896306ff7e",
+    ".taeguk/rules/proposals/index.md": "905c601bf6dad413e8542a9cf7c48e31386fd77f699bcbe36627ff8a45899e39",
     ".taeguk/rules/proposals/intent-requirement-records.md": "004be0b10f188ea1ccfebfe49dbb1ec7f825e228e028531c46113d0a36420a86",
-    ".taeguk/rules/proposals/review-loop-exit.md": "2a855ad92e8aea80c3747524c8ea5f17f2f494f56a18c3b8cbcaa0a4156ecbc9",
+    ".taeguk/rules/proposals/review-loop-exit.md": "e285d0c5dc9db2f1ee30d17cc4164efebc85c8027da41bab051e92cf39f9743a",
     ".taeguk/rules/registry.toml": "6fc76adeb33cb00c22b6da8d9061da78826c87d7fdfa79fa22734235ffa5bffe",
     ".taeguk/rules/verification.md": "da9a550eb5de5c2064486400bdcab6601a4091b918d03bf96fa4b0c439509d2d"
   }

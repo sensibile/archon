@@ -28,3 +28,7 @@ archon-*.tar
 
 # Python bytecode from the Codex review gate script tests.
 __pycache__/
+
+# Taeguk worker run reports (daily cleanup, test gap) stay local.
+/.taeguk/daily-cleanup/
+/.taeguk/test-gap/
