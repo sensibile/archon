@@ -11,6 +11,10 @@ defmodule Archon.Decider.Context do
     * `new_id` - generates task IDs (upstream `IDGenerator.generate()`). UUID v4 by default.
     * `task_defs` - task definitions by name, filled by the caller for the names the workflow
       definition uses. Replaces `MetadataDAO.getTaskDef`; a missing name is upstream's `null`.
+    * `latest_workflow_versions` - the latest version of each workflow definition name, filled by
+      the caller for the sub-workflows the definition starts. Replaces
+      `MetadataDAO.getLatestWorkflowDef` in the `SUB_WORKFLOW` mapper; a missing name is
+      upstream's empty result.
     * `system_tasks` - the system task registry, see `Archon.Decider.SystemTasks`.
     * `jitter` - given the configured `backoffJitterMs`, returns a value in `0..max`. Replaces
       upstream's `ThreadLocalRandom` in `retry`; uniform by default.
@@ -20,13 +24,21 @@ defmodule Archon.Decider.Context do
   alias Archon.Domain.TaskDef
 
   @enforce_keys [:now]
-  defstruct [:now, :new_id, :jitter, task_defs: %{}, system_tasks: %{}]
+  defstruct [
+    :now,
+    :new_id,
+    :jitter,
+    task_defs: %{},
+    latest_workflow_versions: %{},
+    system_tasks: %{}
+  ]
 
   @type t :: %__MODULE__{
           now: integer(),
           new_id: (-> String.t()),
           jitter: (non_neg_integer() -> non_neg_integer()),
           task_defs: %{optional(String.t()) => TaskDef.t()},
+          latest_workflow_versions: %{optional(String.t()) => integer()},
           system_tasks: SystemTasks.t()
         }
 
@@ -41,6 +53,7 @@ defmodule Archon.Decider.Context do
       new_id: Keyword.get(opts, :new_id, &uuid4/0),
       jitter: Keyword.get(opts, :jitter, &uniform_jitter/1),
       task_defs: Keyword.get(opts, :task_defs, %{}),
+      latest_workflow_versions: Keyword.get(opts, :latest_workflow_versions, %{}),
       system_tasks: Keyword.get(opts, :system_tasks, SystemTasks.default())
     }
   end

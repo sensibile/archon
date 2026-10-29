@@ -18,7 +18,18 @@ defmodule Archon.Decider.Mapper do
   (ADR 0014, decision 5).
   """
 
-  alias Archon.Decider.Mapper.{Context, Decision, ForkJoin, Join, Simple, Switch, UserDefined}
+  alias Archon.Decider.Mapper.{
+    Context,
+    Decision,
+    ForkJoin,
+    Join,
+    Simple,
+    SubWorkflow,
+    Switch,
+    UserDefined,
+    Wait
+  }
+
   alias Archon.Domain.{Task, WorkflowTask}
 
   @callback map(WorkflowTask.t(), Context.t()) :: {:ok, [Task.t()]} | {:terminate, String.t()}
@@ -28,7 +39,9 @@ defmodule Archon.Decider.Mapper do
     "SWITCH" => Switch,
     "DECISION" => Decision,
     "FORK_JOIN" => ForkJoin,
-    "JOIN" => Join
+    "JOIN" => Join,
+    "SUB_WORKFLOW" => SubWorkflow,
+    "WAIT" => Wait
   }
 
   @doc "The mapper for a task type, `UserDefined` when none is registered."

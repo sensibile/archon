@@ -1,7 +1,7 @@
 # ADR 0014: Phase 2 Decider 설계
 
 - 상태: 제안
-- 날짜: 2026-10-29 (2b에서 결정 1·2·5, 2c에서 결정 5·6 갱신)
+- 날짜: 2026-10-29 (2b에서 결정 1·2·5, 2c에서 결정 5·6, 2d에서 결정 2·5 갱신)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 
 ## 맥락
@@ -67,6 +67,7 @@ Decider가 이 필드를 읽는다(`TaskModel.firstScheduledTime`, `waitTimeout`
 | `task_defs :: %{String.t() => TaskDef.t()}` | `MetadataDAO.getTaskDef` | 호출자가 정의에 나오는 이름으로 미리 채운다. 없으면 upstream의 `null`과 같다 |
 | `system_tasks` | `SystemTaskRegistry` | 타입 → `isAsyncComplete` 규칙(`:by_task` 또는 고정 값). 기본은 MVP 시스템 태스크 `DECISION`, `SWITCH`, `FORK`, `JOIN`, `DO_WHILE`, `SUB_WORKFLOW`(항상 `true`), `WAIT` |
 | `jitter :: (max -> 0..max)` | `ThreadLocalRandom` | 2b에서 추가. 재시도 지연의 `backoffJitterMs`. 기본은 균등 난수, 테스트는 고정 함수 |
+| `latest_workflow_versions :: %{String.t() => integer()}` | `MetadataDAO.getLatestWorkflowDef` | 2d에서 추가. SUB_WORKFLOW 매퍼가 버전이 없는 하위 워크플로우의 최신 버전을 찾는다. 호출자가 정의에 나오는 하위 워크플로우 이름으로 미리 채운다. 없으면 upstream의 빈 `Optional`과 같다 |
 
 `new_id`와 `jitter`는 Decider가 받는 입력 중 결정적이지 않은 값이다. 테스트에서는 결정적 생성기를 넣으므로
 같은 입력에 같은 결과가 나온다. "부수효과 없음"은 I/O·영속성·큐·프로세스 메시지가 없다는 뜻으로 쓴다.
@@ -137,14 +138,31 @@ MVP 정의에서 쓰는 경로는 위 부분집합 안에 있다.
   - 다른 태스크를 이어서 예약하는 매퍼(SWITCH·DECISION·FORK_JOIN)는 upstream처럼
     `Decider.tasks_to_be_scheduled/5`를 다시 부른다(`Mapper.Context.tasks_to_be_scheduled/3`). 안쪽 종료는
     그 문구 그대로 매퍼의 종료 값이 된다.
-  - 실행 단계는 `Archon.Decider.SystemTask.execute(workflow, task) :: {boolean(), Task.t()}`이다. upstream
-    `execute`의 반환값과 바뀐 태스크를 함께 돌려준다. SWITCH·DECISION은 `COMPLETED`, FORK는 기본
-    `execute`(변화 없음), JOIN은 `SystemTask.Join`이다.
+  - 실행 단계는 `Archon.Decider.SystemTask.execute(workflow, task, now) :: {boolean(), Task.t()}`이다.
+    upstream `execute`의 반환값과 바뀐 태스크를 함께 돌려준다. SWITCH·DECISION은 `COMPLETED`, FORK는 기본
+    `execute`(변화 없음), JOIN은 `SystemTask.Join`이다. `now`는 2d에서 WAIT 때문에 더했다(결정 2의 시계와
+    같은 이유로 인자로 받는다).
   - 언제 `execute`를 부르는지(SWITCH·DECISION·FORK는 decide 루프 안에서 동기, JOIN은 시스템 태스크 큐에서
     비동기)와, JOIN 대상 가지 태스크가 성공했을 때 decide를 건너뛰는 `isLazyEvaluateWorkflow`, JOIN의
     재평가 간격(`getEvaluationOffset`)은 큐·저장과 묶여 있으므로 Phase 3 런타임이 맡는다.
   - JOIN은 upstream의 에이전트 워크플로우 출력 가공(정의 `metadata`의 `agent_sdk`·`agentDef`)도 옮긴다.
     `metadata`는 Phase 1 `WorkflowDef`에 이미 있는 계약 필드다.
+- 2d에서 정한 세부:
+  - SUB_WORKFLOW 매퍼는 upstream `SubWorkflowTaskMapper`를 옮긴다. `subWorkflowParam`의 이름·우선순위·
+    `taskToDomain`·멱등 키를 입력처럼 해석하고, `workflowDefinition`이 `${...}` 문자열이면 함께 해석하고
+    인라인 정의면 해석한 뒤 JSON으로 넣는다. 인라인 정의가 없고 버전도 없으면 결정 2의
+    `latest_workflow_versions`에서 찾고, 없으면 upstream 문구로 종료한다.
+  - WAIT 매퍼는 upstream `WaitTaskMapper`를 옮긴다. `duration`·`until` 해석은 upstream `DateTimeUtils`를
+    `Archon.Domain.DateTimeUtils`로 옮기고, `TaskTypeConstraint`의 `duration` 검사도 같은 함수를 쓴다.
+    `until`은 upstream이 부르는 commons-lang3 3.18 `DateUtils.parseDate`(관대한 모드)를 그 세 패턴에 대해
+    다시 구현했다. 월·일·시·분이 범위를 넘으면 넘겨 계산하고, 숫자 앞의 Java 공백을 건너뛰며, `int`를
+    넘는 숫자는 실패다. 결과는 로컬 캐시의 `commons-lang3-3.18.0.jar`를 UTC에서 돌린 값과 맞췄다.
+  - WAIT 실행 판정은 `SystemTask.execute/3`이다. `now`가 `wait_timeout`을 지나면 `COMPLETED`이고,
+    `wait_timeout`이 0이면 계속 기다린다. 재평가 간격(`getEvaluationOffset`)은 JOIN처럼 런타임이 맡는다.
+  - SUB_WORKFLOW 실행 판정은 하위 워크플로우가 있어야 하므로 `SystemTask.SubWorkflow.execute(task, child)`로
+    따로 둔다. 런타임이 `Task.sub_workflow_id/1`로 하위 워크플로우를 읽어 넘기고(없으면 `nil`), 종료 상태가
+    되면 태스크가 그 상태·출력·실패 이유를 따른다(upstream `updateTaskStatus`). 하위 워크플로우 시작
+    (`start`, `SCHEDULED`인데 하위 워크플로우가 없을 때의 재시작)과 취소는 Phase 3 런타임이 맡는다.
 
 ### 6. 평가기는 `value-param`만 먼저 구현한다
 
@@ -181,7 +199,7 @@ MVP 정의에서 쓰는 경로는 위 부분집합 안에 있다.
 | 2a | 결정 4, 7, 결정 3의 필드 추가 | upstream `ParametersUtilsTest`, `TestWorkflowDef`, `WorkflowTaskTypeConstraintTest`, `TestDeciderService`(입력 해석·`getNextTask`)에서 옮긴 사례 |
 | 2b | 결정 1, 2와 SIMPLE: 시작, 다음 태스크, 재시도, 타임아웃, 완료 판정 | `workflow_get_completed_simple.json` 재현, upstream `TestDeciderService` |
 | 2c | SWITCH(`value-param`), FORK_JOIN, JOIN | `workflow_get_completed_switch.json`, `workflow_get_completed_fork.json` 재현 |
-| 2d | SUB_WORKFLOW, WAIT의 결정 부분 | upstream 매퍼 테스트 |
+| 2d | SUB_WORKFLOW, WAIT의 결정 부분 | upstream `SubWorkflowTaskMapperTest`, `WaitTaskMapperTest`, `TestSubWorkflow`(execute), `DateTimeUtilsTest`와 commons-lang3 `DateUtils.parseDate` 실행 결과 |
 | 2e | DO_WHILE | 결정 6의 평가기 ADR 이후 |
 
 "재현"은 시작 요청과 `task_update_*` 픽스처의 결과를 차례로 넣으며 `decide`를 반복했을 때, 마지막
@@ -200,6 +218,20 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
   upstream은 이름이 일치하는 서버 환경 변수를 그대로 태스크 입력에 넣는데, 이는 서버 비밀을 워크플로우
   정의로 꺼낼 수 있는 경로다. 정의 등록 시 `${...}` 참조 검사(ADR 0002의 `WorkflowDef.validate/2`)는
   upstream처럼 환경 변수 존재를 참조 유효성으로 인정하므로, 그런 정의는 등록되지만 실행 시 값은 `null`이다.
+- WAIT `until`의 시간대 없는 시각은 UTC로 읽는다. upstream은 서버 JVM 기본 시간대로 읽으므로 UTC로 도는
+  서버와 같다. 시간대는 `GMT`·`UTC`(대소문자 무관), `GMT±H:MM`·`GMT±HH:MM`, `±HHMM`만 받는다. upstream이
+  서버 로캘의 시간대 이름으로 받는 `KST`·`PST` 등은 시간대 데이터베이스가 필요하므로 받지 않고, upstream이
+  `until`을 해석하지 못했을 때의 문구로 태스크를 `FAILED_WITH_TERMINAL_ERROR`로 만든다. ASCII가 아닌 숫자도
+  받지 않는다. 1582-10-15 이전 날짜와, 밀리초가 Java `long`을 넘는 약 2억 9천만 년 이후 날짜(upstream은
+  `2147483647-01-01`을 음수 시각으로 읽어 바로 끝낸다)는 율리우스력이나 Java `Calendar` 넘침 대신 proleptic
+  그레고리력으로 정확히 계산한다. 정의 등록 시 `until` 검사는 결정 7대로 모양만 보므로, 이런 값은
+  등록되고 실행 시 실패한다.
+- WAIT `duration`이 실행 시 해석되지 않으면(`${...}`가 잘못된 값으로 풀린 경우) upstream은 매퍼에서
+  `IllegalArgumentException`을 던져 decide가 매번 실패하고 워크플로우가 멈춘다. Archon은 upstream 예외 문구
+  `Not valid duration: <duration>`으로 태스크를 `FAILED_WITH_TERMINAL_ERROR`로 만든다.
+- SUB_WORKFLOW 이름이 `null`로 풀리면 upstream은 `NullPointerException`을 던진다. Archon은
+  `Task <name> is defined as sub-workflow and its subWorkflowParams name resolved to null`로 워크플로우를
+  종료시킨다.
 - `javascript`·`graaljs`·`python` 평가기, DECISION `caseExpression`, DO_WHILE은 별도 ADR 전까지 동작하지
   않는다. DECISION `caseExpression`은 upstream에서 스크립트가 실패할 때와 같은 문구로 종료한다.
 - FORK_JOIN의 가지 목록 중 빈 가지가 있으면 upstream은 `IndexOutOfBoundsException`을 낸다. Archon은 그
@@ -230,7 +262,8 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
 
 - 2a(결정 3의 필드, 결정 4, 결정 7)를 첫 PR로 구현했다. 2b(결정 1, 2, SIMPLE·USER_DEFINED 매퍼)를 두 번째
   PR로 구현했다. 2c(SWITCH `value-param`·DECISION `caseValueParam`·FORK_JOIN·JOIN 매퍼, 결정 5의
-  SWITCH·DECISION·JOIN 실행 판정)를 세 번째 PR로 구현했다. 2d~2e는 아직 구현하지 않았다. 조각마다 PR을
+  SWITCH·DECISION·JOIN 실행 판정)를 세 번째 PR로 구현했다. 2d(SUB_WORKFLOW·WAIT 매퍼, WAIT·SUB_WORKFLOW
+  실행 판정, `DateTimeUtils`)를 네 번째 PR로 구현했다. 2e는 아직 구현하지 않았다. 조각마다 PR을
   올리고, 마지막 조각이 머지되면 이 ADR을 `승인`으로 바꾼다.
 - 재현 테스트(`test/archon/decider/simple_replay_test.exs`, 2c의 `system_task_replay_test.exs`)는 런타임
   역할을 `test/support/decider_replay.ex`에서 흉내 낸다. 2c에서 decide 루프의 동기 시스템 태스크 실행,
@@ -242,7 +275,8 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
   완료 시 태스크를 갱신하지 않고 상태·출력만 저장하는 동작은 upstream `WorkflowExecutorOps`를 따랐고,
   Phase 3 런타임이 같은 규칙을 지켜야 픽스처와 같아진다. 마지막 태스크의 `executed: false`가 그 결과다.
 - 결정 3의 내부 필드 중 `first_scheduled_time`, `callback_after_ms`는 2b Decider가 읽고 쓴다.
-  `wait_timeout`, `loop_task_id`, `previous_status`, `failed_task_id`는 2c 이후와 Phase 3에서 쓴다.
+  `wait_timeout`은 2d의 WAIT 매퍼와 실행 판정이 쓴다. `loop_task_id`, `previous_status`, `failed_task_id`는
+  2e와 Phase 3에서 쓴다.
 - 입력 해석은 upstream처럼 결과 크기에 상한이 없다. `${workflow.input.x}`를 정의에 여러 번 쓰고 큰 `x`를 넣으면
   결과 문자열이 두 크기의 곱만큼 커진다(2a 로컬 보안 리뷰 지적). upstream도 같은 성질이고 아직 이를 부르는
   REST 경로가 없으므로 2a에서는 동작을 바꾸지 않는다. Phase 5에서 요청 본문 크기 제한과 함께 확장 상한을

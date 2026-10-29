@@ -4,14 +4,17 @@
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
 #
 # Ported from conductor-oss core/src/test/java/com/netflix/conductor/core/execution/tasks/TestJoin.java,
-# JoinTest.java and SwitchTest.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
+# JoinTest.java, SwitchTest.java and TestSubWorkflow.java (execute cases)
+# at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: rewritten as ExUnit tests against the pure execute; the evaluation
-# offset cases move with the queue to Phase 3 (ADR 0014).
+# offset cases move with the queue, and the start and cancel cases with starting the child, to
+# Phase 3 (ADR 0014).
 
 defmodule Archon.Decider.SystemTaskTest do
   use ExUnit.Case, async: true
 
   alias Archon.Decider.SystemTask
+  alias Archon.Decider.SystemTask.SubWorkflow
   alias Archon.Domain.{Task, Workflow, WorkflowDef, WorkflowTask}
 
   # TestJoin#createTask
@@ -40,17 +43,21 @@ defmodule Archon.Decider.SystemTaskTest do
       input_data: %{"joinOn" => Enum.map(tasks, & &1.reference_task_name) ++ extra_refs}
     }
 
-    SystemTask.execute(%Workflow{workflow_definition: definition, tasks: tasks ++ [join]}, join)
+    SystemTask.execute(
+      %Workflow{workflow_definition: definition, tasks: tasks ++ [join]},
+      join,
+      0
+    )
   end
 
   test "SWITCH and DECISION complete; FORK does nothing" do
     for type <- ["SWITCH", "DECISION"] do
       task = %Task{task_type: type, status: :in_progress}
-      assert {true, %Task{status: :completed}} = SystemTask.execute(%Workflow{}, task)
+      assert {true, %Task{status: :completed}} = SystemTask.execute(%Workflow{}, task, 0)
     end
 
     fork = %Task{task_type: "FORK", status: :completed}
-    assert {false, ^fork} = SystemTask.execute(%Workflow{}, fork)
+    assert {false, ^fork} = SystemTask.execute(%Workflow{}, fork, 0)
   end
 
   describe "JOIN" do
@@ -132,7 +139,7 @@ defmodule Archon.Decider.SystemTaskTest do
       workflow = %Workflow{workflow_definition: %WorkflowDef{}, tasks: [task, join]}
 
       assert {true, %Task{status: :completed, output_data: %{"task1__2" => %{"i" => 2}}}} =
-               SystemTask.execute(workflow, join)
+               SystemTask.execute(workflow, join, 0)
     end
 
     test "reads the latest task of a reference name" do
@@ -185,7 +192,95 @@ defmodule Archon.Decider.SystemTaskTest do
       join = %Task{task_type: "JOIN", status: :in_progress, input_data: %{"joinOn" => ["t1"]}}
 
       assert {true, %Task{status: :completed}} =
-               SystemTask.execute(%Workflow{tasks: [task, join]}, join)
+               SystemTask.execute(%Workflow{tasks: [task, join]}, join, 0)
+    end
+  end
+
+  describe "WAIT" do
+    test "completes once now is past the wait timeout" do
+      task = %Task{task_type: "WAIT", status: :in_progress, wait_timeout: 1000}
+
+      assert {false, ^task} = SystemTask.execute(%Workflow{}, task, 999)
+      assert {false, ^task} = SystemTask.execute(%Workflow{}, task, 1000)
+      assert {true, %Task{status: :completed}} = SystemTask.execute(%Workflow{}, task, 1001)
+    end
+
+    test "a zero wait timeout waits forever" do
+      task = %Task{task_type: "WAIT", status: :in_progress, wait_timeout: 0}
+      assert {false, ^task} = SystemTask.execute(%Workflow{}, task, 1_800_000_000_000)
+    end
+  end
+
+  describe "SUB_WORKFLOW" do
+    defp sub_task do
+      %Task{
+        task_type: "SUB_WORKFLOW",
+        sub_workflow_id: "sub-workflow-id",
+        output_data: %{"subWorkflowId" => "sub-workflow-id"}
+      }
+    end
+
+    defp child(status, extra \\ []) do
+      struct!(
+        %Workflow{
+          workflow_id: "sub-workflow-id",
+          workflow_definition: %WorkflowDef{name: "UnitWorkFlow", version: 2},
+          status: status
+        },
+        extra
+      )
+    end
+
+    # TestSubWorkflow#testExecuteSubWorkflowWithoutId and
+    # #testExecuteReturnsFalseWhenSubWorkflowNotFoundInStore: the runtime finds no child.
+    test "without a child nothing changes" do
+      task = sub_task()
+      assert {false, ^task} = SubWorkflow.execute(task, nil)
+    end
+
+    # TestSubWorkflow#testExecuteWorkflowStatus
+    test "the task follows the child's terminal status" do
+      task = sub_task()
+      assert {false, ^task} = SubWorkflow.execute(task, child(:running))
+      assert {false, ^task} = SubWorkflow.execute(task, child(:paused))
+
+      assert {true, %Task{status: :completed, reason_for_incompletion: nil}} =
+               SubWorkflow.execute(task, child(:completed))
+
+      for {status, task_status, reason} <- [
+            {:failed, :failed, "unit1"},
+            {:timed_out, :timed_out, "unit2"},
+            {:terminated, :canceled, "unit3"}
+          ] do
+        assert {true, %Task{status: ^task_status} = updated} =
+                 SubWorkflow.execute(task, child(status, reason_for_incompletion: reason))
+
+        assert updated.reason_for_incompletion ==
+                 "Sub workflow UnitWorkFlow.2/sub-workflow-id failure reason: #{reason}"
+      end
+    end
+
+    test "a terminal child's output is added to the task's output" do
+      assert {true, %Task{output_data: output}} =
+               SubWorkflow.execute(sub_task(), child(:completed, output: %{"r" => 1}))
+
+      assert output == %{"subWorkflowId" => "sub-workflow-id", "r" => 1}
+    end
+
+    test "update_task_status keeps a running child's task in progress without its output" do
+      task = SubWorkflow.update_task_status(child(:running, output: %{"r" => 1}), sub_task())
+
+      assert {task.status, task.output_data} ==
+               {:in_progress, %{"subWorkflowId" => "sub-workflow-id"}}
+    end
+
+    test "a failed child without a definition or reason reads null in the reason" do
+      child = %Workflow{workflow_id: "c", status: :failed}
+
+      assert {true, %Task{reason_for_incompletion: reason}} =
+               SubWorkflow.execute(sub_task(), child)
+
+      assert reason == "Sub workflow null.null/c failure reason: null"
     end
   end
 end
