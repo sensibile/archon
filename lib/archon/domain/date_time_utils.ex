@@ -26,8 +26,9 @@ defmodule Archon.Domain.DateTimeUtils do
 
   Not reproduced (ADR 0014): zone names other than `GMT`/`UTC` such as `KST` or `PST`, which
   need a time zone database and upstream's server locale; non-ASCII digits; and the Julian
-  calendar `GregorianCalendar` uses before 1582-10-15 and its overflow for years past the `int`
-  range. Those dates are computed in the proleptic Gregorian calendar.
+  calendar `GregorianCalendar` uses before 1582-10-15 and its overflow of `long` milliseconds
+  around year 292,278,994 (`2147483647-01-01` is a negative time upstream). Those dates are
+  computed exactly in the proleptic Gregorian calendar.
   """
 
   @int_max 2_147_483_647

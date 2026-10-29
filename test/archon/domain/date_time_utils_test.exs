@@ -169,5 +169,10 @@ defmodule Archon.Domain.DateTimeUtilsTest do
       assert DateTimeUtils.parse_date("2022-12-12 10:00 KST") == :error
       assert DateTimeUtils.parse_date("2022-12-12 10:00 PST") == :error
     end
+
+    test "a year whose milliseconds overflow Java's long is computed exactly (upstream wraps)" do
+      # Upstream: -6019000092841406464.
+      assert DateTimeUtils.parse_date("2147483647-01-01") == {:ok, 67_767_976_201_996_800_000}
+    end
   end
 end

@@ -29,6 +29,8 @@ defmodule Archon.Decider.Mapper.Wait do
   # Integer.MAX_VALUE: no duration waits forever.
   @forever 2_147_483_647
 
+  @java_blank ~r/^[\t-\r\x{1C}-\x{20}\x{1680}\x{2000}-\x{2006}\x{2008}-\x{200A}\x{2028}\x{2029}\x{205F}\x{3000}]*\z/u
+
   @impl true
   def map(%WorkflowTask{}, %Context{} = context) do
     task = Context.create_task(context)
@@ -89,7 +91,8 @@ defmodule Archon.Decider.Mapper.Wait do
   defp wait_input(nil), do: ""
   defp wait_input(value), do: Parameters.java_string(value)
 
-  defp blank?(value), do: String.trim(value) == ""
+  # StringUtils.isBlank: only Character.isWhitespace characters, so a no-break space is not blank.
+  defp blank?(value), do: Regex.match?(@java_blank, value)
 
   defp isolation_group_id(%TaskDef{isolation_group_id: id}), do: id
   defp isolation_group_id(nil), do: nil

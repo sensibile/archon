@@ -222,8 +222,9 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
   서버와 같다. 시간대는 `GMT`·`UTC`(대소문자 무관), `GMT±H:MM`·`GMT±HH:MM`, `±HHMM`만 받는다. upstream이
   서버 로캘의 시간대 이름으로 받는 `KST`·`PST` 등은 시간대 데이터베이스가 필요하므로 받지 않고, upstream이
   `until`을 해석하지 못했을 때의 문구로 태스크를 `FAILED_WITH_TERMINAL_ERROR`로 만든다. ASCII가 아닌 숫자도
-  받지 않는다. 1582-10-15 이전 날짜와 `int` 범위를 넘는 연도는 율리우스력이나 Java `Calendar` 넘침 대신
-  proleptic 그레고리력으로 계산한다. 정의 등록 시 `until` 검사는 결정 7대로 모양만 보므로, 이런 값은
+  받지 않는다. 1582-10-15 이전 날짜와, 밀리초가 Java `long`을 넘는 약 2억 9천만 년 이후 날짜(upstream은
+  `2147483647-01-01`을 음수 시각으로 읽어 바로 끝낸다)는 율리우스력이나 Java `Calendar` 넘침 대신 proleptic
+  그레고리력으로 정확히 계산한다. 정의 등록 시 `until` 검사는 결정 7대로 모양만 보므로, 이런 값은
   등록되고 실행 시 실패한다.
 - WAIT `duration`이 실행 시 해석되지 않으면(`${...}`가 잘못된 값으로 풀린 경우) upstream은 매퍼에서
   `IllegalArgumentException`을 던져 decide가 매번 실패하고 워크플로우가 멈춘다. Archon은 upstream 예외 문구

@@ -482,6 +482,17 @@ defmodule Archon.Decider.MapperTest do
                "Invalid/Unsupported Wait Until format.  Provided: 2022-12-12 10:00 KST"
     end
 
+    test "a no-break space is not blank, so it fails as an until (StringUtils.isNotBlank)" do
+      task = schedule_wait(wait(%{"until" => "\u00a0"}))
+      assert task.status == :failed_with_terminal_error
+
+      assert task.reason_for_incompletion ==
+               "Invalid/Unsupported Wait Until format.  Provided: \u00a0"
+
+      task = schedule_wait(wait(%{"until" => " \t"}))
+      assert {task.status, task.callback_after_seconds} == {:in_progress, 2_147_483_647}
+    end
+
     test "a duration that does not parse fails the task where upstream throws" do
       task = schedule_wait(wait(%{"duration" => "${workflow.input.d}"}), %{"d" => "5.0s"})
       assert task.status == :failed_with_terminal_error
