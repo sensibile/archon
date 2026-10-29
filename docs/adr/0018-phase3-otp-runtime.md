@@ -440,8 +440,8 @@ upstream의 두 종료 경로를 그대로 나눈다. 둘 다 순서는 "남은 
 ### 9. 생명주기 연산(REST는 Later)
 
 일시정지·재개·재시도·재시작은 REST가 Later지만 하위 워크플로우 재시도(`updateAndPushParents`)와 얽혀 있어 런타임 메시지로
-Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종료 상태면 conflict, `resumeWorkflow`: `PAUSED`가 아니면
-오류와 `lastRetriedTime`, `retry`: 실패·취소 태스크 재예약과 JOIN·DO_WHILE 제자리 재시도, `restart`: 태스크 비우고 처음부터)을
+Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종료 상태면 conflict, 이미 `PAUSED`면 아무것도 하지 않음, `resumeWorkflow`: `RUNNING`이면 아무것도 하지 않고 성공,
+그 밖에 `PAUSED`가 아니면 오류, 재개하면 `lastRetriedTime`, `retry`: 실패·취소 태스크 재예약과 JOIN·DO_WHILE 제자리 재시도, `restart`: 태스크 비우고 처음부터)을
 따르고, 일시정지 중에는 타이머를 걸지 않는다. `updateAndPushParents`가 부모를 되살리는 일은 부모 프로세스에 `cast`로
 보낸다(결정 1의 호출 방향). rerun, skip, `resetCallbacksForWorkflow`는 이 ADR 범위 밖이다.
 
