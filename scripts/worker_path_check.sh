@@ -61,9 +61,16 @@ allowed_path() {
 
 # A blob with a NUL byte is binary, whatever .gitattributes says.
 is_binary() {
-  local size text_size
-  size="$(git cat-file -s "$1")" || return 0
-  text_size="$(git cat-file blob "$1" | tr -d '\000' | wc -c | tr -d ' ')" || return 0
+  local blob_file size text_size
+  blob_file="$(mktemp)" || exit 2
+  if ! git cat-file blob "$1" >"$blob_file"; then
+    rm -f "$blob_file"
+    echo "cannot read blob $1" >&2
+    exit 2
+  fi
+  size="$(wc -c <"$blob_file" | tr -d ' ')"
+  text_size="$(tr -d '\000' <"$blob_file" | wc -c | tr -d ' ')"
+  rm -f "$blob_file"
   [ "$size" != "$text_size" ]
 }
 
@@ -151,12 +158,16 @@ if [ "$worker" = "test-gap" ]; then
 fi
 
 # On a case-insensitive checkout, test/Test_helper.exs overwrites test/test_helper.exs.
-# Reject any head tree whose paths (files or directories) collide when case-folded.
-collisions="$(git ls-tree -r -t -z --name-only "$head_sha" | tr '\000' '\n' |
-  tr '[:upper:]' '[:lower:]' | sort | uniq -d)" || {
-  echo "cannot list $head" >&2
+# Check the union of the base and head trees (files and directories) so a path main
+# gained after the merge-base is compared too.
+tree_file="$(mktemp)" || exit 2
+trap 'rm -f "$raw_file" "$numstat_file" "$tree_file"' EXIT
+if ! git ls-tree -r -t -z --name-only "$base_sha" >"$tree_file" ||
+  ! git ls-tree -r -t -z --name-only "$head_sha" >>"$tree_file"; then
+  echo "cannot list $base or $head" >&2
   exit 2
-}
+fi
+collisions="$(tr '\000' '\n' <"$tree_file" | sort -u | tr '[:upper:]' '[:lower:]' | sort | uniq -d)"
 if [ -n "$collisions" ]; then
   while IFS= read -r path; do
     printf '%s\t%s\t%s\n' "-" "case collision" "$path"

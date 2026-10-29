@@ -182,6 +182,19 @@ defmodule Archon.Scripts.WorkerPathCheckTest do
     assert out =~ "case collision\ttest/test_helper.exs"
   end
 
+  test "a case collision with a path main gained later is rejected", %{tmp_dir: dir} do
+    git!(dir, ["switch", "--quiet", "main"])
+    write!(dir, "test/Foo_test.exs", "main\n")
+    commit!(dir, "main adds")
+    git!(dir, ["switch", "--quiet", "work"])
+    blob = git_out!(dir, ["hash-object", "-w", "--stdin"], "work\n")
+    git!(dir, ["update-index", "--add", "--cacheinfo", "100644,#{blob},test/foo_test.exs"])
+    git!(dir, ["commit", "--quiet", "-m", "work adds"])
+
+    assert {out, 1} = check(dir, "test-gap")
+    assert out =~ "case collision\ttest/foo_test.exs"
+  end
+
   test "agent instruction files are rejected at any depth", %{tmp_dir: dir} do
     write!(dir, "test/CLAUDE.md", "x\n")
     write!(dir, "lib/AGENTS.override.md", "x\n")

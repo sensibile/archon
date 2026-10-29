@@ -60,7 +60,7 @@ echo "path check exit: $?"
   실행 비트), NUL 바이트가 있는 파일(바뀌기 전과 후 모두), 출력 가능한 ASCII 밖의 문자가 든 경로, git 메타 파일
   (`.gitattributes`·`.gitignore`·`.gitmodules`), 에이전트 지시 파일(`AGENTS*.md`, `CLAUDE.md`, `CLAUDE.local.md`,
   `.claude/`·`.codex/`·`.agents/` 아래)은 어느 깊이에 있든 허용 밖이다. 보호 경로는 대소문자를 가리지 않고 막고,
-  head 트리에 대소문자만 다른 경로가 있으면 거부한다. base와 head는 커밋 SHA로 먼저 확인한다.
+  base와 head 트리를 합쳐 대소문자만 다른 경로가 있으면 거부한다. base와 head는 커밋 SHA로 먼저 확인한다.
 
 | 워커 | 허용 경로 | 추가 조건 |
 |---|---|---|
