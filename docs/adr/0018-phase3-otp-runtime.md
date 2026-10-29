@@ -113,15 +113,19 @@ Archon.Supervisor (one_for_one)
   시작하면 `{:already_started, pid}`를 받은 쪽이 그 pid를 쓴다. `init`은 저장소에서 상태를 읽기만 하고, 복구·decide·
   타이머 설정은 `handle_continue`에서 한다. 그래서 `init`이 다른 프로세스 시작을 기다리며 `WorkflowSupervisor`를
   막는 일이 없다. 저장소에 없는 ID면 `init`이 `:ignore`를 돌려주고 호출자는 `{:error, :not_found}`를 받는다.
-  새 워크플로우는 `start_workflow`(결정 7)가 "새로 만듦" 인자로 띄우므로 `init`이 저장소를 읽지 않고, 같은 ID의
-  프로세스나 기록이 이미 있으면 `{:error, :conflict}`이고, 기록을 만들지 못한 그 프로세스는 바로 끝난다.
+  새 워크플로우는 `start_workflow`(결정 7)가 "새로 만듦" 인자로 띄우므로 `init`이 저장소를 읽지 않고 `handle_continue`도
+  하지 않는다. 기록 생성과 첫 decide는 이어서 받는 `{:start, input}` 호출이 한다. 최상위 시작은 첫 decide까지 마치고
+  답하고, 하위 워크플로우의 멱등 시작은 기록을 만든 뒤 바로 답하고 첫 decide를 `{:continue, ...}`로 이어서 한다(결정 5).
+  같은 ID의 프로세스나 기록이 이미 있으면 `{:error, :conflict}`이고, 기록을 만들지 못한 그 프로세스는 바로 끝난다.
 - **호출이 프로세스 종료와 겹칠 때.** 종료 직후 `:normal`로 끝나는 프로세스나 레지스트리에 남은 죽은 pid로 보낸
   `call`이 `:noproc`·`:normal` exit로 끝나면, 호출 함수(`Archon.Runtime` 안)는 활성화를 한 번 더 시도한다.
 - **읽기는 저장소에서 한다.** `GET /api/workflow/{id}`, `GET /api/tasks/{taskId}`에 해당하는 조회는 프로세스를 거치지
   않고 저장소를 읽는다. 프로세스는 응답 전에 저장을 마치므로(결정 2의 write-through) 호출자는 자기가 일으킨 변경을
   읽는다. 끝난 워크플로우를 읽으려고 프로세스를 띄우지 않는다.
-- **수명.** 워크플로우가 종료 상태에 이르면 결정 8의 종료 Effect까지 마친 뒤 `:normal`로 끝난다. 재시도·재시작처럼
-  끝난 워크플로우를 다시 움직이는 요청은 활성화로 다시 띄운다. 오래 기다리는(WAIT, 사람 대기) 프로세스는 일정 시간
+- **수명.** 프로세스는 처리한 메시지가 워크플로우를 종료 상태로 바꿨을 때, 응답과 Effect까지 마친 뒤 `:normal`로
+  끝난다. 이미 종료 상태인 워크플로우로 활성화된 프로세스는 `handle_continue`의 복구 검사에서 decide·종료를 하지 않고,
+  활성화를 일으킨 요청(이미 `FAILED`인 워크플로우의 종료 요청, 재시도, 재시작 등)을 처리한다. 그 요청 뒤에도 종료
+  상태면 끝나고, 실행 상태가 되었으면 계속 산다. 요청이 오지 않으면 짧은 유휴 시간(설정값) 뒤 끝난다. 오래 기다리는(WAIT, 사람 대기) 프로세스는 일정 시간
   메시지가 없으면 hibernate한다.
 - **프로세스 사이 호출 방향.** 워크플로우 프로세스끼리는 부모 → 자식 방향만 `GenServer.call`을 쓰고(자식 종료 요청),
   자식 → 부모 알림은 `cast`다. 결정 9의 `updateAndPushParents`처럼 자식에서 부모 쪽으로 가는 일도 `cast`다. 서로를
@@ -270,7 +274,7 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   (upstream `startWorkflowIdempotent`)로 하며 멱등이다. 같은 ID가 이미 있으면 부모 ID·부모 태스크
   ID가 같은지 확인하고(다르면 upstream `validateIdempotentWorkflowOwnership`의 오류 문구) 그것을 쓰며, 그것이 성공이 아닌
   종료 상태(`FAILED`·`TIMED_OUT`·`TERMINATED`)로 끝나 있으면 새 무작위 ID로 다시 시작한다. 자식의 첫 decide는 자식
-  프로세스가 `handle_continue`에서 한다(upstream은 decider 큐에 우선순위 10으로 넣는다). 부모는 자식 기록 생성까지만
+  프로세스가 기록을 만들고 답한 뒤 `{:continue, ...}`로 한다(결정 1의 활성화, upstream은 decider 큐에 우선순위 10으로 넣는다). 부모는 자식 기록 생성까지만
   기다린다. 시작이 일시적 오류면 태스크는 `SCHEDULED`로 남고 이유와 출력 `subWorkflowLaunchError`를 남겨 다음 재평가에서
   다시 시도하고, 그 밖의 오류면 `FAILED`다(upstream `start`의 예외 처리).
 - **시작 결과 기록.** 자식 시작은 부모 Commit 뒤의 `post` Effect이므로 그 결과(실제 자식 ID와 상태, 또는 오류)는 같은
