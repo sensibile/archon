@@ -65,7 +65,12 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
 - `Archon.Script.Pool`이 supervisor 아래에 워커 N개를 두고, 워커마다 `archon_js` Port 하나를 연다.
   메시지는 `{:packet, 4}` 길이 접두 JSON이다.
   - 요청: `{"op": "eval" | "parse", "script": ..., "input": ...}`
-  - 응답: `{"ok": value}` 또는 `{"error": kind, "message": ..., "line": ...}`
+  - 응답: `{"ok": <타입 붙은 값>}` 또는 `{"error": kind, "message": ..., "line": ...}`
+  - 요청의 `input`은 일반 JSON이다. 입력은 Archon의 JSON 값이므로 비유한 숫자가 없다.
+  - 응답의 값은 모든 노드에 타입을 붙인 2원소 배열이다. `["null"]`, `["bool", true]`, `["int", "<10진수>"]`,
+    `["float", <JSON 숫자>]`, `["nonfinite", "NaN" | "Infinity" | "-Infinity"]`, `["str", "..."]`,
+    `["list", [값...]]`, `["map", [[키 값, 값]...]]`. 사용자 객체가 어떤 모양이든 태그와 겹치지 않고,
+    정수는 문자열이라 `long` 범위 값이 JSON 실수로 뭉개지지 않는다.
 - 시간 상한은 두 겹이다. 엔진 안의 인터럽트 핸들러가 먼저 멈추고, 워커가 그보다 조금 긴 시간을 기다려도 응답이
   없으면 Port를 닫고 OS 프로세스를 kill한 뒤 새로 띄운다. 프로세스가 죽어도 같은 경로로 복구되며, BEAM은
   영향을 받지 않는다.
@@ -88,8 +93,9 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
   `undefined`·`null`은 `null`, 배열은 목록, 그 밖의 객체는 맵이다.
 - JSON이 표현하지 못하는 `NaN`·`Infinity`·`-Infinity`는 upstream에서 Java `Double`로 남아 결과에 영향을 준다
   (SWITCH는 `String.valueOf`로 `"NaN"`·`"Infinity"` 분기를 고르고, `evalBool`은 `Infinity`를 참으로 본다).
-  그래서 `archon_js`는 이 값을 태그 `{"$archon_number": "NaN" | "Infinity" | "-Infinity"}`로 보내고, Elixir 쪽은
-  평가 결과 안에서 `:nan`·`:infinity`·`:neg_infinity`로 받는다. 호출 지점은 이를 upstream처럼 쓴다. 문자열로는
+  그래서 `archon_js`는 이 값을 결정 2의 `["nonfinite", ...]`로 보내고, Elixir 쪽은 평가 결과 안에서
+  `:nan`·`:infinity`·`:neg_infinity`로 받는다. 같은 모양의 사용자 객체는 `["map", ...]`이므로 섞이지 않는다.
+  호출 지점은 이를 upstream처럼 쓴다. 문자열로는
   Java `Double#toString`(`"NaN"`, `"Infinity"`, `"-Infinity"`)이 되고, `evalBool`에서는 `Infinity`만 참이다.
   결과 맵이 태스크 출력으로 저장될 때는 upstream `ObjectMapper`가 이 값을 쓰는 방식을 구현 PR에서 확인해 따른다.
   이 경계 사례는 결정 7의 오라클 비교에 넣는다.
@@ -119,7 +125,9 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
 - upstream 테스트에서 옮긴다: `ScriptEvaluator`·평가기 테스트, `SwitchTaskMapperTest`의 JavaScript 사례,
   `DecisionTaskMapperTest#getEvaluatedCaseValueUsingExpression`, `WorkflowTaskTypeConstraintTest`의 스크립트 사례.
   `TestDoWhile`은 2e에서 옮긴다.
-- 비유한 숫자(`1/0`, `0/0`, `-1/0`)의 SWITCH 분기·`evalBool`·출력 저장 결과를 오라클과 비교한다.
+- 비유한 숫자(`1/0`, `0/0`, `-1/0`)의 SWITCH 분기·`evalBool`·출력 저장 결과를 오라클과 비교한다. 태그와
+  같은 모양의 사용자 객체(예: `({selectedCase: ["nonfinite", "NaN"]})`, `{"$archon_number": "Infinity"}`)가
+  맵·목록 그대로 남는지도 시험한다.
 - 격리는 따로 테스트한다. `import()`, 무한 루프, 메모리 폭주, 앞선 평가가 남긴 전역 상태, 프로세스 kill 후
   복구를 시험한다.
 
