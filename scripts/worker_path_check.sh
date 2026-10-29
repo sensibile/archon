@@ -9,6 +9,8 @@
 # (printed to stdout), 2 usage or git error. Only exit 0 passes.
 
 set -u
+# Byte-wise globs and tr: non-ASCII paths are rejected below, not case-folded.
+export LC_ALL=C
 
 worker="${1:-}"
 base="${2:-origin/main}"
@@ -23,12 +25,20 @@ case "$worker" in
 esac
 
 allowed_path() {
+  # Only printable ASCII: APFS folds some non-ASCII letters (U+017F to s), so
+  # docs/operation\u017f.md would overwrite docs/operations.md on checkout.
+  case "$1" in
+    *[!\ -~]*) return 1 ;;
+  esac
+
   # Protected records are matched case-insensitively: on a case-insensitive
   # checkout docs/ADR/x.md lands next to the real ADRs.
   local lower
   lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   case "$lower" in
     docs/adr/* | docs/operations.md) return 1 ;;
+    # A PR-controlled .gitattributes can hide diffs from review or binaries from this check.
+    .gitattributes | */.gitattributes | .gitignore | */.gitignore | .gitmodules | */.gitmodules) return 1 ;;
   esac
 
   case "$worker" in
@@ -46,6 +56,14 @@ allowed_path() {
   return 1
 }
 
+# A blob with a NUL byte is binary, whatever .gitattributes says.
+is_binary() {
+  local size text_size
+  size="$(git cat-file -s "$1")" || return 0
+  text_size="$(git cat-file blob "$1" | tr -d '\000' | wc -c | tr -d ' ')" || return 0
+  [ "$size" != "$text_size" ]
+}
+
 # Run from the repository root so diff.relative cannot hide paths outside the cwd.
 top="$(git rev-parse --show-toplevel)" || exit 2
 cd "$top" || exit 2
@@ -54,11 +72,12 @@ raw_file="$(mktemp)" || exit 2
 numstat_file="$(mktemp)" || exit 2
 trap 'rm -f "$raw_file" "$numstat_file"' EXIT
 
-# -z keeps paths byte for byte; --raw exposes file modes, --numstat removed lines.
+# -z keeps paths byte for byte; --raw exposes file modes, --numstat --text removed
+# lines even where attributes would mark a file binary.
 # The flags override user config that would hide changes (diff.relative, diff.ignoreSubmodules).
 diff_flags=(-z --no-renames --no-relative --ignore-submodules=none)
 if ! git diff --raw --no-abbrev "${diff_flags[@]}" "$base...$head" >"$raw_file" ||
-  ! git diff --numstat "${diff_flags[@]}" "$base...$head" >"$numstat_file"; then
+  ! git diff --numstat --text "${diff_flags[@]}" "$base...$head" >"$numstat_file"; then
   echo "git diff failed for $base...$head" >&2
   exit 2
 fi
@@ -71,11 +90,13 @@ while IFS= read -r -d '' meta; do
   fi
 
   # meta is ":<old mode> <new mode> <old sha> <new sha> <status>"
-  read -r old_mode new_mode _old_sha _new_sha status <<<"${meta#:}"
+  read -r old_mode new_mode _old_sha new_sha status <<<"${meta#:}"
   reason=""
 
   if [ "$worker" = "test-gap" ] && [ "$status" = "D" ]; then
     reason="deletion"
+  elif [ "$new_mode" = "100644" ] && is_binary "$new_sha"; then
+    reason="binary"
   elif [ "$new_mode" = "120000" ] || [ "$old_mode" = "120000" ]; then
     reason="symlink"
   elif [ "$new_mode" = "160000" ] || [ "$old_mode" = "160000" ]; then

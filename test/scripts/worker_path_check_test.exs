@@ -98,6 +98,32 @@ defmodule Archon.Scripts.WorkerPathCheckTest do
     assert out =~ "outside allowlist\tmix.exs"
   end
 
+  test "non-ASCII paths are rejected because the filesystem may fold them", %{tmp_dir: dir} do
+    write!(dir, "docs/operation\u017F.md", "x\n")
+    commit!(dir, "long s")
+
+    assert {out, 1} = check(dir, "daily-cleanup")
+    assert out =~ "outside allowlist"
+  end
+
+  test "git metadata files are rejected anywhere", %{tmp_dir: dir} do
+    write!(dir, "lib/.gitattributes", "*.ex -diff\n")
+    write!(dir, "test/.gitignore", "x\n")
+    commit!(dir, "attributes")
+
+    assert {out, 1} = check(dir, "daily-cleanup")
+    assert out =~ "outside allowlist\tlib/.gitattributes"
+    assert out =~ "outside allowlist\ttest/.gitignore"
+  end
+
+  test "files with a NUL byte are binary for every worker", %{tmp_dir: dir} do
+    write!(dir, "lib/blob.ex", <<"a", 0, "b">>)
+    commit!(dir, "binary")
+
+    assert {out, 1} = check(dir, "daily-cleanup")
+    assert out =~ "binary\tlib/blob.ex"
+  end
+
   test "daily-cleanup allows lib, test and docs but not authority records", %{tmp_dir: dir} do
     write!(dir, "lib/a.ex", "changed")
     write!(dir, "docs/guide.md", "x")

@@ -57,7 +57,8 @@ echo "path check exit: $?"
   종료 코드 1은 허용 밖 변경이 있다는 뜻이고 그 목록을 출력한다. 2는 사용법 오류나 git 오류다.
 - 스크립트는 저장소 루트에서 경로를 `git diff -z`로 그대로 읽고, 변경을 숨기는 git 설정(`diff.relative`,
   `diff.ignoreSubmodules`)을 무시한다. 일반 파일 모드(`100644`)가 아닌 변경(심볼릭 링크, 서브모듈,
-  실행 비트)은 경로와 관계없이 허용 밖이다. `docs/adr/`와 `docs/operations.md`는 대소문자를 가리지 않고 막는다.
+  실행 비트), NUL 바이트가 있는 파일, 출력 가능한 ASCII 밖의 문자가 든 경로, `.gitattributes`·`.gitignore`·
+  `.gitmodules`는 경로와 관계없이 허용 밖이다. `docs/adr/`와 `docs/operations.md`는 대소문자를 가리지 않고 막는다.
 
 | 워커 | 허용 경로 | 추가 조건 |
 |---|---|---|
@@ -71,7 +72,8 @@ echo "path check exit: $?"
   BOSS에게 보고한다. 그 경로를 빼서 다시 리뷰하는 것은 허용한다.
 - head가 바뀌면(새 커밋, `gh pr update-branch`) auto-merge를 다시 켜기 전에 이 검사도 다시 한다.
 - 이 검사는 워커 자신이 실행한다. 서버가 강제하지 않으므로, 프롬프트 주입 등으로 워커가 절차를 건너뛰는 경우는
-  막지 못한다. 남는 위험은 [ADR 0013](adr/0013-taeguk-daily-workers.md) 결과에 적었다.
+  막지 못한다. 테스트를 약하게 만드는 추가(제외 설정, skip 태그)도 경로로는 잡히지 않아 Codex 리뷰에 기댄다.
+  남는 위험은 [ADR 0013](adr/0013-taeguk-daily-workers.md) 결과에 적었다.
 
 ## 공통
 
