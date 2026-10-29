@@ -147,7 +147,7 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
 ```
 
 - `Event`는 프로세스가 받은 일이다: `{:start, input}`, `{:poll, task_id, worker_id}`, `{:update, TaskResult}`,
-  `:wake`(타이머), `{:child_changed, task_id, child}`, `{:terminate, reason}`, `{:cancel_by_parent, reason}`(결정 5), 복구 검사 `:recover`(활성화 직후와 예외 격리 뒤.
+  `:wake`(타이머), `{:child_changed, task_id, child}`, `{:terminate, reason}`, `{:cancel_by_parent, reason}`·`{:sub_workflow_started, task_id, result}`(결정 5), 복구 검사 `:recover`(활성화 직후와 예외 격리 뒤.
   상태를 바꾸지 않은 `:wake`도 같은 검사를 한다), 그리고 결정 9의 생명주기 요청.
 - `Env`는 바깥 값이다: `now`, `new_id`, `jitter`, `evaluate_script`, 태스크 정의, 최신 워크플로우 버전, 도메인별
   마지막 poll 시각(`getActiveDomain`용), 태스크 정의별 진행 중 개수(동시 실행 한도용), 큐에 메시지가 있는지(복구용),
@@ -269,8 +269,14 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   ID가 같은지 확인하고(다르면 upstream `validateIdempotentWorkflowOwnership`의 오류 문구) 그것을 쓰며, 그것이 성공이 아닌
   종료 상태(`FAILED`·`TIMED_OUT`·`TERMINATED`)로 끝나 있으면 새 무작위 ID로 다시 시작한다. 자식의 첫 decide는 자식
   프로세스가 `handle_continue`에서 한다(upstream은 decider 큐에 우선순위 10으로 넣는다). 부모는 자식 기록 생성까지만
-  기다린다. 시작이 일시적 오류면 태스크는 `SCHEDULED`로 남아 다음 재평가에서 다시 시도하고, 그 밖의 오류면 `FAILED`다
-  (upstream `start`의 예외 처리).
+  기다린다. 시작이 일시적 오류면 태스크는 `SCHEDULED`로 남고 이유와 출력 `subWorkflowLaunchError`를 남겨 다음 재평가에서
+  다시 시도하고, 그 밖의 오류면 `FAILED`다(upstream `start`의 예외 처리).
+- **시작 결과 기록.** 자식 시작은 부모 Commit 뒤의 `post` Effect이므로 그 결과(실제 자식 ID와 상태, 또는 오류)는 같은
+  메시지 처리 안에서 `{:sub_workflow_started, task_id, result}` 이벤트로 `Step.run`에 다시 넣어 두 번째 Commit으로 저장한
+  뒤 응답한다. 저장 내용은 upstream `attachToSubWorkflow`와 같다: `subWorkflowId`와 출력 `subWorkflowId`(무작위 ID로 다시
+  시작했으면 그 ID), `reasonForIncompletion`·`subWorkflowLaunchError` 지우기, 자식 상태에 따른 태스크 상태(`updateTaskStatus`).
+  두 Commit 사이에 프로세스가 죽으면 태스크는 자식 ID 없는 `SCHEDULED`로 남고, 복구 검사가 같은 결정적 ID로 시작을 다시
+  해서(멱등) 기존 자식에 붙는다.
 - **진행 반영.** 자식이 종료 상태가 되면 자식 프로세스가 부모에게 `{:child_changed, task_id, child}`를 `cast`한다.
   부모는 그 태스크가 아직 자기 태스크 목록에 있는지 확인하고(upstream의 세대 펜스), `SystemTask.SubWorkflow.execute/2`로
   상태·출력·실패 이유를 반영한 뒤 진행 중 JOIN을 평가하고 decide한다. 알림이 사라질 경우(부모 재시작 등)에 대비해 부모는
@@ -305,7 +311,8 @@ upstream의 decider 큐와 스위퍼, 시스템 태스크 큐의 지연 재평�
     decide를 건너뛴 갱신, Decider의 타임아웃·재시도 표시, 하위 워크플로우 진행 반영, 종료 처리 포함), 그리고 `:wake`.
     평가할 때마다 `pollCount + 1`이다. 끝나면 `endTime`을 찍고 decide한다(upstream `AsyncSystemTaskExecutor`). 이 규칙으로
     `workflow_get_completed_fork`의 JOIN `pollCount` 3(예약 직후, 가지 둘)이 나온다.
-  - WAIT: `:wake`. 외부 완료는 태스크 갱신(결정 7의 `update`)이다.
+  - WAIT: `:wake`. WAIT 매퍼(ADR 0014 2d)는 태스크를 처음부터 `IN_PROGRESS`와 `waitTimeout`으로 만들므로 재평가 시각은
+    `computePostpone`의 진행 중 WAIT 후보(마감 시각)다. 외부 완료는 태스크 갱신(결정 7의 `update`)이다.
   - SUB_WORKFLOW: 결정 5.
   - 평가 전 검사는 upstream `AsyncSystemTaskExecutor#execute`를 따른다(태스크가 끝났으면 무시, 워크플로우가 끝났으면
     `CANCELED`, `SCHEDULED`이면 `startTime`을 찍고 `start`). 끝나지 않은 JOIN·WAIT의 `callbackAfterSeconds`는 upstream처럼
@@ -481,6 +488,9 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
 - **큐 이름에 실행 네임스페이스와 격리 그룹이 없다.** 도메인만 지원한다.
 - **동시 실행 한도는 개수만 본다.** upstream `SqliteExecutionDAO#exceedsLimit`의 도착 순서 공정성 검사
   (`findAllTasksInProgressInOrderOfArrival`)는 옮기지 않는다. 한도 안에서 어느 태스크가 먼저 나가는지는 큐 순서를 따른다.
+  개수 확인과 `IN_PROGRESS` 저장은 서로 다른 워크플로우 프로세스에서 일어나므로, 같은 정의의 태스크를 동시에 poll하면
+  한도를 잠깐 넘을 수 있다. upstream도 `exceedsLimit`의 개수 질의와 poll 저장이 원자적이지 않아 같은 성질이다. 원자적
+  예약은 Phase 4 저장소에서 다시 본다.
 - **하위 워크플로우 완료 알림은 프로세스 메시지다.** upstream은 부모를 decider 큐 우선순위로 앞당긴다. 결과 상태는 같고
   반영 시점이 더 이르다.
 - **스키마 검증은 아직 하지 않는다**(결정 4). 결과 섹션의 조건대로 Phase 5 전에 붙인다.
