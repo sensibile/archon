@@ -213,6 +213,10 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
     `length` 속성이 아니라 내부 길이로 읽는다.
   - 스크립트가 예약한 Promise 작업(`then`, `async` 함수의 `await` 뒤)은 결과를 읽기 전에 같은 시간·메모리
     상한 안에서 모두 실행한다. GraalJS 오라클과 같다. `import()`는 모듈 로더가 없어 거부되는 Promise다.
+    결과를 읽는 동안 getter가 바꾸는 상태도 GraalJS처럼 따른다. 배열 길이는 원소마다 다시 읽고, `Map`은
+    순회하면서 그때의 값을 읽으며, getter가 예약한 Promise 작업은 다음 값을 읽기 전에 실행한다.
+  - 풀의 대기열은 `max_queue`(기본 1,000)까지다. 넘치면 `Script evaluation queue is full`로 바로 실패하고,
+    호출자가 이미 끝난 대기 요청은 실행하지 않고 버린다. upstream 스레드풀은 상한이 없다(로컬 보안 리뷰 지적).
   - 등록 검사는 파서가 낸 `SyntaxError`만 문법 오류로 본다. 깊은 괄호 중첩처럼 스택·메모리 상한으로 파싱이
     멈춘 경우는 upstream처럼 통과시킨다.
   - 오류 종류는 `syntax`·`runtime`·`timeout`·`conversion`(결과를 읽다가 getter·프록시가 던진 예외. upstream처럼
@@ -221,7 +225,7 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
     기다리다 빈 워커로 가고, 워커가 호출자에게 직접 답한다. 바쁜 워커가 죽으면 디스패처가 대신 오류로 답한다.
     워커는 엔진 상한 뒤 `grace`(기본 1초)까지 응답이 없으면 OS 프로세스를 `kill -KILL`하고 새로 띄운다.
     설정은 `config :archon, Archon.Script.Pool`의 `timeout`·`grace`·`memory_limit`·`stack_limit`(기본
-    1MiB)·`max_output`·`workers`다.
+    1MiB)·`max_output`·`max_queue`·`workers`다.
   - 비유한 숫자의 저장 형태는 Jackson 2.18.8(upstream이 고정한 버전)에 upstream `ObjectMapperProvider` 설정을
     준 오라클에서 `"NaN"`·`"Infinity"`·`"-Infinity"` 문자열로 확인했다(`Archon.Script.storable/1`).
 - QuickJS-ng는 v0.17.0(태그 커밋 `6d46d07d04041b40f4f49eaa7fdebe44c314c699`)을

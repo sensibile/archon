@@ -78,7 +78,8 @@ typedef enum { ENC_OK, ENC_EXCEPTION, ENC_LIMIT } EncStatus;
  */
 typedef struct {
     JSValue helpers; /* the array HELPERS_SOURCE evaluates to; owns the values below */
-    JSValue map_entries;
+    JSValue map_iterator; /* map => its entry iterator */
+    JSValue map_step;     /* iterator => [key, value] or undefined when done */
     JSValue number_value_of;
     JSValue string_value_of;
     JSValue boolean_value_of;
@@ -237,24 +238,24 @@ static JSContext *new_context(JSRuntime *rt)
 }
 
 /*
- * [map entry reader, Number/String/Boolean.prototype.valueOf, sample objects whose class IDs
- * identify primitive wrappers and arguments objects, the typed array length getter]. The entry
- * list has no prototype, so setters a script defines on Array.prototype never see it.
+ * [map iterator, map step, Number/String/Boolean.prototype.valueOf, sample objects whose class
+ * IDs identify primitive wrappers and arguments objects, the typed array length getter]. Each
+ * step's [key, value] pair has no prototype, so a script's Array.prototype accessors never see
+ * it.
  */
 static const char HELPERS_SOURCE[] =
     "(() => {"
-    "  const apply = Reflect.apply, entries = Map.prototype.entries, push = Array.prototype.push;"
+    "  const apply = Reflect.apply, entries = Map.prototype.entries;"
     "  const setPrototypeOf = Object.setPrototypeOf;"
     "  const next = Object.getPrototypeOf(new Map().entries()).next;"
     "  const typedArrayLength = Object.getOwnPropertyDescriptor("
     "    Object.getPrototypeOf(Uint8Array.prototype), 'length').get;"
-    "  const mapEntries = (m) => {"
-    "    const it = apply(entries, m, []), out = setPrototypeOf([], null);"
-    "    for (let r = apply(next, it, []); !r.done; r = apply(next, it, []))"
-    "      apply(push, out, [r.value[0], r.value[1]]);"
-    "    return out;"
+    "  const mapIterator = (m) => apply(entries, m, []);"
+    "  const mapStep = (it) => {"
+    "    const r = apply(next, it, []);"
+    "    return r.done ? undefined : setPrototypeOf([r.value[0], r.value[1]], null);"
     "  };"
-    "  return [mapEntries, Number.prototype.valueOf, String.prototype.valueOf,"
+    "  return [mapIterator, mapStep, Number.prototype.valueOf, String.prototype.valueOf,"
     "          Boolean.prototype.valueOf, new Number(0), new String(''), new Boolean(false),"
     "          (function () { 'use strict'; return arguments; })(),"
     "          (function (a) { return arguments; })(0), typedArrayLength];"
@@ -267,22 +268,23 @@ static int load_intrinsics(JSContext *ctx, Intrinsics *in)
                           JS_EVAL_TYPE_GLOBAL);
     if (JS_IsException(in->helpers))
         return -1;
-    JSValue items[10];
-    for (uint32_t i = 0; i < 10; i++) {
+    JSValue items[11];
+    for (uint32_t i = 0; i < 11; i++) {
         items[i] = JS_GetPropertyUint32(ctx, in->helpers, i);
         /* The array keeps every item alive; hold borrowed copies. */
         JS_FreeValue(ctx, items[i]);
     }
-    in->map_entries = items[0];
-    in->number_value_of = items[1];
-    in->string_value_of = items[2];
-    in->boolean_value_of = items[3];
-    in->number_class = JS_GetClassID(items[4]);
-    in->string_class = JS_GetClassID(items[5]);
-    in->boolean_class = JS_GetClassID(items[6]);
-    in->arguments_class = JS_GetClassID(items[7]);
-    in->mapped_arguments_class = JS_GetClassID(items[8]);
-    in->typed_array_length = items[9];
+    in->map_iterator = items[0];
+    in->map_step = items[1];
+    in->number_value_of = items[2];
+    in->string_value_of = items[3];
+    in->boolean_value_of = items[4];
+    in->number_class = JS_GetClassID(items[5]);
+    in->string_class = JS_GetClassID(items[6]);
+    in->boolean_class = JS_GetClassID(items[7]);
+    in->arguments_class = JS_GetClassID(items[8]);
+    in->mapped_arguments_class = JS_GetClassID(items[9]);
+    in->typed_array_length = items[10];
     return 0;
 }
 
@@ -394,24 +396,30 @@ static void put_bigint(Encoder *e, JSValueConst v, EncStatus *status)
 
 static void encode(Encoder *e, JSValueConst v, int depth, EncStatus *status);
 
+/* The current size: the intrinsic one for a typed array (GraalJS getArraySize ignores an own
+ * `length` property), the `length` property otherwise. */
+static int list_length(Encoder *e, JSValueConst v, int64_t *len)
+{
+    if (JS_GetTypedArrayType(v) < 0)
+        return JS_GetLength(e->ctx, v, len);
+    JSValue n = JS_Call(e->ctx, e->intrinsics->typed_array_length, v, 0, NULL);
+    int r = JS_IsException(n) ? -1 : JS_ToInt64(e->ctx, len, n);
+    JS_FreeValue(e->ctx, n);
+    return r;
+}
+
 static void encode_list(Encoder *e, JSValueConst v, int depth, EncStatus *status)
 {
-    int64_t len;
-    if (JS_GetTypedArrayType(v) >= 0) {
-        /* The intrinsic size, as GraalJS getArraySize: an own `length` property does not count. */
-        JSValue n = JS_Call(e->ctx, e->intrinsics->typed_array_length, v, 0, NULL);
-        int r = JS_IsException(n) ? -1 : JS_ToInt64(e->ctx, &len, n);
-        JS_FreeValue(e->ctx, n);
-        if (r < 0) {
+    buf_puts(e->out, "[\"list\",[");
+    /* The size is read again before each element, as upstream calls getArraySize each time. */
+    for (int64_t i = 0; *status == ENC_OK && !e->out->overflow; i++) {
+        int64_t len;
+        if (list_length(e, v, &len) < 0) {
             *status = ENC_EXCEPTION;
             return;
         }
-    } else if (JS_GetLength(e->ctx, v, &len) < 0) {
-        *status = ENC_EXCEPTION;
-        return;
-    }
-    buf_puts(e->out, "[\"list\",[");
-    for (int64_t i = 0; i < len && *status == ENC_OK && !e->out->overflow; i++) {
+        if (i >= len)
+            break;
         if (i > 0)
             buf_puts(e->out, ",");
         JSValue item = JS_GetPropertyInt64(e->ctx, v, i);
@@ -425,25 +433,28 @@ static void encode_list(Encoder *e, JSValueConst v, int depth, EncStatus *status
     buf_puts(e->out, "]]");
 }
 
+/* Entries in iteration order, each value read when its entry is reached. */
 static void encode_map_entries(Encoder *e, JSValueConst v, int depth, EncStatus *status)
 {
-    JSValue flat = JS_Call(e->ctx, e->intrinsics->map_entries, JS_UNDEFINED, 1, &v);
-    if (JS_IsException(flat)) {
-        *status = ENC_EXCEPTION;
-        return;
-    }
-    int64_t len;
-    if (JS_GetLength(e->ctx, flat, &len) < 0) {
-        JS_FreeValue(e->ctx, flat);
+    JSValue it = JS_Call(e->ctx, e->intrinsics->map_iterator, JS_UNDEFINED, 1, &v);
+    if (JS_IsException(it)) {
         *status = ENC_EXCEPTION;
         return;
     }
     buf_puts(e->out, "[\"map\",[");
-    for (int64_t i = 0; i + 1 < len && *status == ENC_OK && !e->out->overflow; i += 2) {
-        if (i > 0)
+    for (int first = 1; *status == ENC_OK && !e->out->overflow; first = 0) {
+        JSValue pair = JS_Call(e->ctx, e->intrinsics->map_step, JS_UNDEFINED, 1, &it);
+        if (JS_IsException(pair)) {
+            *status = ENC_EXCEPTION;
+            break;
+        }
+        if (JS_IsUndefined(pair))
+            break;
+        JSValue key = JS_GetPropertyUint32(e->ctx, pair, 0);
+        JSValue val = JS_GetPropertyUint32(e->ctx, pair, 1);
+        JS_FreeValue(e->ctx, pair);
+        if (!first)
             buf_puts(e->out, ",");
-        JSValue key = JS_GetPropertyInt64(e->ctx, flat, i);
-        JSValue val = JS_GetPropertyInt64(e->ctx, flat, i + 1);
         buf_puts(e->out, "[");
         encode(e, key, depth + 1, status);
         buf_puts(e->out, ",");
@@ -454,7 +465,7 @@ static void encode_map_entries(Encoder *e, JSValueConst v, int depth, EncStatus 
         JS_FreeValue(e->ctx, val);
     }
     buf_puts(e->out, "]]");
-    JS_FreeValue(e->ctx, flat);
+    JS_FreeValue(e->ctx, it);
 }
 
 /* Own enumerable string-keyed properties, read through [[Get]] (getters run). */
@@ -492,10 +503,27 @@ static void encode_members(Encoder *e, JSValueConst v, int depth, EncStatus *sta
     JS_FreePropertyEnum(e->ctx, props, count);
 }
 
+/* Runs the promise jobs queued so far; -1 when one stopped with an exception. */
+static int drain_jobs(JSContext *ctx)
+{
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    JSContext *job_ctx;
+    int r;
+    while ((r = JS_ExecutePendingJob(rt, &job_ctx)) > 0)
+        ;
+    return r;
+}
+
 static void encode(Encoder *e, JSValueConst v, int depth, EncStatus *status)
 {
     if (*status != ENC_OK || e->out->overflow)
         return;
+    /* A getter that ran to produce `v` may have queued jobs; GraalJS runs them before the next
+     * read. There is one context, so an exception is left on it for put_exception. */
+    if (drain_jobs(e->ctx) < 0) {
+        *status = ENC_EXCEPTION;
+        return;
+    }
     if (depth > MAX_DEPTH) {
         *status = ENC_LIMIT;
         return;
@@ -674,16 +702,10 @@ static void run_script(JSContext *ctx, Buf *out, const Deadline *d, int parse_on
         return;
     }
     /* GraalJS runs the promise jobs the script queued before the result is read. */
-    for (;;) {
-        JSContext *job_ctx;
-        int r = JS_ExecutePendingJob(JS_GetRuntime(ctx), &job_ctx);
-        if (r == 0)
-            break;
-        if (r < 0) {
-            JS_FreeValue(ctx, result);
-            put_exception(out, job_ctx, "runtime", d);
-            return;
-        }
+    if (drain_jobs(ctx) < 0) {
+        JS_FreeValue(ctx, result);
+        put_exception(out, ctx, "runtime", d);
+        return;
     }
     Encoder e = {ctx, out, intrinsics};
     EncStatus status = ENC_OK;

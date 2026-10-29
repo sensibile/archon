@@ -8,7 +8,9 @@ defmodule Archon.Script.Pool do
 
   A supervisor (`:rest_for_one`) over a dispatcher and `workers` `Archon.Script.Worker`s, each
   owning one `archon_js` port. A request waits in the dispatcher until a worker is idle; the
-  worker answers the caller directly. A worker that stops while busy is answered for by the
+  worker answers the caller directly. At most `max_queue` requests wait; beyond that a request
+  fails at once with `Script evaluation queue is full`, and a waiting request whose caller has
+  exited is dropped instead of run. A worker that stops while busy is answered for by the
   dispatcher, and if the dispatcher restarts, the workers restart and register again.
 
   Options (defaults from `config :archon, Archon.Script.Pool`, then the values below):
@@ -22,6 +24,7 @@ defmodule Archon.Script.Pool do
     * `:memory_limit` - engine memory limit in bytes, 64 MiB.
     * `:stack_limit` - engine stack limit in bytes, 1 MiB.
     * `:max_output` - largest result in bytes, 16 MiB.
+    * `:max_queue` - most requests waiting for a worker, 1000.
     * `:executable` - path of `archon_js`, `priv/archon_js` by default.
   """
 
@@ -35,7 +38,8 @@ defmodule Archon.Script.Pool do
     grace: 1_000,
     memory_limit: 64 * 1024 * 1024,
     stack_limit: 1024 * 1024,
-    max_output: 16 * 1024 * 1024
+    max_output: 16 * 1024 * 1024,
+    max_queue: 1_000
   ]
 
   @doc false
@@ -73,7 +77,11 @@ defmodule Archon.Script.Pool do
          [workers, [strategy: :one_for_one, name: Module.concat(name, Workers)]]}
     }
 
-    children = [{__MODULE__.Dispatcher, name: dispatcher(name)}, worker_supervisor]
+    children = [
+      {__MODULE__.Dispatcher, name: dispatcher(name), max_queue: opts[:max_queue]},
+      worker_supervisor
+    ]
+
     Supervisor.init(children, strategy: :rest_for_one)
   end
 
@@ -97,18 +105,26 @@ defmodule Archon.Script.Pool do
 
     alias Archon.Script.Error
 
-    def start_link(opts), do: GenServer.start_link(__MODULE__, :ok, name: opts[:name])
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: opts[:name])
 
     @impl true
-    def init(:ok), do: {:ok, %{idle: [], busy: %{}, queue: :queue.new()}}
+    def init(opts),
+      do: {:ok, %{idle: [], busy: %{}, queue: :queue.new(), max_queue: opts[:max_queue]}}
 
     @impl true
     def handle_call({:run, op, script, input}, from, state) do
       request = {op, script, input}
 
-      case state.idle do
-        [worker | idle] -> {:noreply, assign(%{state | idle: idle}, worker, request, from)}
-        [] -> {:noreply, %{state | queue: :queue.in({request, from}, state.queue)}}
+      cond do
+        state.idle != [] ->
+          [worker | idle] = state.idle
+          {:noreply, assign(%{state | idle: idle}, worker, request, from)}
+
+        :queue.len(state.queue) >= state.max_queue ->
+          {:reply, {:error, %Error{kind: :limit, reason: "evaluation queue is full"}}, state}
+
+        true ->
+          {:noreply, %{state | queue: :queue.in({request, from}, state.queue)}}
       end
     end
 
@@ -135,8 +151,11 @@ defmodule Archon.Script.Pool do
 
     defp idle(state, worker) do
       case :queue.out(state.queue) do
-        {{:value, {request, from}}, queue} ->
-          assign(%{state | queue: queue}, worker, request, from)
+        {{:value, {request, {caller, _tag} = from}}, queue} ->
+          # Nobody waits for the answer of a caller that has exited.
+          if Process.alive?(caller),
+            do: assign(%{state | queue: queue}, worker, request, from),
+            else: idle(%{state | queue: queue}, worker)
 
         {:empty, _queue} ->
           %{state | idle: [worker | state.idle]}

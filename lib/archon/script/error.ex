@@ -23,7 +23,8 @@ defmodule Archon.Script.Error do
       `Script not evaluated within <N> seconds, interrupted.`
     * `:conversion` - reading the result threw (a getter, a proxy trap). Upstream lets that
       `PolyglotException` through unwrapped, so the message is `reason` as is.
-    * `:limit` - the result is nested too deeply or too large to send back.
+    * `:limit` - the result is nested too deeply or too large to send back, or too many
+      requests are already waiting for a worker.
     * `:crashed` - the evaluator process exited while evaluating.
     * `:request` - the evaluator rejected the request (an Archon bug, not the script's fault).
   """

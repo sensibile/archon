@@ -311,11 +311,18 @@ defmodule Archon.ScriptTest do
       end
     end
 
-    test "script changes to built-ins and own properties do not change the reading" do
+    test "the result is read as GraalJS reads it, even when reading changes it" do
       cases = [
         {"var a = new Uint8Array([1,2]); Object.defineProperty(a, 'length', {value: 0}); a",
          [1, 2]},
         {"var a = (function(){ return arguments })(1,2); a.length = 4; a", [1, 2, nil, nil]},
+        {"var a = [1, 2]; Object.defineProperty(a, '0', {get(){ a.length = 1; return 7 }}); a",
+         [7]},
+        {"var m = new Map([['a', {get x(){ m.set('b', 9); return 1 }}], ['b', 2]]); m",
+         %{"a" => %{"x" => 1}, "b" => 9}},
+        {"var r = {get selectedCase(){ var a = {v: 1}; " <>
+           "Promise.resolve().then(() => a.v = 9); return a }}; r",
+         %{"selectedCase" => %{"v" => 9}}},
         {"Object.defineProperty(Array.prototype, '0', {set(v){}, get(){ return 'hijacked' }, " <>
            "configurable: true}); new Map([['key', 'value']])", %{"key" => "value"}}
       ]

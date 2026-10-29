@@ -217,6 +217,38 @@ defmodule Archon.Script.PoolTest do
     end
   end
 
+  describe "queue" do
+    test "a full queue rejects new requests at once" do
+      pool = start_pool(:full_pool, timeout: 2_000, max_queue: 1)
+      busy = Task.async(fn -> eval(pool, "while (true) {}") end)
+      Process.sleep(50)
+      waiting = Task.async(fn -> eval(pool, "1") end)
+      Process.sleep(50)
+
+      assert {:error, %Error{kind: :limit} = error} = eval(pool, "2")
+      assert Exception.message(error) == "Script evaluation queue is full"
+      assert {:error, %Error{kind: :timeout}} = Task.await(busy, 5_000)
+      assert {:ok, 1} = Task.await(waiting)
+    end
+
+    test "a waiting request whose caller exited is dropped" do
+      pool = start_pool(:abandoned_pool, timeout: 300)
+      busy = Task.async(fn -> eval(pool, "while (true) {}") end)
+      Process.sleep(50)
+
+      for _ <- 1..3 do
+        pid = spawn(fn -> eval(pool, "while (true) {}") end)
+        Process.sleep(10)
+        Process.exit(pid, :kill)
+      end
+
+      assert {:error, %Error{kind: :timeout}} = Task.await(busy)
+      {micros, result} = :timer.tc(fn -> eval(pool, "1") end)
+      assert result == {:ok, 1}
+      assert micros < 250_000
+    end
+  end
+
   @tag :tmp_dir
   test "archon_js frees everything and exits 0 at the end of its input", %{tmp_dir: dir} do
     # Under the sanitizer build on Linux (CI), a leak or memory error makes the exit status
