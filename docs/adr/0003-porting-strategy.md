@@ -25,7 +25,7 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
    |---|---|---|
    | Phase 0 | 계약 고정: JSON 스키마, OpenAPI 스냅샷, 범위 분류, 골든 픽스처 | [ADR 0001](0001-api-contract-scope.md) |
    | Phase 1 | 도메인 모델: 계약을 통과하는 struct와 JSON 코덱 | [ADR 0002](0002-domain-model-representation.md) |
-   | Phase 2 | Decider를 부수효과 없는 순수 함수로 | 미작성 |
+   | Phase 2 | Decider를 부수효과 없는 순수 함수로 | [ADR 0014](0014-phase2-decider.md) |
    | Phase 3 | OTP 런타임: 워크플로우 인스턴스당 GenServer, 레지스트리, DynamicSupervisor | 미작성 |
    | Phase 4 | 영속성과 큐: PostgreSQL 우선 | 미작성 |
    | Phase 5 | Phoenix REST: MVP 엔드포인트부터 | 미작성 |
@@ -46,3 +46,4 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
 - 각 단계는 앞 단계의 계약 테스트를 통과해야 한다. 골든 픽스처가 단계 사이의 회귀 기준이다.
 - Phase 2부터는 단계를 시작할 때 설계 결정을 별도 ADR로 남긴다.
 - Phase 2~5는 아직 구현되지 않았다.
+  (비고: Phase 2는 [ADR 0014](0014-phase2-decider.md)의 조각 2a~2e로 구현했다. Phase 3~5는 아직 구현되지 않았다.)
