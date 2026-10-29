@@ -129,7 +129,8 @@ Archon.Supervisor (one_for_one)
 - **수명.** 프로세스는 처리한 메시지가 워크플로우를 종료 상태로 바꿨을 때, 응답과 Effect까지 마친 뒤 `:normal`로
   끝난다. 이미 종료 상태인 워크플로우로 활성화된 프로세스는 `handle_continue`의 복구 검사에서 decide·종료를 하지 않고(실패 워크플로우 재시작 검사,
   결정 8 (a)는 한다. `CANCELED`인
-  SUB_WORKFLOW 태스크의 자식이 아직 끝나지 않았으면 `{:cancel_by_parent, reason}`을 다시 보내는 검사도 한다. 완료·종료 Commit
+  SUB_WORKFLOW 태스크의 자식(태스크의 `subWorkflowId`, 없으면 결정적 ID)이 아직 끝나지 않았으면
+  `{:cancel_by_parent, reason}`을 다시 보내는 검사도 한다. 완료·종료 Commit
   뒤 자식 종료 요청 전에 죽은 부모가 `:transient` 재시작으로 다시 뜰 때 이 검사가 남은 자식을 정리한다. 일시정지된 자식처럼
   스스로 깨어나지 않는 자식도 이렇게 정리된다),
   활성화를 일으킨 요청(이미 `FAILED`인 워크플로우의 종료 요청, 재시도, 재시작 등)을 처리한다. 그 요청 뒤에도 종료
@@ -378,8 +379,9 @@ upstream의 decider 큐와 스위퍼, 시스템 태스크 큐의 지연 재평�
     프로세스는 저장소 상태에서 시작한다. 처리 중이던 메시지는 잃는다. 그 메시지가 저장 전이었으면 호출자는 오류를 받고
     다시 보낼 수 있고, 저장 뒤였으면 결과는 남는다.
   - 활성화 직후 복구(`:recover` 이벤트, upstream 스위퍼의 repair): 큐에 메시지가 없는 `SCHEDULED` 워커 태스크를 다시
-    넣고(지연은 저장된 `updateTime`에 `callbackAfterMs`, 없으면 `callbackAfterSeconds`를 더한 시각까지 남은 시간. 워커가
-    `IN_PROGRESS`와 `callbackAfterSeconds`로 미룬 태스크가 일찍 다시 나가지 않게 한다), 진행 중 SUB_WORKFLOW의 자식이 이미 끝났으면 반영하고, 부모가 종료 상태이고 자기 부모 태스크가 `CANCELED`이면
+    넣고(지연은 저장된 `updateTime`(0이면 `scheduledTime`)에 `callbackAfterMs`, 없으면 `callbackAfterSeconds`를 더한
+    시각까지 남은 시간. 워커가 `IN_PROGRESS`와 `callbackAfterSeconds`로 미룬 태스크가 일찍 다시 나가지 않게 한다. upstream
+    스위퍼는 `callbackAfterSeconds` 전체를 다시 걸지만 Archon은 남은 시간만 건다), 진행 중 SUB_WORKFLOW의 자식이 이미 끝났으면 반영하고, 부모가 종료 상태이고 자기 부모 태스크가 `CANCELED`이면
     스스로 종료하고, decide한 뒤 타이머를 건다. 실행 중인데 끝나지 않은 태스크가 없으면 upstream처럼 마지막 태스크를
     미실행으로 되돌려 다시 decide한다.
   - `Archon.Runtime.Recovery`는 애플리케이션 시작 때와 `rest_for_one`으로 다시 뜰 때 `Store.running_workflow_ids/0`의
