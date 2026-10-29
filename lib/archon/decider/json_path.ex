@@ -82,17 +82,11 @@ defmodule Archon.Decider.JsonPath do
   defp tokens("[" <> rest, acc) do
     case Regex.run(~r/\A\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|(-?\d+)|(\*))\s*\]/s, rest) do
       [match | groups] ->
-        token =
-          case groups do
-            [single] -> {:property, unescape(single)}
-            ["", double] -> {:property, unescape(double)}
-            ["", "", index] -> {:index, String.to_integer(index)}
-            ["", "", "", "*"] -> :wildcard
-          end
-
-        tokens(binary_part(rest, byte_size(match), byte_size(rest) - byte_size(match)), [
-          token | acc
-        ])
+        with {:ok, token} <- bracket_token(groups) do
+          tokens(binary_part(rest, byte_size(match), byte_size(rest) - byte_size(match)), [
+            token | acc
+          ])
+        end
 
       nil ->
         :error
@@ -101,23 +95,63 @@ defmodule Archon.Decider.JsonPath do
 
   defp tokens(_rest, _acc), do: :error
 
-  defp unescape(name) do
-    Regex.replace(~r/\\(u[0-9a-fA-F]{4}|.)/s, name, fn _match, escaped ->
-      case escaped do
-        "u" <> hex -> code_point(String.to_integer(hex, 16))
-        "n" -> "\n"
-        "t" -> "\t"
-        "r" -> "\r"
-        "b" -> "\b"
-        "f" -> "\f"
-        other -> other
-      end
-    end)
+  defp bracket_token([single]), do: property(single)
+  defp bracket_token(["", double]), do: property(double)
+  defp bracket_token(["", "", index]), do: {:ok, {:index, String.to_integer(index)}}
+  defp bracket_token(["", "", "", "*"]), do: {:ok, :wildcard}
+
+  defp property(quoted) do
+    with {:ok, name} <- unescape(quoted), do: {:ok, {:property, name}}
   end
 
-  # A lone UTF-16 surrogate cannot be a key of decoded JSON; keep it from raising.
-  defp code_point(code) when code in 0xD800..0xDFFF, do: "\\u" <> Integer.to_string(code, 16)
-  defp code_point(code), do: <<code::utf8>>
+  # Utils.unescape as Jayway applies it to quoted names: `\\uXXXX` (surrogate pairs combined),
+  # the usual control escapes, and any other escaped character as itself. A `\\u` without four
+  # hex digits, or a lone surrogate, fails the path.
+  defp unescape(name), do: unescape(name, [])
+
+  defp unescape(<<>>, acc), do: {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary()}
+
+  defp unescape(<<"\\u", hex::binary-size(4), rest::binary>>, acc) do
+    with {:ok, code} <- hex(hex),
+         {:ok, char, rest} <- code_point(code, rest) do
+      unescape(rest, [char | acc])
+    end
+  end
+
+  defp unescape(<<"\\u", _rest::binary>>, _acc), do: :error
+
+  defp unescape(<<?\\, char::utf8, rest::binary>>, acc),
+    do: unescape(rest, [control(char) | acc])
+
+  defp unescape(<<char::utf8, rest::binary>>, acc), do: unescape(rest, [<<char::utf8>> | acc])
+
+  defp hex(digits) do
+    case Integer.parse(digits, 16) do
+      {code, ""} when byte_size(digits) == 4 -> {:ok, code}
+      _other -> :error
+    end
+  end
+
+  defp code_point(high, <<"\\u", hex::binary-size(4), rest::binary>>)
+       when high in 0xD800..0xDBFF do
+    case hex(hex) do
+      {:ok, low} when low in 0xDC00..0xDFFF ->
+        {:ok, <<0x10000 + (high - 0xD800) * 0x400 + (low - 0xDC00)::utf8>>, rest}
+
+      _other ->
+        :error
+    end
+  end
+
+  defp code_point(code, _rest) when code in 0xD800..0xDFFF, do: :error
+  defp code_point(code, rest), do: {:ok, <<code::utf8>>, rest}
+
+  defp control(?n), do: "\n"
+  defp control(?t), do: "\t"
+  defp control(?r), do: "\r"
+  defp control(?b), do: "\b"
+  defp control(?f), do: "\f"
+  defp control(char), do: <<char::utf8>>
 
   # Every value `tokens` reaches from `value`; branches that do not resolve add nothing.
   defp collect(value, []), do: [value]

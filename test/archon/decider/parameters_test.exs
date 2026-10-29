@@ -531,6 +531,13 @@ defmodule Archon.Decider.ParametersTest do
   end
 
   describe "beyond the upstream tests" do
+    test "a malformed path resolves to nil instead of raising" do
+      assert Parameters.replace(%{"v" => "${a['\\uZZZZ']}", "w" => "x${a[}"}, %{"a" => 1}) == %{
+               "v" => nil,
+               "w" => "xnull"
+             }
+    end
+
     test "the workflow entry carries the workflow's own fields" do
       workflow = %Workflow{
         default_workflow()

@@ -14,7 +14,8 @@ defmodule Archon.Decider.JsonPathTest do
       "e.f" => 2,
       "n" => nil,
       "customer's name" => 7,
-      "back\\slash" => 8
+      "back\\slash" => 8,
+      "😀" => 42
     },
     "list" => [%{"x" => 1}, %{"y" => 2}, %{"x" => 3}],
     "s" => "text"
@@ -50,7 +51,13 @@ defmodule Archon.Decider.JsonPathTest do
     assert JsonPath.read(@doc_json, "a['e\\.f']") == 2
     assert JsonPath.read(@doc_json, "a['c\\ d']") == 1
     assert JsonPath.read(@doc_json, "a['c\\x d']") == nil
+    assert JsonPath.read(@doc_json, "a['\\uD83D\\uDE00']") == 42
+    assert JsonPath.read(@doc_json, "a['\\uD83D']") == nil
     assert JsonPath.read(@doc_json, "a['\\ud800']") == nil
+    assert JsonPath.read(@doc_json, "a['\\uDE00\\uD83D']") == nil
+    assert JsonPath.read(@doc_json, "a['\\uZZZZ']") == nil
+    assert JsonPath.read(@doc_json, "a['\\u12']") == nil
+    assert JsonPath.read(@doc_json, "a['\\u']") == nil
   end
 
   test "paths that do not resolve read as nil" do
@@ -67,7 +74,7 @@ defmodule Archon.Decider.JsonPathTest do
     assert JsonPath.read(@doc_json, "list[*].x") == [1, 3]
     assert JsonPath.read(@doc_json, "list.*.y") == [2]
     assert JsonPath.read(@doc_json, "list[*].z") == []
-    assert JsonPath.read(@doc_json, "a.*") == [[10, 20, 30], 8, 1, 7, 2, nil]
+    assert JsonPath.read(@doc_json, "a.*") == [[10, 20, 30], 8, 1, 7, 2, nil, 42]
   end
 
   test "unsupported or invalid syntax reads as nil" do
