@@ -12,6 +12,11 @@ set -u
 # Byte-wise globs and tr: non-ASCII paths are rejected below, not case-folded.
 export LC_ALL=C
 
+if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
+  echo "usage: $0 <test-gap|daily-cleanup> [base] [head]" >&2
+  exit 2
+fi
+
 worker="${1:-}"
 base="${2:-origin/main}"
 head="${3:-HEAD}"

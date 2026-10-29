@@ -207,6 +207,11 @@ defmodule Archon.Scripts.WorkerPathCheckTest do
     assert out =~ "outside allowlist\tdocs/.claude/skills/x/SKILL.md"
   end
 
+  test "extra arguments are a usage error", %{tmp_dir: dir} do
+    assert {out, 2} = check(dir, "test-gap", ["main", "HEAD", "lib/a.ex"])
+    assert out =~ "usage:"
+  end
+
   test "an unknown worker is a usage error", %{tmp_dir: dir} do
     assert {out, 2} = check(dir, "other")
     assert out =~ "usage:"
