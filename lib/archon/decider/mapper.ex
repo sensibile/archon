@@ -21,6 +21,7 @@ defmodule Archon.Decider.Mapper do
   alias Archon.Decider.Mapper.{
     Context,
     Decision,
+    DoWhile,
     ForkJoin,
     Join,
     Simple,
@@ -40,6 +41,7 @@ defmodule Archon.Decider.Mapper do
     "DECISION" => Decision,
     "FORK_JOIN" => ForkJoin,
     "JOIN" => Join,
+    "DO_WHILE" => DoWhile,
     "SUB_WORKFLOW" => SubWorkflow,
     "WAIT" => Wait
   }

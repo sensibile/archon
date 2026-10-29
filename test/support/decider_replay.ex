@@ -14,6 +14,7 @@ defmodule Archon.DeciderReplay do
     * `decide/2` - the `WorkflowExecutorOps#decide` loop: persist `tasks_to_be_updated`, add new
       tasks deduplicated by reference name and retry count with `seq` and `firstScheduledTime`,
       start synchronous system tasks, `execute` them, and decide again while that changed state.
+      A `DO_WHILE` adds the tasks of its next iteration and drops those `keepLastN` removes.
       On completion only the status and output are stored, so tasks keep `executed: false`.
     * `poll/3` and `update/3` - `ExecutionService#poll` and `#updateTask`. The update skips the
       decide like `isLazyEvaluateWorkflow` for a successful forked task a `JOIN` waits on.
@@ -28,6 +29,7 @@ defmodule Archon.DeciderReplay do
   alias Archon.Contract
   alias Archon.Decider
   alias Archon.Decider.{Context, Outcome, SystemTask, SystemTasks}
+  alias Archon.Decider.SystemTask.DoWhile
   alias Archon.Domain.{Task, TaskDef, Workflow, WorkflowDef, WorkflowTask}
 
   @worker "archon-contract"
@@ -169,9 +171,40 @@ defmodule Archon.DeciderReplay do
     |> Enum.filter(&(sync_system_task?(&1) and not Task.terminal?(&1.status)))
     |> Enum.reduce({workflow, false}, fn %Task{task_id: id}, {workflow, changed?} ->
       task = Enum.find(workflow.tasks, &(&1.task_id == id))
-      {executed?, task} = SystemTask.execute(workflow, task, now)
-      if executed?, do: {replace(workflow, task), true}, else: {workflow, changed?}
+      {executed?, workflow} = execute(workflow, task, now)
+      {workflow, changed? or executed?}
     end)
+  end
+
+  # DoWhile#execute with WorkflowExecutorOps#scheduleNextIteration (scheduleTask, then add to the
+  # workflow) and removeIterations, which deletes the dropped tasks from the store.
+  defp execute(workflow, %Task{task_type: "DO_WHILE"} = task, now) do
+    assert {:ok, %DoWhile{} = result} = DoWhile.execute(workflow, task, Context.new(now: now))
+    removed = MapSet.new(result.removed_task_ids)
+
+    workflow = %{
+      workflow
+      | tasks: Enum.reject(workflow.tasks, &MapSet.member?(removed, &1.task_id))
+    }
+
+    if result.changed? do
+      workflow = replace(workflow, result.task)
+      seq = workflow.tasks |> Enum.map(& &1.seq) |> Enum.max(fn -> 0 end)
+
+      scheduled =
+        result.tasks_to_be_scheduled
+        |> Enum.with_index(seq + 1)
+        |> Enum.map(fn {task, seq} -> schedule(task, seq, now) end)
+
+      {true, %{workflow | tasks: workflow.tasks ++ scheduled}}
+    else
+      {false, workflow}
+    end
+  end
+
+  defp execute(workflow, task, now) do
+    {executed?, task} = SystemTask.execute(workflow, task, now)
+    if executed?, do: {true, replace(workflow, task)}, else: {false, workflow}
   end
 
   @doc "`AsyncSystemTaskExecutor#execute` for every pending `JOIN`, then a decide if one finished."

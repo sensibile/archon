@@ -21,6 +21,8 @@ defmodule Archon.Decider.SystemTask do
   keeps the default `execute` (nothing changes); `JOIN` is `Archon.Decider.SystemTask.Join`;
   `WAIT` completes once `now` is past its `wait_timeout`. `SUB_WORKFLOW` needs the child
   workflow, which the runtime loads, so it is `Archon.Decider.SystemTask.SubWorkflow.execute/2`.
+  `DO_WHILE` evaluates scripts and schedules its next iteration, so it is
+  `Archon.Decider.SystemTask.DoWhile.execute/3`, which takes the Decider context.
   When to call it (synchronously in the decide loop or from the system task queue) is the
   runtime's choice (Phase 3).
   """

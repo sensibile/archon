@@ -1,7 +1,7 @@
 # ADR 0014: Phase 2 Decider 설계
 
 - 상태: 제안
-- 날짜: 2026-10-29 (2b에서 결정 1·2·5, 2c에서 결정 5·6, 2d에서 결정 2·5 갱신)
+- 날짜: 2026-10-29 (2b에서 결정 1·2·5, 2c에서 결정 5·6, 2d에서 결정 2·5, 2e에서 결정 5·6·8 갱신)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 
 ## 맥락
@@ -164,6 +164,27 @@ MVP 정의에서 쓰는 경로는 위 부분집합 안에 있다.
     따로 둔다. 런타임이 `Task.sub_workflow_id/1`로 하위 워크플로우를 읽어 넘기고(없으면 `nil`), 종료 상태가
     되면 태스크가 그 상태·출력·실패 이유를 따른다(upstream `updateTaskStatus`). 하위 워크플로우 시작
     (`start`, `SCHEDULED`인데 하위 워크플로우가 없을 때의 재시작)과 취소는 Phase 3 런타임이 맡는다.
+- 2e에서 정한 세부:
+  - DO_WHILE 매퍼는 upstream `DoWhileTaskMapper`를 옮긴다. 같은 참조명의 태스크가 이미 종료 상태면 아무것도
+    예약하지 않고, 아니면 `IN_PROGRESS`인 DO_WHILE 태스크 하나만 만든다. 루프 본문은 실행 단계가 예약한다.
+    태스크 정의는 박힌 정의, 결정 2의 `task_defs`, `TaskDef` 기본값 순서로 찾는다.
+  - DO_WHILE 실행 판정은 스크립트를 평가하고 다음 반복을 예약해야 하므로
+    `SystemTask.DoWhile.execute(workflow, task, context)`로 따로 둔다. 결정 2의 `Context`를 받아
+    `evaluate_script`로 `loopCondition`을 평가하고(upstream `ScriptEvaluator.evalBool`), 다음 반복의 태스크를
+    `Decider.tasks_to_be_scheduled/5`로 매핑한다. 결과는 upstream `execute`의 반환값(`changed?`)과 바뀐 태스크에
+    더해, 런타임이 예약하고 워크플로우에 더할 다음 반복의 태스크(upstream
+    `WorkflowExecutorOps#scheduleNextIteration`: 첫 `loopOver` 태스크를 루프 태스크의 `retryCount`로 매핑하고
+    참조명에 `__<iteration>`을 붙인다)와, `keepLastN`이 더는 남기지 않는 반복의 본문 태스크 ID(upstream
+    `removeIterations`가 저장소에서 지우는 것)를 담는다. 지울 태스크는 `changed?`와 상관없이 돌려준다. upstream도
+    `execute`가 `false`를 돌려주는 호출에서 지우기 때문이다. 다음 반복을 매핑하다 종료가 나면
+    `{:terminate, termination}`을 돌려준다(upstream은 `TerminateWorkflowException`이 decide까지 올라간다).
+  - 조건 평가와 다음 반복 매핑은 갱신한 루프 태스크(새 `iteration`, 출력, `loopIndex`·`loopItem`)를 워크플로우에
+    넣은 뒤에 한다. upstream은 워크플로우 안의 같은 객체를 고치므로 `${loop.output.iteration}` 같은 입력이 새 값을
+    본다.
+  - 리스트 반복(`items`, 또는 Orkes 호환 `_items` 입력 파라미터)도 옮긴다. `items`는 Phase 1 `WorkflowTask`에 이미
+    있는 계약 필드다. 빈 목록이면 본문 없이 `iteration` 0으로 완료한다.
+  - DO_WHILE은 upstream에서 동기 시스템 태스크다. decide 루프가 진행 중인 DO_WHILE을 매번 다시 실행하는 동작과,
+    다음 반복 태스크의 도메인 지정(`setTaskDomains`)은 Phase 3 런타임이 맡는다.
 
 ### 6. 평가기는 `value-param`만 먼저 구현한다
 
@@ -174,6 +195,7 @@ MVP 정의에서 쓰는 경로는 위 부분집합 안에 있다.
   워크플로우를 종료시킨다. DO_WHILE은 2e 전까지 매퍼를 등록하지 않는다.
   (비고: [ADR 0015](0015-script-evaluator.md)가 `javascript`·`graaljs`를 QuickJS-ng 프로세스로 구현했다.
   `python`은 보류해 지금도 이 문구로 종료한다. DO_WHILE은 2e에서 같은 평가기를 쓴다.)
+  (비고: 2e에서 DO_WHILE 매퍼를 등록하고 `loopCondition`을 같은 평가기로 평가한다. 결정 5의 2e 세부를 본다.)
 - DECISION의 `caseExpression`도 스크립트다. 평가기 ADR 전까지는 upstream `DecisionTaskMapper`가 스크립트
   평가에 실패했을 때의 문구(`Error while evaluating script: <expression>`)로 워크플로우를 종료시킨다.
   `caseValueParam`만 쓰는 DECISION은 upstream과 같게 동작한다.
@@ -206,7 +228,7 @@ MVP 정의에서 쓰는 경로는 위 부분집합 안에 있다.
 | 2b | 결정 1, 2와 SIMPLE: 시작, 다음 태스크, 재시도, 타임아웃, 완료 판정 | `workflow_get_completed_simple.json` 재현, upstream `TestDeciderService` |
 | 2c | SWITCH(`value-param`), FORK_JOIN, JOIN | `workflow_get_completed_switch.json`, `workflow_get_completed_fork.json` 재현 |
 | 2d | SUB_WORKFLOW, WAIT의 결정 부분 | upstream `SubWorkflowTaskMapperTest`, `WaitTaskMapperTest`, `TestSubWorkflow`(execute), `DateTimeUtilsTest`와 commons-lang3 `DateUtils.parseDate` 실행 결과 |
-| 2e | DO_WHILE | 결정 6의 평가기 ADR 이후 |
+| 2e | DO_WHILE | upstream `DoWhileTaskMapperTest`, `DoWhileTest`. DO_WHILE은 골든 픽스처가 없으므로 재현 하네스로 decide와 실행 판정을 반복하는 시나리오를 함께 둔다 |
 
 "재현"은 시작 요청과 `task_update_*` 픽스처의 결과를 차례로 넣으며 `decide`를 반복했을 때, 마지막
 `Workflow`가 해당 `workflow_get_completed_*` 픽스처와 같다는 뜻이다. `taskId`·시각 필드는 비교에서 뺀다.
@@ -241,7 +263,16 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
 - `javascript`·`graaljs`·`python` 평가기, DECISION `caseExpression`, DO_WHILE은 별도 ADR 전까지 동작하지
   않는다. DECISION `caseExpression`은 upstream에서 스크립트가 실패할 때와 같은 문구로 종료한다.
   (비고: [ADR 0015](0015-script-evaluator.md)로 `javascript`·`graaljs`·`caseExpression`은 동작한다. 그
-  평가기의 차이는 ADR 0015에 적는다.)
+  평가기의 차이는 ADR 0015에 적는다. DO_WHILE은 2e에서 동작한다.)
+- DO_WHILE의 `keepLastN` 입력 파라미터가 Java `int`가 아니면(문자열, 실수, `int` 범위 밖 정수, `${...}` 표현식)
+  upstream은 `(Integer)` 캐스트에서 `ClassCastException`을 던져 decide가 매번 실패하고 워크플로우가 멈춘다.
+  `keepLastN`은 해석하지 않은 원래 입력 파라미터에서 읽기 때문에 표현식도 같다. Archon은 DO_WHILE 태스크를
+  `FAILED_WITH_TERMINAL_ERROR`와 `keepLastN must be an int, got: <값>`으로 끝낸다. Java 예외 문구는 JVM 모듈
+  정보를 담고 있어 옮기지 않았다.
+- DO_WHILE의 `loopOver`에 태스크가 없으면(정의 검증을 거치지 않았거나 `null` 항목뿐인 경우) upstream은 다음
+  반복을 예약할 때 `IndexOutOfBoundsException`이나 `NullPointerException`을 던진다. Archon은 DO_WHILE 태스크를
+  `FAILED_WITH_TERMINAL_ERROR`와 `DO_WHILE task <참조명> has no loopOver tasks`로 끝낸다. 예약할 것 없이
+  반복을 늘리면 decide 루프가 끝나지 않기 때문이다. `null` 항목은 FORK_JOIN의 빈 가지처럼 건너뛴다.
 - FORK_JOIN의 가지 목록 중 빈 가지가 있으면 upstream은 `IndexOutOfBoundsException`을 낸다. Archon은 그
   가지를 건너뛴다. 정의 검증(`TaskTypeConstraint`)은 upstream처럼 `forkTasks` 자체가 비었는지만 본다.
 - 완료 직전 permissive 태스크 실패가 여럿이면 upstream은 `HashMap` 순회 순서(Java 해시)로 메시지를
@@ -271,11 +302,12 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
 - 2a(결정 3의 필드, 결정 4, 결정 7)를 첫 PR로 구현했다. 2b(결정 1, 2, SIMPLE·USER_DEFINED 매퍼)를 두 번째
   PR로 구현했다. 2c(SWITCH `value-param`·DECISION `caseValueParam`·FORK_JOIN·JOIN 매퍼, 결정 5의
   SWITCH·DECISION·JOIN 실행 판정)를 세 번째 PR로 구현했다. 2d(SUB_WORKFLOW·WAIT 매퍼, WAIT·SUB_WORKFLOW
-  실행 판정, `DateTimeUtils`)를 네 번째 PR로 구현했다. 2e는 아직 구현하지 않았다. 조각마다 PR을
-  올리고, 마지막 조각이 머지되면 이 ADR을 `승인`으로 바꾼다.
+  실행 판정, `DateTimeUtils`)를 네 번째 PR로 구현했다. 2e(DO_WHILE 매퍼와 실행 판정)를 다섯 번째 PR로
+  구현했다. 2e가 마지막 조각이므로 이 PR이 머지되면 이 ADR을 `승인`으로 바꾼다.
 - 재현 테스트(`test/archon/decider/simple_replay_test.exs`, 2c의 `system_task_replay_test.exs`)는 런타임
   역할을 `test/support/decider_replay.ex`에서 흉내 낸다. 2c에서 decide 루프의 동기 시스템 태스크 실행,
-  JOIN 비동기 실행, `isLazyEvaluateWorkflow`를 더했다. FORK_JOIN 픽스처에서 가지 태스크와 JOIN이
+  JOIN 비동기 실행, `isLazyEvaluateWorkflow`를 더했다. 2e에서 DO_WHILE 실행 결과의 다음 반복 예약과
+  `keepLastN` 삭제를 더했다(`test/archon/decider/do_while_replay_test.exs`). FORK_JOIN 픽스처에서 가지 태스크와 JOIN이
   `executed: false`로 남는 것은 가지 완료 때 decide를 건너뛰고, JOIN 완료 뒤의 decide가 태스크를 저장하지
   않고 워크플로우를 끝내기 때문이다. JOIN의 `pollCount` 3은 예약 직후와 가지 완료마다 한 번씩 평가한 결과다.
   2b에서 정리한 규칙은 다음과 같다.
@@ -283,13 +315,15 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
   완료 시 태스크를 갱신하지 않고 상태·출력만 저장하는 동작은 upstream `WorkflowExecutorOps`를 따랐고,
   Phase 3 런타임이 같은 규칙을 지켜야 픽스처와 같아진다. 마지막 태스크의 `executed: false`가 그 결과다.
 - 결정 3의 내부 필드 중 `first_scheduled_time`, `callback_after_ms`는 2b Decider가 읽고 쓴다.
-  `wait_timeout`은 2d의 WAIT 매퍼와 실행 판정이 쓴다. `loop_task_id`, `previous_status`, `failed_task_id`는
-  2e와 Phase 3에서 쓴다.
+  `wait_timeout`은 2d의 WAIT 매퍼와 실행 판정이 쓴다. `previous_status`, `failed_task_id`는 Phase 3에서 쓴다.
+  `loop_task_id`는 upstream core에서 값을 넣는 곳이 없어(`TaskModel`의 getter·setter만 있다) 2e에서도 쓰지
+  않는다. 저장용 인코딩(Phase 4)에서 왕복만 유지한다.
 - 입력 해석은 upstream처럼 결과 크기에 상한이 없다. `${workflow.input.x}`를 정의에 여러 번 쓰고 큰 `x`를 넣으면
   결과 문자열이 두 크기의 곱만큼 커진다(2a 로컬 보안 리뷰 지적). upstream도 같은 성질이고 아직 이를 부르는
   REST 경로가 없으므로 2a에서는 동작을 바꾸지 않는다. Phase 5에서 요청 본문 크기 제한과 함께 확장 상한을
   정하고, 그때 upstream과 다른 점으로 기록한다.
 - DO_WHILE과 스크립트 평가기는 별도 ADR이 필요하다. 그 ADR이 나오기 전까지 Phase 2는 완료가 아니다.
-  (비고: 스크립트 평가기는 [ADR 0015](0015-script-evaluator.md)로 정하고 구현했다. 남은 것은 2e DO_WHILE이다.)
+  (비고: 스크립트 평가기는 [ADR 0015](0015-script-evaluator.md)로 정하고 구현했다. 2e DO_WHILE도 구현해
+  Phase 2의 범위를 마쳤다.)
 - Phase 3 런타임은 `Outcome`을 받아 저장·큐 투입·하위 워크플로우 시작을 수행하는 쪽으로 설계한다.
 - Phase 4는 결정 3의 내부 필드를 포함하는 저장용 인코딩을 정한다.
