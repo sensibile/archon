@@ -39,31 +39,27 @@ archon 세션에서 예약 시각과 머지 방식을 포함한 계획에 "진�
 명령을 실행해, 바뀐 경로가 모두 허용 목록 안에 있는지 기계적으로 확인한다. Codex가 동의했더라도 이 검사를
 통과하지 못하면 auto-merge를 켜지 않는다.
 
-아래 명령은 허용 밖 경로를 출력한다. 출력이 비어 있어야 통과다. 판정은 출력으로 한다(`grep`은 출력이 없을 때
-종료 코드 1을 낸다). `git diff`가 오류를 내면 통과로 보지 않는다.
-비교 기준은 최신 `origin/main`이므로, 실행 전에 `git fetch origin`을 한다.
-
-테스트 보강:
+검사는 [`scripts/worker_path_check.sh`](../scripts/worker_path_check.sh)로 한다. PR 브랜치가 스크립트 자체를 고쳐
+검사를 무력화하지 못하도록, 작업 브랜치의 사본이 아니라 `origin/main`의 스크립트를 실행한다. 대상은 리뷰한 head SHA이고,
+auto-merge의 `--match-head-commit`에도 같은 SHA를 쓴다.
 
 ```bash
-git diff --name-status --no-renames origin/main...HEAD | awk '$1 == "D" || $2 !~ /^test\//'
+git fetch origin
+check="$(mktemp)"
+git show origin/main:scripts/worker_path_check.sh > "$check"
+bash "$check" <test-gap|daily-cleanup> origin/main <리뷰한 head SHA>
 ```
 
-데일리 정리:
-
-```bash
-git diff --name-only --no-renames origin/main...HEAD \
-  | grep -Ev '^(lib/|test/|docs/|README\.md$)|^$' ; \
-git diff --name-only --no-renames origin/main...HEAD | grep -E '^docs/(adr/|operations\.md$)'
-```
+- 종료 코드 0만 통과다. 1은 허용 밖 변경이 있다는 뜻이고 그 목록을 출력한다. 2는 사용법 오류나 git 오류다.
+- 스크립트는 경로를 `git diff -z`로 그대로 읽는다. 심볼릭 링크와 서브모듈 변경은 경로와 관계없이 허용 밖이다.
 
 | 워커 | 허용 경로 | 추가 조건 |
 |---|---|---|
-| 테스트 보강(`test-gap`) | `test/` 아래 | 삭제(`D`) 없음 |
+| 테스트 보강(`test-gap`) | `test/` 아래 | 삭제 없음 |
 | 데일리 정리(`daily-cleanup`) | `lib/`, `test/`, `docs/` 아래와 `README.md`. 단 `docs/adr/`, `docs/operations.md`는 제외 | 없음 |
 
 - 그 밖의 경로는 모두 허용 밖이다. 예: `.github/`, `mix.exs`, `mix.lock`, `config/`, `priv/`(외부 계약 포함),
-  `AGENTS.md`, `.gitignore`, 태극 설치본(`.taeguk/`, `.claude/`, `.codex/`, `.agents/`).
+  `scripts/`, `AGENTS.md`, `.gitignore`, 태극 설치본(`.taeguk/`, `.claude/`, `.codex/`, `.agents/`).
   워커는 자기 권한 기록(이 문서, ADR, AGENTS.md)을 바꿀 수 없다.
 - 허용 밖 경로가 하나라도 있으면 그 PR에 `no-auto-merge` label을 붙이고, 해당 경로와 이유를 실행 보고에 남긴 뒤
   BOSS에게 보고한다. 그 경로를 빼서 다시 리뷰하는 것은 허용한다.

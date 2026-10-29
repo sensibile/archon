@@ -26,10 +26,10 @@ archon 작업의 로컬 Codex 전송은 같은 날 상시 허용됐다.
    - 예약: 이 Mac의 로컬 Claude 예약 작업. 정리는 매일 09:01, 테스트 보강은 매일 10:01.
    - 머지 권한: Codex가 필요하다고 동의한 항목만 AGENTS.md "PR과 머지" 절차로 head를 고정해 auto-merge한다.
      Codex가 필요 없다고 보거나 판단이 불분명한 항목은 뺀다.
-   - 경로 허용 목록: auto-merge를 켜기 직전에, 바뀐 경로가 워커별 허용 목록 안에 있는지 `git diff`로 기계적으로
-     검사한다. 테스트 보강은 `test/`만 허용하고 삭제는 없어야 한다. 데일리 정리는 `lib/`, `test/`, `docs/`,
-     `README.md`만 허용하되 ADR과 운영 문서는 뺀다. 허용 밖 경로가 있으면 auto-merge를 켜지 않고 BOSS에게 보고한다.
-     목록과 절차는 운영 문서에 있다.
+   - 경로 허용 목록: auto-merge를 켜기 직전에 `origin/main`의 `scripts/worker_path_check.sh`로 리뷰한 head SHA의
+     변경 경로를 기계적으로 검사한다. 테스트 보강은 `test/`만 허용하고 삭제는 없어야 한다. 데일리 정리는 `lib/`,
+     `test/`, `docs/`, `README.md`만 허용하되 ADR과 운영 문서는 뺀다. 심볼릭 링크와 서브모듈은 허용하지 않는다.
+     종료 코드가 0이 아니면 auto-merge를 켜지 않고 BOSS에게 보고한다. 목록과 절차는 운영 문서에 있다.
    - Codex 전송: archon diff를 로컬 Codex CLI로 보내는 것은 상시 허용이다.
 3. **coverage는 측정 도구로만 쓴다.** 측정 명령은 `mix test --cover`다. `mix.exs`에
    `test_coverage: [summary: [threshold: 0]]`을 두어, 통과한 suite가 커버리지 임계값(Elixir 기본 90%) 때문에
