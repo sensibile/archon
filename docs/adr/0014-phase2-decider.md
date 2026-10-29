@@ -172,10 +172,14 @@ MVP 정의에서 쓰는 경로는 위 부분집합 안에 있다.
   어떻게 들일지 정하는 별도 ADR에서 다룬다. 그 전까지 SWITCH에서 이 평가기를 쓰면 upstream
   `SwitchTaskMapper`가 등록되지 않은 평가기에 쓰는 문구(`No evaluator registered for type: <type>`)로
   워크플로우를 종료시킨다. DO_WHILE은 2e 전까지 매퍼를 등록하지 않는다.
+  (비고: [ADR 0015](0015-script-evaluator.md)가 `javascript`·`graaljs`를 QuickJS-ng 프로세스로 구현했다.
+  `python`은 보류해 지금도 이 문구로 종료한다. DO_WHILE은 2e에서 같은 평가기를 쓴다.)
 - DECISION의 `caseExpression`도 스크립트다. 평가기 ADR 전까지는 upstream `DecisionTaskMapper`가 스크립트
   평가에 실패했을 때의 문구(`Error while evaluating script: <expression>`)로 워크플로우를 종료시킨다.
   `caseValueParam`만 쓰는 DECISION은 upstream과 같게 동작한다.
-- 평가기는 `Archon.Decider.Evaluator.evaluate/3`가 고른다. upstream 테스트가 주입하는 임의 평가기는 받지
+  (비고: [ADR 0015](0015-script-evaluator.md) 이후 `caseExpression`을 평가하고, 평가에 실패할 때만 이 문구로
+  종료한다.)
+- 평가기는 `Archon.Decider.Evaluator.evaluate/3`(ADR 0015 이후 `evaluate/4`)가 고른다. upstream 테스트가 주입하는 임의 평가기는 받지
   않는다. 평가 결과가 `selectedCase` 키를 가진 맵이면 그 키로 분기하고 맵을 출력에 복사하는 upstream
   분기는 `value-param` 결과에도 그대로 적용한다.
 
@@ -190,6 +194,7 @@ MVP 정의에서 쓰는 경로는 위 부분집합 안에 있다.
 - 다음은 아직 옮기지 않는다. HTTP·KAFKA_PUBLISH·JSON_JQ_TRANSFORM 규칙은 `MetadataDAO`에서 태스크 정의를
   찾아야 하므로 영속성이 생긴 뒤에 붙인다. DECISION `caseExpression`과 `javascript` SWITCH `expression`의
   스크립트 문법 검사는 결정 6의 평가기 ADR에서 다룬다.
+  (비고: [ADR 0015](0015-script-evaluator.md)에서 실행 없이 파싱하는 검사로 구현했다.)
 - WAIT `until`은 upstream 날짜 패턴(`yyyy-MM-dd HH:mm`, `yyyy-MM-dd HH:mm z`, `yyyy-MM-dd`)의 모양만 검사한다.
   관대한 `SimpleDateFormat`이 범위 밖 값(13월 등)을 넘겨 받는 동작은 재현하지 않는다.
 
@@ -235,6 +240,8 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
   종료시킨다.
 - `javascript`·`graaljs`·`python` 평가기, DECISION `caseExpression`, DO_WHILE은 별도 ADR 전까지 동작하지
   않는다. DECISION `caseExpression`은 upstream에서 스크립트가 실패할 때와 같은 문구로 종료한다.
+  (비고: [ADR 0015](0015-script-evaluator.md)로 `javascript`·`graaljs`·`caseExpression`은 동작한다. 그
+  평가기의 차이는 ADR 0015에 적는다.)
 - FORK_JOIN의 가지 목록 중 빈 가지가 있으면 upstream은 `IndexOutOfBoundsException`을 낸다. Archon은 그
   가지를 건너뛴다. 정의 검증(`TaskTypeConstraint`)은 upstream처럼 `forkTasks` 자체가 비었는지만 본다.
 - 완료 직전 permissive 태스크 실패가 여럿이면 upstream은 `HashMap` 순회 순서(Java 해시)로 메시지를
@@ -283,5 +290,6 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
   REST 경로가 없으므로 2a에서는 동작을 바꾸지 않는다. Phase 5에서 요청 본문 크기 제한과 함께 확장 상한을
   정하고, 그때 upstream과 다른 점으로 기록한다.
 - DO_WHILE과 스크립트 평가기는 별도 ADR이 필요하다. 그 ADR이 나오기 전까지 Phase 2는 완료가 아니다.
+  (비고: 스크립트 평가기는 [ADR 0015](0015-script-evaluator.md)로 정하고 구현했다. 남은 것은 2e DO_WHILE이다.)
 - Phase 3 런타임은 `Outcome`을 받아 저장·큐 투입·하위 워크플로우 시작을 수행하는 쪽으로 설계한다.
 - Phase 4는 결정 3의 내부 필드를 포함하는 저장용 인코딩을 정한다.

@@ -7,7 +7,8 @@
 # and core/src/main/java/com/netflix/conductor/core/utils/DateTimeUtils.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the class-level constraint became a function returning error tuples;
-# rules that need a MetadataDAO lookup or a script engine are not ported yet (ADR 0014).
+# rules that need a MetadataDAO lookup are not ported yet (ADR 0014); the script syntax check
+# runs through Archon.Script (ADR 0015).
 
 defmodule Archon.Domain.TaskTypeConstraint do
   @moduledoc """
@@ -17,12 +18,14 @@ defmodule Archon.Domain.TaskTypeConstraint do
   it runs for every task wherever a `WorkflowTask` is validated. The violations are class-level:
   their path is the task's own path (`tasks[0]`), represented here by `""`.
 
-  Not ported yet (ADR 0014):
+  Not ported yet (ADR 0014): `HTTP`, `KAFKA_PUBLISH` and `JSON_JQ_TRANSFORM`, which fall back to
+  a `MetadataDAO` lookup of the task definition.
 
-    * `HTTP`, `KAFKA_PUBLISH` and `JSON_JQ_TRANSFORM`, which fall back to a `MetadataDAO` lookup
-      of the task definition.
-    * The script syntax check of `DECISION.caseExpression` and of `SWITCH.expression` with the
-      `javascript` evaluator, which needs a script engine.
+  `DECISION.caseExpression` and `SWITCH.expression` with the `javascript` evaluator (not
+  `graaljs`, as upstream) are parsed without running (`Archon.Script.validate_syntax/1`, ADR
+  0015). A syntax error is reported as
+  `Expression is not well formatted: <engine message>, taskType: <type> taskName <name>`; the
+  engine message is QuickJS-ng's, not GraalJS's.
 
   `WAIT.until` is checked against upstream's date patterns (`yyyy-MM-dd HH:mm`,
   `yyyy-MM-dd HH:mm z`, `yyyy-MM-dd`) by shape only; lenient `SimpleDateFormat` parsing of
@@ -30,6 +33,7 @@ defmodule Archon.Domain.TaskTypeConstraint do
   """
 
   alias Archon.Domain.{Codec, DateTimeUtils, WorkflowTask}
+  alias Archon.Script
 
   @date ~r/^\d+-\d+-\d+(?: \d+:\d+(?: \S+)?)?\z/
 
@@ -49,7 +53,7 @@ defmodule Archon.Domain.TaskTypeConstraint do
       "caseValueParam or caseExpression",
       "DECISION",
       task
-    ) ++ decision_cases(task, "DECISION")
+    ) ++ decision_cases(task, "DECISION") ++ script_syntax(task.case_expression, "DECISION", task)
   end
 
   defp messages(%WorkflowTask{type: "SWITCH"} = task) do
@@ -60,7 +64,12 @@ defmodule Archon.Domain.TaskTypeConstraint do
         true -> []
       end
 
-    evaluator ++ decision_cases(task, "SWITCH")
+    script =
+      if task.evaluator_type == "javascript",
+        do: script_syntax(task.expression, "SWITCH", task),
+        else: []
+
+    evaluator ++ decision_cases(task, "SWITCH") ++ script
   end
 
   defp messages(%WorkflowTask{type: "DYNAMIC"} = task) do
@@ -172,6 +181,18 @@ defmodule Archon.Domain.TaskTypeConstraint do
        ]
 
   defp decision_cases(%WorkflowTask{}, _type), do: []
+
+  defp script_syntax(nil, _type, _task), do: []
+
+  defp script_syntax(expression, type, task) do
+    case Script.validate_syntax(expression) do
+      :ok ->
+        []
+
+      {:error, reason} ->
+        ["Expression is not well formatted: #{reason}, taskType: #{type} taskName #{task.name}"]
+    end
+  end
 
   # PARAM_REQUIRED_STRING_FORMAT
   defp required(false, _field, _type, _task), do: []

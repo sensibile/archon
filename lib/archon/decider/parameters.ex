@@ -308,10 +308,14 @@ defmodule Archon.Decider.Parameters do
 
   @doc """
   Java's `Objects.toString` of a decoded JSON value: `null`, `{k=v, ...}` for maps (keys sorted),
-  `[a, b]` for lists and `Double#toString` for floats.
+  `[a, b]` for lists and `Double#toString` for floats. Also takes a script result
+  (`t:Archon.Script.value/0`), whose non-finite numbers print as `Double#toString` does.
   """
-  @spec java_string(json()) :: String.t()
+  @spec java_string(json() | Archon.Script.value()) :: String.t()
   def java_string(nil), do: "null"
+  def java_string(:nan), do: "NaN"
+  def java_string(:infinity), do: "Infinity"
+  def java_string(:neg_infinity), do: "-Infinity"
   def java_string(value) when is_binary(value), do: value
   def java_string(value) when is_boolean(value), do: Atom.to_string(value)
   def java_string(value) when is_integer(value), do: Integer.to_string(value)

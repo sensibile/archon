@@ -32,3 +32,11 @@ __pycache__/
 # Taeguk worker run reports (daily cleanup, test gap) stay local.
 /.taeguk/daily-cleanup/
 /.taeguk/test-gap/
+
+# The script evaluator binary built by elixir_make (ADR 0015).
+/priv/archon_js
+
+/priv/archon_js-sanitize
+
+# Object files of a direct `make` run.
+/obj/

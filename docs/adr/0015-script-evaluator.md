@@ -147,8 +147,9 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
 ## upstream과 의도적으로 다른 점
 
 - `$`는 JS 일반 객체다. upstream은 Java `Map`을 호스트 객체로 넘기므로 `$.get('x')` 같은 Java 메서드 호출이
-  되지만 Archon에서는 되지 않는다. 그 밖에 `Object.keys($)`·`JSON.stringify($)`처럼 호스트 객체와 일반 객체가
-  다르게 동작하는 경우가 있다. GraalJS 오라클로 확인한 차이를 구현 PR에서 이 절에 더한다.
+  되지만 Archon에서는 되지 않는다(`TypeError`). GraalJS 오라클에서 `Object.keys($)`는 입력 키가 아니라
+  `get`·`put`·`size` 같은 Java `Map` 메서드 이름 목록이고 `JSON.stringify($)`는 `"{}"`였다. Archon에서는
+  각각 입력 키 목록과 입력 JSON이다. 입력 안의 배열은 두 곳 모두 `Array.isArray`가 참이다.
 - 스크립트는 입력의 사본만 본다. upstream DECISION·DO_WHILE에서 스크립트가 Java `Map` 메서드로 입력 맵(DO_WHILE은
   실제 태스크 출력)을 고치면 원래 데이터가 바뀌지만, Archon에서는 프로세스 경계 때문에 바뀌지 않는다.
   스크립트가 워크플로우 상태를 고치는 경로는 막는 편이 맞으므로 재현하지 않는다.
@@ -158,8 +159,35 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
   이 사례는 오라클 비교에 차이로 기록한다.
 - 비유한 숫자가 태스크 출력에 들어가면 바로 저장 형태로 바뀐다. upstream은 같은 decide 안에서는 메모리의
   `Double`을 쓰다가 저장 후 다시 읽을 때 바뀌므로, 같은 decide 안에서 그 값을 다시 참조하는 드문 경우만 다를 수 있다.
-- 스크립트 오류 메시지 본문(`<메시지>` 부분)은 엔진마다 다르다. 감싸는 형식만 upstream과 같다.
+- 스크립트 오류 메시지 본문(`<메시지>` 부분)은 엔진마다 다르다. 감싸는 형식만 upstream과 같다. 예를 들어
+  `null.x`는 GraalJS가 ``TypeError: Cannot read property 'x' of null``, QuickJS-ng가
+  ``TypeError: cannot read property 'x' of null``이고, 문법 오류 본문은 GraalJS가 위치와 원문 줄을 덧붙인다.
+- `at line N`은 QuickJS-ng가 아는 줄(`Error` 객체 스택의 가장 안쪽 스크립트 프레임)일 때만 붙인다. 엔진이
+  던진 오류(`ReferenceError` 등)는 GraalJS와 같은 줄이 붙는다. 다르게 나오는 경우는 둘이다. GraalJS는
+  `throw 'abc'`처럼 `Error`가 아닌 값을 던지면 `throw` 문의 줄을 붙이지만 QuickJS-ng는 그 위치를 모르므로
+  줄을 붙이지 않는다. 반대로 스크립트가 만든 `Error` 객체(`throw new Error('x')`)와 `JSON.parse` 같은 내장
+  함수 오류에는 GraalJS가 줄을 붙이지 않지만 Archon은 붙인다.
+- 결과를 읽을 때 깊이(1,000단계)와 응답 크기(기본 16MiB)에 상한이 있다. 넘으면
+  `Script result is nested too deeply`·`Script result is too large`로 실패한다. upstream은 순환 참조 결과
+  (`var a = {}; a.self = a; a`)에서 `getObject`가 `StackOverflowError`를 낸다.
+- 짝이 없는 UTF-16 서로게이트는 결과 문자열과 오류 메시지에서 U+FFFD로 바뀐다. Archon의 문자열은 UTF-8이고,
+  upstream은 Java `String`에 그대로 담는다.
+- JS `Map` 결과의 키는 Java 문자열로 바꾼 뒤 맵 키가 되므로, `1`과 `'1'`처럼 문자열이 같은 키는 하나만 남는다.
+  upstream `HashMap`은 둘을 따로 갖고 저장할 때 같은 JSON 키를 두 번 쓴다.
+- 평가 프로세스가 비정상 종료하면 `Script evaluator exited with status <N>`로, 응답이 깨지면
+  `Script evaluator sent a malformed response`로 실패한다. upstream에는 해당하는 경로가 없다. 호출 지점의
+  처리(SWITCH 태스크 실패, DECISION 종료)는 다른 평가 실패와 같다.
+- 등록 검사 문구에서 upstream은 엔진 메시지를 `String.format`의 형식 문자열로 쓰므로, 메시지에 `%`가 있으면
+  (GraalJS 문법 오류 본문은 원문 줄을 담으므로 `$.a % 2 ==` 같은 식) 검증 대신 예외가 난다. Archon은 메시지를
+  그대로 넣는다.
+- `expression`이 없는 `javascript`·`graaljs` SWITCH(등록 검사를 거치지 않은 정의)는 upstream에서
+  `NullPointerException`으로 태스크가 실패한다. Archon도 태스크를 실패시키되 이유는
+  `Script request rejected: expression is null`이다.
 - 지원하는 ECMAScript 판과 내장 객체 세부(날짜 문자열 해석, 정규식 확장, 숫자 출력)는 QuickJS-ng를 따른다.
+- 결과를 읽는 동안 스크립트의 getter·프록시 트랩이 결과 자체를 바꾸는 경우의 읽기 순서는 GraalJS 오라클로
+  확인한 경우(위 "결과"에 적은 것)만 맞춘다. 그 밖의 순서 차이는 따로 재현하지 않는다. 결과가 달라지는 것은
+  그런 스크립트를 쓴 정의 자신뿐이고, 로컬 교차 리뷰 3회 동안 같은 영역에서 새 사례가 계속 나와 2026-10-29
+  BOSS 결정으로 이 규칙으로 닫았다.
 - 메모리 상한이 있다. upstream은 메모리 제한이 없다.
 - Python 평가기가 없다(결정 5).
 - INLINE·LAMBDA·이벤트 핸들러 조건은 해당 기능을 들일 때 이 평가기를 쓴다. 이 ADR은 Decider가 쓰는 곳만 구현한다.
@@ -179,8 +207,43 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
 
 ## 결과
 
-- 아직 구현하지 않았다. 구현 PR은 결정 1~4·6·7과 SWITCH `javascript`·`graaljs`, DECISION `caseExpression`,
-  등록 시 문법 검사를 연결하고, ADR 0014 결정 6·7의 해당 문장에 이 ADR 링크를 단다. DO_WHILE은 그 뒤 ADR 0014의 2e에서 이 평가기를 쓴다.
-- C 코드(`archon_js`)가 저장소에 생긴다. `mix credo`·`dialyzer`가 보지 않으므로 구현 PR에서 C 쪽 검사
-  (컴파일 경고를 오류로, 가능하면 AddressSanitizer 빌드 테스트)를 CI에 더한다.
+- 결정 1~4·6·7과 SWITCH `javascript`·`graaljs`, DECISION `caseExpression`, 등록 시 문법 검사를 구현했다.
+  ADR 0014 결정 2·6·7의 해당 문장에 이 ADR 링크를 달았다. DO_WHILE은 ADR 0014의 2e에서 이 평가기를 쓴다.
+  - `archon_js`(`c_src/archon_js/archon_js.c`)는 요청마다 새 `JSRuntime`과 `JSContext`를 만든다(결정 1의 새
+    realm보다 한 단계 더 나눴다). `JS_NewContextRaw`에 ECMAScript 내장 객체만 더하고, `JS_NewContext`가
+    더하는 `performance`(시계)와 `atob`·`btoa`는 넣지 않는다. GraalJS 오라클에서도 `console`·`print`·
+    `performance`·`setTimeout`·`require`는 없다. 결과를 읽는 데 쓰는 `Map` 순회와 원시 래퍼의 `valueOf`는
+    스크립트 실행 전에 잡아 두므로, 스크립트가 내장 객체를 바꿔도 변환 방식은 바뀌지 않는다. typed array는
+    `length` 속성이 아니라 내부 길이로 읽는다.
+  - 스크립트가 예약한 Promise 작업(`then`, `async` 함수의 `await` 뒤)은 결과를 읽기 전에 같은 시간·메모리
+    상한 안에서 모두 실행한다. GraalJS 오라클과 같다. `import()`는 모듈 로더가 없어 거부되는 Promise다.
+    결과를 읽는 동안 getter가 바꾸는 상태도 GraalJS처럼 따른다. 배열 길이는 원소마다 다시 읽고, `Map`은 키를
+    변환한 뒤 그때의 값을 읽으며, getter·프록시 트랩이 예약한 Promise 작업은 다음 값을 읽기 전에 실행한다.
+  - 풀의 대기열은 `max_queue`(기본 1,000)까지다. 넘치면 `Script evaluation queue is full`로 바로 실패하고,
+    호출자가 이미 끝난 대기 요청은 실행하지 않고 버린다. upstream 스레드풀은 상한이 없다(로컬 보안 리뷰 지적).
+  - 등록 검사는 파서가 낸 `SyntaxError`만 문법 오류로 본다. 깊은 괄호 중첩처럼 스택·메모리 상한으로 파싱이
+    멈춘 경우는 upstream처럼 통과시킨다.
+  - 오류 종류는 `syntax`·`runtime`·`timeout`·`conversion`(결과를 읽다가 getter·프록시가 던진 예외. upstream처럼
+    감싸지 않은 메시지를 쓴다)·`limit`·`request`다. Elixir 쪽 `Archon.Script.Error`가 결정 4의 문구를 만든다.
+  - `Archon.Script.Pool`은 디스패처와 워커 감독자를 `:rest_for_one`으로 둔다. 요청은 디스패처 큐에서
+    기다리다 빈 워커로 가고, 워커가 호출자에게 직접 답한다. 바쁜 워커가 죽으면 디스패처가 대신 오류로 답한다.
+    워커는 엔진 상한 뒤 `grace`(기본 1초)까지 응답이 없으면 OS 프로세스를 `kill -KILL`하고 새로 띄운다.
+    설정은 `config :archon, Archon.Script.Pool`의 `timeout`·`grace`·`memory_limit`·`stack_limit`(기본
+    1MiB)·`max_output`·`max_queue`·`workers`다.
+  - 비유한 숫자의 저장 형태는 Jackson 2.18.8(upstream이 고정한 버전)에 upstream `ObjectMapperProvider` 설정을
+    준 오라클에서 `"NaN"`·`"Infinity"`·`"-Infinity"` 문자열로 확인했다(`Archon.Script.storable/1`).
+- QuickJS-ng는 v0.17.0(태그 커밋 `6d46d07d04041b40f4f49eaa7fdebe44c314c699`)을
+  `https://codeload.github.com/quickjs-ng/quickjs/tar.gz/refs/tags/v0.17.0`에서 받았다. tarball SHA256은
+  `559bc4c420475e55c7ab4510adbc562f55d7524d75e8e89d79ce4bb02f5687d9`(905,393바이트)다. 라이브러리 빌드에
+  필요한 19개 파일만 고치지 않고 `c_src/quickjs-ng/`에 넣었고, 파일별 SHA256은 `c_src/quickjs-ng/VERSION`에
+  있다. `quickjs-libc.c`(`std`·`os`)와 `qjs.c`(CLI)는 넣지 않았다(2026-10-29 BOSS 확인). MIT 고지는 루트
+  `NOTICE`에 적었다.
+- 정답 기준: GraalJS 25.0.2(Gradle 캐시의 polyglot·js-language·truffle jar)에 upstream `ScriptEvaluator`의
+  `createNewContext`·`getObject`·`handlePolyglotException`·`validateScriptSyntax`를 그대로 옮긴 Java 프로브로
+  같은 스크립트를 돌려 비교했다. 값 변환은 숫자 경계(정수·`long`·`-0`·비유한 수·BigInt), 원시 래퍼,
+  `arguments`, 프록시, `Map`·`Set`, 태그와 같은 모양의 사용자 객체를 포함해 오라클과 같다. 다른 사례는 위
+  "upstream과 의도적으로 다른 점"에 적었다. 기대값은 `test/archon/script_test.exs`에 있다.
+- CI: 모든 잡의 `mix compile`이 `archon_js`를 경고를 오류로 빌드한다. `c-sanitize` 잡이 AddressSanitizer·
+  UndefinedBehaviorSanitizer·LeakSanitizer 빌드(`make ARCHON_JS_SANITIZE=1`)로 스크립트 관련 테스트를 돌린다.
+  필수 체크에는 넣지 않았다.
 - 서버를 배포할 때는 `priv/archon_js`가 대상 OS·CPU용으로 빌드되어야 한다. 릴리스 빌드 절차는 Phase 5에서 정한다.

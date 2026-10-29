@@ -23,3 +23,6 @@ runs:
           mix-${{ runner.os }}-${{ env.MIX_ENV }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
     - run: mix deps.get
       shell: bash
+    # `mix compile` builds the archon_js C program (ADR 0015); the runner image ships cc and make.
+    - run: cc --version && make --version
+      shell: bash

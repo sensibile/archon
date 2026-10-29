@@ -18,16 +18,22 @@ defmodule Archon.Decider.Context do
     * `system_tasks` - the system task registry, see `Archon.Decider.SystemTasks`.
     * `jitter` - given the configured `backoffJitterMs`, returns a value in `0..max`. Replaces
       upstream's `ThreadLocalRandom` in `retry`; uniform by default.
+    * `evaluate_script` - runs a script operation (`t:Archon.Script.evaluator/0`). Replaces
+      upstream's static `ScriptEvaluator`; `Archon.Script.evaluate/3` (the worker pool) by
+      default. It is the one call the Decider makes that sends a process message: a computation
+      that changes no state, allowed by ADR 0015 (decision 3).
   """
 
   alias Archon.Decider.SystemTasks
   alias Archon.Domain.TaskDef
+  alias Archon.Script
 
   @enforce_keys [:now]
   defstruct [
     :now,
     :new_id,
     :jitter,
+    :evaluate_script,
     task_defs: %{},
     latest_workflow_versions: %{},
     system_tasks: %{}
@@ -37,14 +43,16 @@ defmodule Archon.Decider.Context do
           now: integer(),
           new_id: (-> String.t()),
           jitter: (non_neg_integer() -> non_neg_integer()),
+          evaluate_script: Script.evaluator(),
           task_defs: %{optional(String.t()) => TaskDef.t()},
           latest_workflow_versions: %{optional(String.t()) => integer()},
           system_tasks: SystemTasks.t()
         }
 
   @doc """
-  Builds a context. `now` is required; `new_id`, `jitter` and `system_tasks` default to UUID v4,
-  uniform jitter and `Archon.Decider.SystemTasks.default/0`.
+  Builds a context. `now` is required; `new_id`, `jitter`, `evaluate_script` and `system_tasks`
+  default to UUID v4, uniform jitter, `Archon.Script.evaluate/3` and
+  `Archon.Decider.SystemTasks.default/0`.
   """
   @spec new(keyword()) :: t()
   def new(opts) do
@@ -52,6 +60,7 @@ defmodule Archon.Decider.Context do
       now: Keyword.fetch!(opts, :now),
       new_id: Keyword.get(opts, :new_id, &uuid4/0),
       jitter: Keyword.get(opts, :jitter, &uniform_jitter/1),
+      evaluate_script: Keyword.get(opts, :evaluate_script, &Script.evaluate/3),
       task_defs: Keyword.get(opts, :task_defs, %{}),
       latest_workflow_versions: Keyword.get(opts, :latest_workflow_versions, %{}),
       system_tasks: Keyword.get(opts, :system_tasks, SystemTasks.default())

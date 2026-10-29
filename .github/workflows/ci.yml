@@ -21,6 +21,22 @@ jobs:
       - run: mix compile --warnings-as-errors
       - run: mix test
 
+  # archon_js under AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer (ADR 0015).
+  # Every job already builds archon_js with warnings as errors through `mix compile`.
+  c-sanitize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-elixir
+      - run: make ARCHON_JS_SANITIZE=1
+      - run: >-
+          mix test test/archon/script_test.exs test/archon/script/pool_test.exs
+          test/archon/decider/mapper_test.exs test/archon/domain/task_type_constraint_test.exs
+        env:
+          ARCHON_JS_EXECUTABLE: priv/archon_js-sanitize
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+
   credo:
     runs-on: ubuntu-latest
     permissions:
