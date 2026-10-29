@@ -47,9 +47,13 @@ mix deps.audit
   1. push 전에 PR 누적 범위(`origin/main`과의 merge-base부터 head까지)를 먼저 세션의 리뷰 에이전트(리뷰 서브에이전트)로
      VER-005 종료 조건까지 반복 리뷰합니다. 그다음 같은 head를 태극 `taeguk-codex-local-review` 절차로 리뷰합니다
      (`gpt-6-sol`, `high`, [ADR 0016](docs/adr/0016-taeguk-review-order-and-model.md)).
+     Codex 프롬프트에는 목적 맥락(목적, 요구사항, 정답 기준, 미룬 범위와 근거 ADR, 도달 경로·입력 신뢰 주체)을 넣고,
+     재리뷰 때는 고치지 않은 지적을 상태·이유와 함께 넘깁니다. archon 기본값은 [ADR 0019](docs/adr/0019-taeguk-codex-purpose-context.md)에 있습니다.
+     프롬프트 파일을 증거로 남기고 그 sha256 해시를 PR 본문에 적습니다.
      교차 리뷰는 항상, 보안 리뷰는 코드·스크립트·CI·의존성·권한처럼 실행 동작에 영향을 주는 변경에 합니다(문서만이면 NOT_APPLICABLE).
      Codex 지적으로 head가 바뀌면 자체 리뷰부터 다시 합니다. 지적은 반영하거나 반영하지 않은 이유를 PR 본문에 남깁니다.
-  2. 그 head에 대한 필수 로컬 리뷰가 NOT_RUN이나 UNKNOWN이면 auto-merge를 켜지 않고 원인을 해소하거나 BOSS에게 보고합니다.
+     목적·정답 기준·미룬 범위 자체를 문제 삼는 목적 이의는 기각하지 않고 BOSS에게 넘깁니다.
+  2. 그 head에 대한 필수 로컬 리뷰가 NOT_RUN이나 UNKNOWN이거나 BOSS가 답하지 않은 목적 이의가 있으면 auto-merge를 켜지 않고 원인을 해소하거나 BOSS에게 보고합니다.
      끝났으면 PR을 만든 세션이 `gh pr merge <번호> --squash --auto --match-head-commit <리뷰한 head SHA>`로 켭니다.
      draft PR과 `no-auto-merge` label PR은 제외합니다. 사용자가 특정 PR에 대해 직접 요청하지 않는 한 머지를 미루지 않습니다.
   3. 새 커밋을 올리기 전에 `gh pr merge <번호> --disable-auto`로 끄고, 새 누적 범위를 리뷰한 뒤 push하고 다시 켭니다.
