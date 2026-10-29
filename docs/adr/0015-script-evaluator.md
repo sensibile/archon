@@ -97,8 +97,11 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
 ### 4. upstream과 같게 지키는 것
 
 - 입력은 JS 전역 `$`로 넘긴다. 평가 결과는 마지막 식의 값이다(upstream `context.eval(source)`).
-- 결과 변환은 upstream `getObject`를 따른다. JS 숫자가 정수이고 `long` 범위면 정수, 아니면 실수다.
+- 결과 변환은 upstream `getObject`를 따른다. JS 숫자가 정수이고 `long` 범위면 정수, 아니면 실수다. 다만 `-0`은
+  GraalJS에서 `fitsInInt`·`fitsInLong`이 거짓이므로 실수 `-0.0`이다(`["float", -0.0]`, 분기 키 `"-0.0"`).
   `undefined`·`null`은 `null`, 배열은 목록, 그 밖의 객체는 맵이다.
+- 숫자·문자열 변환의 세부 경계는 이 ADR에 하나씩 적지 않는다. 구현 PR에서 GraalJS 25.0.2 오라클(결정 7)과 같은
+  결과를 내는 것을 기준으로 삼고, 오라클과 다르게 두기로 한 사례만 아래 "upstream과 의도적으로 다른 점"에 더한다.
 - JSON이 표현하지 못하는 `NaN`·`Infinity`·`-Infinity`는 upstream에서 Java `Double`로 남아 결과에 영향을 준다
   (SWITCH는 `String.valueOf`로 `"NaN"`·`"Infinity"` 분기를 고르고, `evalBool`은 `Infinity`를 참으로 본다).
   그래서 `archon_js`는 이 값을 결정 2의 `["nonfinite", ...]`로 보내고, Elixir 쪽은 평가 결과 안에서
@@ -149,6 +152,10 @@ upstream과 같게 하고, 실행 방식은 BEAM에 맞게 다시 설계한다. 
 - 스크립트는 입력의 사본만 본다. upstream DECISION·DO_WHILE에서 스크립트가 Java `Map` 메서드로 입력 맵(DO_WHILE은
   실제 태스크 출력)을 고치면 원래 데이터가 바뀌지만, Archon에서는 프로세스 경계 때문에 바뀌지 않는다.
   스크립트가 워크플로우 상태를 고치는 경로는 막는 편이 맞으므로 재현하지 않는다.
+- `$` 안의 숫자는 JS 숫자(double)다. upstream은 Java `Long`을 호스트 값으로 넘기므로 2^53을 넘는 정수
+  (예: `9007199254740993`)를 그대로 돌려줄 수 있지만, Archon에서는 가장 가까운 double(`9007199254740992`)이 된다.
+  정밀도를 지키려면 입력마다 BigInt 같은 별도 표현이 필요하고 스크립트의 산술 의미가 달라지므로, 따르지 않는다.
+  이 사례는 오라클 비교에 차이로 기록한다.
 - 비유한 숫자가 태스크 출력에 들어가면 바로 저장 형태로 바뀐다. upstream은 같은 decide 안에서는 메모리의
   `Double`을 쓰다가 저장 후 다시 읽을 때 바뀌므로, 같은 decide 안에서 그 값을 다시 참조하는 드문 경우만 다를 수 있다.
 - 스크립트 오류 메시지 본문(`<메시지>` 부분)은 엔진마다 다르다. 감싸는 형식만 upstream과 같다.
