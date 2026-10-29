@@ -99,11 +99,12 @@ upstream `TaskModel.toTask()`처럼 커지고, Decider·런타임·REST가 서�
 - `${workflow.secrets.*}`는 upstream처럼 리터럴로 남긴다. secrets 공급자가 없을 때 upstream
   `substituteSecrets`도 입력을 그대로 돌려준다. `${workflow.env.*}`는 environment 공급자가 없을 때의
   upstream 동작대로 JsonPath 조회로 넘어가서 `null`이 된다.
-- 경로 문법은 다음만 지원한다: 선택적 `$` 루트, 점 표기 `a.b.c`, 따옴표 괄호 `['a b']`·`["a"]`,
-  정수 인덱스 `[0]`·`[-1]`, 와일드카드 `[*]`·`.*`. 와일드카드가 있는 경로는 Jayway처럼 닿은 값의 목록을
+- 경로 문법은 다음만 지원한다: 선택적 `$` 루트, 점 표기 `a.b.c`, 따옴표 괄호 `['a b']`·`["a"]`(루트 바로
+  뒤 `['a']`·`$.['a']` 포함, 백슬래시 이스케이프와 `\uXXXX` 해석), 정수 인덱스 `[0]`·`[-1]`, 와일드카드 `[*]`·`.*`. 와일드카드가 있는 경로는 Jayway처럼 닿은 값의 목록을
   돌려주고, 풀리지 않는 가지는 건너뛴다. upstream `TestDeciderService#testGetTaskInputV2Partial`이
   `${workflow.output.names[*].year}`를 쓰므로 부분집합에 넣었다. 지원하지 않는 문법(deep scan `..`, 필터,
-  슬라이스, 합집합, 함수)과 잘못된 경로는 `null`이다. upstream은 `SUPPRESS_EXCEPTIONS` 설정이라 없는
+  슬라이스, 합집합, 함수, `@` 루트)과 잘못된 경로는 `null`이다. 지원 문법의 결과는 로컬 캐시의
+  `json-path-2.4.0.jar`로 같은 문서에서 확인했다. upstream은 `SUPPRESS_EXCEPTIONS` 설정이라 없는
   경로와 컴파일되지 않는 경로가 `null`이 된다.
 - `getTaskInputV1`(`schemaVersion` 1)은 옮기지 않는다. upstream `WorkflowDef`가 이미 `@Min(2)`·`@Max(2)`로
   2만 받고, Archon `WorkflowDef.validate/2`도 같은 검사를 한다.
@@ -186,6 +187,10 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
 - 2a(결정 3의 필드, 결정 4, 결정 7)를 첫 PR로 구현했다. 2b~2e는 아직 구현하지 않았다. 조각마다 PR을 올리고,
   마지막 조각이 머지되면 이 ADR을 `승인`으로 바꾼다.
 - 결정 3의 내부 필드는 아직 아무도 쓰지 않는다. 2b Decider가 처음 읽고 쓴다.
+- 입력 해석은 upstream처럼 결과 크기에 상한이 없다. `${workflow.input.x}`를 정의에 여러 번 쓰고 큰 `x`를 넣으면
+  결과 문자열이 두 크기의 곱만큼 커진다(2a 로컬 보안 리뷰 지적). upstream도 같은 성질이고 아직 이를 부르는
+  REST 경로가 없으므로 2a에서는 동작을 바꾸지 않는다. Phase 5에서 요청 본문 크기 제한과 함께 확장 상한을
+  정하고, 그때 upstream과 다른 점으로 기록한다.
 - DO_WHILE과 스크립트 평가기는 별도 ADR이 필요하다. 그 ADR이 나오기 전까지 Phase 2는 완료가 아니다.
 - Phase 3 런타임은 `Outcome`을 받아 저장·큐 투입·하위 워크플로우 시작을 수행하는 쪽으로 설계한다.
 - Phase 4는 결정 3의 내부 필드를 포함하는 저장용 인코딩을 정한다.

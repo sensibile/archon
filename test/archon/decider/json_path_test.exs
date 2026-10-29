@@ -3,8 +3,19 @@ defmodule Archon.Decider.JsonPathTest do
 
   alias Archon.Decider.JsonPath
 
+  # Supported-syntax expectations were checked against Jayway JsonPath 2.4.0 (json-path-2.4.0.jar
+  # with Option.SUPPRESS_EXCEPTIONS, as upstream ParametersUtils reads) on the same document.
+  # Two differences are intended (ADR 0014): `a.*` lists map values in key order rather than
+  # insertion order, and the unsupported syntax below reads as nil where Jayway returns a value.
   @doc_json %{
-    "a" => %{"b" => [10, 20, 30], "c d" => 1, "e.f" => 2, "n" => nil},
+    "a" => %{
+      "b" => [10, 20, 30],
+      "c d" => 1,
+      "e.f" => 2,
+      "n" => nil,
+      "customer's name" => 7,
+      "back\\slash" => 8
+    },
     "list" => [%{"x" => 1}, %{"y" => 2}, %{"x" => 3}],
     "s" => "text"
   }
@@ -22,6 +33,24 @@ defmodule Archon.Decider.JsonPathTest do
     assert JsonPath.read(@doc_json, "$['a']['b'][1]") == 20
     assert JsonPath.read(@doc_json, "a.b[-1]") == 30
     assert JsonPath.read(@doc_json, "a.b[ 0 ]") == 10
+    assert JsonPath.read(@doc_json, "a[ 'c d' ]") == 1
+  end
+
+  test "brackets right after the root, with or without a dot" do
+    assert JsonPath.read(@doc_json, "['a']['c d']") == 1
+    assert JsonPath.read(@doc_json, "$.['a']['c d']") == 1
+    assert JsonPath.read(@doc_json, "a.['c d']") == 1
+  end
+
+  test "backslash escapes in quoted names" do
+    assert JsonPath.read(@doc_json, "a['customer\\'s name']") == 7
+    assert JsonPath.read(@doc_json, ~s(a["customer's name"])) == 7
+    assert JsonPath.read(@doc_json, "a['back\\\\slash']") == 8
+    assert JsonPath.read(@doc_json, "a['c\\u0020d']") == 1
+    assert JsonPath.read(@doc_json, "a['e\\.f']") == 2
+    assert JsonPath.read(@doc_json, "a['c\\ d']") == 1
+    assert JsonPath.read(@doc_json, "a['c\\x d']") == nil
+    assert JsonPath.read(@doc_json, "a['\\ud800']") == nil
   end
 
   test "paths that do not resolve read as nil" do
@@ -38,7 +67,7 @@ defmodule Archon.Decider.JsonPathTest do
     assert JsonPath.read(@doc_json, "list[*].x") == [1, 3]
     assert JsonPath.read(@doc_json, "list.*.y") == [2]
     assert JsonPath.read(@doc_json, "list[*].z") == []
-    assert JsonPath.read(@doc_json, "a.*") == [[10, 20, 30], 1, 2, nil]
+    assert JsonPath.read(@doc_json, "a.*") == [[10, 20, 30], 8, 1, 7, 2, nil]
   end
 
   test "unsupported or invalid syntax reads as nil" do

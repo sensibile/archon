@@ -313,7 +313,10 @@ defmodule Archon.Decider.Parameters do
 
   # Double#toString: plain notation for 1e-3 <= |d| < 1e7, otherwise d.dddE<n>, always with
   # at least one fractional digit.
-  defp java_double(value) when value == 0, do: "0.0"
+  defp java_double(value) when value == 0 do
+    <<sign::1, _rest::63>> = <<value::float>>
+    if sign == 1, do: "-0.0", else: "0.0"
+  end
 
   defp java_double(value) do
     sign = if value < 0, do: "-", else: ""

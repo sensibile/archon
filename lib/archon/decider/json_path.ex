@@ -17,7 +17,9 @@ defmodule Archon.Decider.JsonPath do
   prepended, as Jayway does):
 
     * dot notation: `a.b.c` (a property name ends at `.`, `[`, `(` or whitespace)
-    * quoted brackets: `['a b']`, `["a.b"]`
+    * quoted brackets: `['a b']`, `["a.b"]`, also right after the root (`['a']`, `$.['a']`);
+      a backslash escapes the next character, with `\\uXXXX`, `\\n`, `\\t`, `\\r`, `\\b` and `\\f`
+      decoded
     * array indexes: `[0]`, `[-1]` (from the end)
     * wildcards: `[*]` and `.*`, over list elements or map values
 
@@ -25,8 +27,8 @@ defmodule Archon.Decider.JsonPath do
   branches that do not resolve, as Jayway does. Map values come in key order, since Elixir maps
   do not keep JSON key order (ADR 0002).
 
-  Everything else Jayway accepts (deep scan `..`, filters, slices, unions, functions) is not
-  supported and reads as `nil`.
+  Everything else Jayway accepts (deep scan `..`, filters, slices, unions, functions, the `@`
+  root) is not supported and reads as `nil`.
   """
 
   @typedoc "Decoded JSON."
@@ -62,6 +64,7 @@ defmodule Archon.Decider.JsonPath do
   defp tokens("", acc), do: {:ok, Enum.reverse(acc)}
 
   defp tokens(".*" <> rest, acc), do: tokens(rest, [:wildcard | acc])
+  defp tokens(".[" <> rest, acc), do: tokens("[" <> rest, acc)
 
   defp tokens("." <> rest, acc) do
     case Regex.run(~r/\A[^.\[\(\s]+/, rest) do
@@ -77,12 +80,12 @@ defmodule Archon.Decider.JsonPath do
   end
 
   defp tokens("[" <> rest, acc) do
-    case Regex.run(~r/\A\s*(?:'([^'\\]*)'|"([^"\\]*)"|(-?\d+)|(\*))\s*\]/, rest) do
+    case Regex.run(~r/\A\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|(-?\d+)|(\*))\s*\]/s, rest) do
       [match | groups] ->
         token =
           case groups do
-            [single] -> {:property, single}
-            ["", double] -> {:property, double}
+            [single] -> {:property, unescape(single)}
+            ["", double] -> {:property, unescape(double)}
             ["", "", index] -> {:index, String.to_integer(index)}
             ["", "", "", "*"] -> :wildcard
           end
@@ -97,6 +100,24 @@ defmodule Archon.Decider.JsonPath do
   end
 
   defp tokens(_rest, _acc), do: :error
+
+  defp unescape(name) do
+    Regex.replace(~r/\\(u[0-9a-fA-F]{4}|.)/s, name, fn _match, escaped ->
+      case escaped do
+        "u" <> hex -> code_point(String.to_integer(hex, 16))
+        "n" -> "\n"
+        "t" -> "\t"
+        "r" -> "\r"
+        "b" -> "\b"
+        "f" -> "\f"
+        other -> other
+      end
+    end)
+  end
+
+  # A lone UTF-16 surrogate cannot be a key of decoded JSON; keep it from raising.
+  defp code_point(code) when code in 0xD800..0xDFFF, do: "\\u" <> Integer.to_string(code, 16)
+  defp code_point(code), do: <<code::utf8>>
 
   # Every value `tokens` reaches from `value`; branches that do not resolve add nothing.
   defp collect(value, []), do: [value]
