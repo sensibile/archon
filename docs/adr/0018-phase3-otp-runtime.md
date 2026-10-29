@@ -114,7 +114,7 @@ Archon.Supervisor (one_for_one)
   타이머 설정은 `handle_continue`에서 한다. 그래서 `init`이 다른 프로세스 시작을 기다리며 `WorkflowSupervisor`를
   막는 일이 없다. 저장소에 없는 ID면 `init`이 `:ignore`를 돌려주고 호출자는 `{:error, :not_found}`를 받는다.
   새 워크플로우는 `start_workflow`(결정 7)가 "새로 만듦" 인자로 띄우므로 `init`이 저장소를 읽지 않고, 같은 ID의
-  프로세스나 기록이 이미 있으면 `{:error, :conflict}`다.
+  프로세스나 기록이 이미 있으면 `{:error, :conflict}`이고, 기록을 만들지 못한 그 프로세스는 바로 끝난다.
 - **호출이 프로세스 종료와 겹칠 때.** 종료 직후 `:normal`로 끝나는 프로세스나 레지스트리에 남은 죽은 pid로 보낸
   `call`이 `:noproc`·`:normal` exit로 끝나면, 호출 함수(`Archon.Runtime` 안)는 활성화를 한 번 더 시도한다.
 - **읽기는 저장소에서 한다.** `GET /api/workflow/{id}`, `GET /api/tasks/{taskId}`에 해당하는 조회는 프로세스를 거치지
@@ -127,8 +127,8 @@ Archon.Supervisor (one_for_one)
   자식 → 부모 알림은 `cast`다. 결정 9의 `updateAndPushParents`처럼 자식에서 부모 쪽으로 가는 일도 `cast`다. 서로를
   동기 호출하는 고리가 없으므로 교착이 생기지 않는다.
 - **예외 격리.** `WorkflowServer`는 `Step.run`과 Effect 실행에서 나는 예외를 잡는다. 잡으면 마지막으로 저장한 상태를
-  그대로 두고, 오류를 기록하고, 호출자에게 `{:error, reason}`으로 답하고, `workflowOffsetTimeout`(30초) 뒤 `:wake`로
-  다시 시도한다. upstream에서 decide 예외가 로그로 남고 스위퍼가 나중에 다시 시도하는 것과 같다. 프로세스 재시작은
+  그대로 두고, 오류를 기록하고, 호출자에게 `{:error, reason}`으로 답하고, `workflowOffsetTimeout`(30초) 뒤 `:recover`로
+  다시 시도한다(활성화 복구와 같은 검사이므로 실패한 Effect가 빠뜨린 큐 메시지도 메운다). upstream에서 decide 예외가 로그로 남고 스위퍼가 나중에 다시 시도하는 것과 같다. 프로세스 재시작은
   잡지 못한 exit에만 일어나므로, 한 워크플로우가 계속 실패해도 supervisor 재시작 한도를 넘겨 다른 워크플로우를
   내리지 않는다.
 - **노드는 하나다.** Phase 3는 단일 노드에서 정합성을 보장한다. upstream 기본 서버 설정(`LocalOnlyLock`)도 같다.
@@ -142,7 +142,8 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
 
 ```elixir
 @spec Step.run(Workflow.t() | nil, Step.Event.t(), Step.Env.t()) ::
-        {reply :: term(), Workflow.t(), Archon.Runtime.Commit.t(), [Step.Effect.t()]}
+        {reply :: term(), Workflow.t(), pre :: [Step.Effect.t()], Archon.Runtime.Commit.t(),
+         post :: [Step.Effect.t()]}
 ```
 
 - `Event`는 프로세스가 받은 일이다: `{:start, input}`, `{:poll, task_id, worker_id}`, `{:update, TaskResult}`,
@@ -155,25 +156,29 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
   `{:error, :conflict | :not_found | ...}`.
 - 반환하는 `Workflow`는 **저장한 뒤의 상태**다. upstream이 메모리에서만 바꾸고 저장하지 않은 값은 넣지 않는다
   (예: 완료 시 Decider가 `executed: true`로 바꾼 태스크는 저장하지 않으므로 `executed: false`로 남는다. ADR 0014 결과).
-- `Commit`은 한 번에 원자적으로 저장할 변경이다: 새로 만들 워크플로우 또는 바꿀 워크플로우 필드, 추가·갱신할 태스크,
-  지울 태스크 ID(DO_WHILE `keepLastN`). 저장소 경계의 타입이므로 `Archon.Runtime.Commit`으로 두고 3a에서 정의한다.
+- `Commit`은 한 번에 원자적으로 저장할 변경이다. 필드는 `create :: Workflow.t() | nil`(새 워크플로우, 태스크 포함),
+  `workflow :: Workflow.t() | nil`(바뀐 워크플로우, `tasks` 필드는 무시), `upsert_tasks :: [Task.t()]`,
+  `delete_task_ids :: [String.t()]`(DO_WHILE `keepLastN`) 네 개다. 저장소 경계의 타입이므로 `Archon.Runtime.Commit`으로 두고 3a에서 정의한다.
   upstream `ExecutionDAOFacade`가 저장할 때 찍는 시각(워크플로우 `updatedTime`과 종료 상태의 `endTime`, 태스크
   `updateTime`과 종료 시 비어 있는 `endTime`)은 `Step`이 `Commit`을 만들 때 `Env.now`로 찍는다. 저장소 구현은 시각을
   다시 찍지 않는다.
-- `Effect`는 저장 뒤 실행할 일이다: 태스크 큐 push(지연 포함)·remove·postpone·ack, 하위 워크플로우 시작·종료 요청,
-  부모 알림, 실패 워크플로우 시작, 다음 재평가 타이머(`{:wake_at, ms}`).
+- `Effect`는 바깥에 하는 일이다: 태스크 큐 push(지연 포함)·remove·postpone·ack, 하위 워크플로우 시작·종료 요청,
+  부모 알림, 실패 워크플로우 시작, 다음 재평가 타이머(`{:wake_at, ms}`). 대부분은 저장 뒤에 실행하는 `post`이고,
+  `pre`는 Commit 전에 끝나야 하는 일이다. 지금 `pre`에 들어가는 것은 종료 처리의 자식 종료 요청뿐이다(결정 8).
 
-`WorkflowServer`는 `Step.run`을 부르고, `Commit`을 저장소에 쓰고(write-through), 그다음 `Effect`를 순서대로 실행한
-뒤 `reply`로 응답한다. JOIN 평가처럼 한 이벤트가 이어서 일으키는 일은 같은 `Step.run` 안에서 끝낸다. 자기 자신에게
+`WorkflowServer`는 `Step.run`을 부르고, `pre`를 순서대로 실행하고, `Commit`을 저장소에 쓰고(write-through), 그다음
+`post`를 순서대로 실행한 뒤 `reply`로 응답한다. `pre`가 하나라도 실패하면 아무것도 Commit하지 않고 결정 1의 예외 격리
+규칙으로 처리한다. JOIN 평가처럼 한 이벤트가 이어서 일으키는 일은 같은 `Step.run` 안에서 끝낸다. 자기 자신에게
 메시지를 보내 나중에 처리하지 않으므로, 응답을 받은 호출자가 읽는 저장소 상태에 그 결과가 이미 들어 있다.
 
 Effect를 실행하다 프로세스가 죽거나 Effect가 실패하면 다음 규칙으로 메운다.
 
-- 워커 큐 Effect: 결정 7의 활성화 복구가 큐에 없는 `SCHEDULED` 태스크를 다시 넣는다. upstream도 `createTasks` 뒤
+- 워커 큐 Effect: 결정 7의 복구 검사(활성화 직후, 예외 격리 뒤의 `:recover`, 그리고 상태를 바꾸지 않은 `:wake`)가
+  큐에 없는 `SCHEDULED` 태스크를 다시 넣는다. upstream도 `createTasks` 뒤
   `addTaskToQueue` 실패를 스위퍼 복구에 맡긴다.
-- 하위 워크플로우 종료 Effect: 결정 8의 종료 순서가 "자식 종료 Effect 먼저, 부모 Commit 나중"이라 부모가 종료 상태로
-  저장되었으면 자식 종료는 이미 끝났다. 그래도 남은 경우를 위해 자식의 활성화 복구는 부모가 종료 상태이고 자기 부모
-  태스크가 `CANCELED`이면 스스로 종료한다.
+- 하위 워크플로우 종료 Effect: 결정 8의 종료 순서가 "자식 종료(`pre`) 먼저, 부모 Commit 나중"이라 부모가 종료 상태로
+  저장되었으면 자식 종료는 이미 끝났다. 완료 경로는 upstream처럼 저장 뒤에 남은 태스크를 취소하므로(`post`) 자식이 남을
+  수 있다. 그 경우를 위해 자식의 복구 검사는 부모가 종료 상태이고 자기 부모 태스크가 `CANCELED`이면 스스로 종료한다.
 - 실패 워크플로우 시작 Effect: 결정 8 (a).
 - 부모 알림 Effect: 부모의 30초 재평가(결정 5)가 저장소에서 자식을 읽어 메운다.
 
@@ -248,7 +253,7 @@ behaviour마다 공통 계약 시험(결정 10)을 두어 Phase 4 구현이 같�
 8. 끝나지 않았으면 다음 재평가 시각을 계산해 `{:wake_at, ms}` Effect를 낸다(결정 6).
 
 `Step`은 한 이벤트 안에서 decide 루프를 최대 반복 횟수(설정값, 기본 100회)까지만 돈다. 넘으면 그때까지를 저장하고
-`{:wake_at, now}`를 내서 끝낸다. 그 사이에 쌓인 종료 요청 같은 메시지가 먼저 처리된다. upstream의 lease 보호(`lockLeaseTime
+자기 자신에게 `:wake`를 바로 보내 끝낸다(결정 6의 최소 1초 규칙의 예외). 그 사이에 쌓인 종료 요청 같은 메시지가 먼저 처리된다. upstream의 lease 보호(`lockLeaseTime
 − 100ms`)는 락이 없으므로 시간 대신 횟수로 바꾼다. 런타임 API의 `GenServer.call` 타임아웃은 결정 7에 적는다.
 
 upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `validateSystemTaskOutput`, `completeWorkflow`의
@@ -271,8 +276,9 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   상태·출력·실패 이유를 반영한 뒤 진행 중 JOIN을 평가하고 decide한다. 알림이 사라질 경우(부모 재시작 등)에 대비해 부모는
   진행 중 SUB_WORKFLOW가 있으면 `workflowOffsetTimeout`(30초)마다 저장소에서 자식을 읽는다(upstream `computePostpone`의
   활성 하위 워크플로우 규칙과 같은 간격).
-- **취소.** 부모가 종료되면 남은 SUB_WORKFLOW 태스크마다 자식 프로세스에 종료를 `call`한다(upstream `SubWorkflow.cancel`,
-  사유 문구 그대로). 자식은 부모를 동기 호출하지 않으므로 교착이 없다. 이 `call`의 타임아웃은 `:infinity`가 아니라
+- **취소.** 부모가 종료되면 남은 SUB_WORKFLOW 태스크마다 자식 프로세스에 `{:cancel_by_parent, reason}`을 `call`한다
+  (upstream `SubWorkflow.cancel`). 이 이벤트는 결정 8 (b)와 달리 자식 상태와 관계없이(`COMPLETED`여도) `TERMINATED`로
+  바꾸고, 사유는 upstream 문구 그대로이며, 실패 워크플로우를 띄우지 않는다. 이미 `TERMINATED`면 아무것도 하지 않는다. 자식은 부모를 동기 호출하지 않으므로 교착이 없다. 이 `call`의 타임아웃은 `:infinity`가 아니라
   설정값(기본 30초)이고, 시간이 넘으면 결정 1의 예외 격리 규칙으로 부모 종료를 실패로 처리해 다음 재평가에서 다시 한다.
 - **실패 워크플로우.** 결정 8 (a).
 
@@ -289,7 +295,8 @@ upstream의 decider 큐와 스위퍼, 시스템 태스크 큐의 지연 재평�
   바꾼다. 결과가 같은 시각이면 같은 일이다.
 - **워커 poll도 타이머를 당긴다.** poll로 태스크가 `IN_PROGRESS`가 되면 응답 타임아웃(태스크 정의 값, 0이면 태스크 값)이
   있을 때 `now + 응답 타임아웃`이 지금 타이머보다 이르면 그 시각으로 당긴다(upstream `adjustDeciderQueuePostpone`).
-- `:wake`를 받으면 진행 중 WAIT과 JOIN을 평가하고 decide한다. Decider의 타임아웃 판정(워크플로우·태스크·poll·응답·
+- `:wake`를 받으면 진행 중 WAIT과 JOIN을 평가하고 decide한다. 그 결과 아무 태스크 상태도 바뀌지 않았으면 결정 7의 복구
+  검사를 한다(upstream 스위퍼가 상태 변화 없는 sweep마다 repair하는 것과 같다). Decider의 타임아웃 판정(워크플로우·태스크·poll·응답·
   전체 타임아웃, ADR 0014)은 이 decide에서 발화한다.
 - **비동기 시스템 태스크의 평가 시점.** 프로세스 밖에서 상태가 바뀌는 일이 없으므로 시간 기반 반복 poll 대신 사건으로
   평가한다.
@@ -345,7 +352,9 @@ upstream의 decider 큐와 스위퍼, 시스템 태스크 큐의 지연 재평�
 
 upstream의 두 종료 경로를 그대로 나눈다. 둘 다 순서는 "남은 태스크 취소(자식 종료 Effect 포함) → 워크플로우 Commit →
 큐 정리·부모 알림"이다(upstream `terminateWorkflow`가 `cancelNonTerminalTasks` 뒤에 `updateWorkflow`를 하는 순서).
-그래서 `Step`은 종료 이벤트에서 자식 종료 Effect를 먼저 내고, `WorkflowServer`는 그것을 마친 뒤 Commit한다.
+그래서 `Step`은 종료 이벤트에서 자식 종료 요청을 `pre` Effect로 내고, 취소한 태스크와 워크플로우 상태는 `Commit`에,
+큐 정리·부모 알림·실패 워크플로우 시작은 `post`에 담는다(결정 2). `pre`가 실패하면 아무것도 저장하지 않고 다시 시도한다.
+완료 경로(결정 4의 3)는 upstream `endExecution`처럼 완료를 저장한 뒤 남은 태스크를 취소하므로 자식 종료도 `post`다.
 
 **(a) Decider 종료**(`{:terminate, termination, outcome}`, `FAILED`·`TERMINATED` TERMINATE 태스크). upstream
 `terminate(workflow, exception)` → `terminateWorkflow(workflow, reason, failureWorkflow, version)`.
@@ -399,7 +408,8 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
   `_switch`, `_fork`와 같은지 본다(비교 규칙은 ADR 0014 결정 8과 같다). 종료는 `workflow_start_to_terminate` →
   `workflow_terminate` → `workflow_get_terminated`, 빈 큐는 `task_poll_empty`다. 시계와 ID는 `config :archon,
   Archon.Runtime`의 `clock`·`new_id`로 주입해 결정적으로 만든다.
-- **타이머 시험.** 실제로 기다리지 않는다. 주입한 시계를 앞으로 돌리고 프로세스에 `:wake`를 직접 보낸다.
+- **타이머 시험.** 실제로 기다리지 않는다. 타이머를 거는 함수도 `config :archon, Archon.Runtime`의 `timer`로 주입하고,
+  시험에서는 걸린 시각만 기록하는 함수를 넣는다. 시계를 앞으로 돌리고 프로세스에 `:wake`를 직접 보낸다.
 - **크래시 시험.** 진행 중인 `WorkflowServer`를 `Process.exit(pid, :kill)`로 죽이고, 다시 뜬 프로세스가 같은 상태에서
   이어 가는지 본다. 저장 뒤·Effect 전 크래시와 계속 실패하는 워크플로우(예외 격리)는 시험용 훅으로 만든다.
 - **골든 픽스처가 없는 시나리오**(하위 워크플로우, WAIT, 재시도 지연, 타임아웃, 생명주기)의 정답은 upstream
@@ -438,7 +448,7 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
 | 3a | 결정 3: `Store`·`Queue`·`Metadata` behaviour와 메모리 구현, `Archon.Runtime.Commit`, 공통 계약 시험 | 계약 시험. upstream `SqliteQueueDAO`(지연, 우선순위, postpone, ack, unack 재노출)와 `ExecutionDAOFacade`·`MetadataDAO`의 MVP 연산 | 없음 | `lib/archon/runtime/{store,queue,metadata,commit}.ex`, `lib/archon/runtime/{store,queue,metadata}/memory.ex`, `test/support/runtime/*_contract.ex`, `test/archon/runtime/{store,queue,metadata}_test.exs` |
 | 3b | 결정 2·4·6·8의 순수 부분: `Step`(decide 루프, 저장 규칙과 저장 시각, 도메인, 동기 시스템 태스크, DO_WHILE, JOIN·WAIT 평가, 하위 워크플로우 Effect, 두 종료 경로, 재평가 시각, poll·update 상태 전이, 복구 이벤트) | 지금의 재현 시험 셋을 `Step`으로 통과, upstream `TestWorkflowExecutor`(`scheduleTask`, `setTaskDomains`, `getActiveDomain`, `dedupAndAddTasks`, `cancelNonTerminalTasks`, `updateTask`), `TestWorkflowExecutorDecideLoop`, `ExecutorUtilsTest`(`computePostpone`) 사례 | 없음(아래) | `lib/archon/runtime/step.ex`, `lib/archon/runtime/step/*.ex`, `test/archon/runtime/step*_test.exs`, `test/archon/decider/*_replay_test.exs`, `test/support/decider_replay.ex`(삭제) |
 | 3c | 결정 1·6·7의 프로세스 부분: `Runtime.Supervisor`, `Registry`, `WorkflowSupervisor`, `WorkflowServer`(활성화, write-through, Effect 실행, 예외 격리, `:wake` 타이머), `Recovery`, `Archon.Runtime`의 시작·조회·종료, `WorkflowServer`의 poll·update 클라이언트 함수, `Archon.Runtime.SubWorkflows`의 자리만 있는 함수, `Application` 연결 | 시작·종료 골든 픽스처(`workflow_start_to_terminate`, `workflow_terminate`, `workflow_get_terminated`, `workflow_get_running`)를 프로세스로 재현, 크래시·재활성화·예외 격리 시험 | 3a, 3b | `lib/archon/runtime.ex`, `lib/archon/runtime/{supervisor,workflow_server,recovery,effects,sub_workflows}.ex`, `lib/archon/application.ex`, `config/*.exs`, `test/archon/runtime/{runtime,workflow_server,recovery}_test.exs` |
-| 3d | 결정 7의 워커 API: `Archon.Runtime.Tasks`(poll, batch poll, update, update-v2, get), poll 데이터, 도메인 큐, 동시 실행 한도 | `workflow_get_completed_simple`·`_switch`·`_fork`, `task_poll_empty`, `task_get`을 프로세스로 재현. DO_WHILE은 `do_while_replay_test.exs` 시나리오를 프로세스로 | 3c | `lib/archon/runtime/tasks.ex`, `test/archon/runtime/tasks_test.exs`, `test/archon/runtime/golden_replay_test.exs` |
+| 3d | 결정 7의 워커 API: `Archon.Runtime.Tasks`(poll, batch poll, update, update-v2, get), poll 데이터 기록, 도메인 큐, 동시 실행 한도 시험(판정은 3b의 `Step`, `Env`의 진행 중 개수 채우기는 3c) | `workflow_get_completed_simple`·`_switch`·`_fork`, `task_poll_empty`, `task_get`을 프로세스로 재현. DO_WHILE은 `do_while_replay_test.exs` 시나리오를 프로세스로 | 3c | `lib/archon/runtime/tasks.ex`, `test/archon/runtime/tasks_test.exs`, `test/archon/runtime/golden_replay_test.exs` |
 | 3e | 결정 5·8 (a)의 실행: 하위 워크플로우 시작·진행 반영·취소, 실패 워크플로우 시작 | upstream `SubWorkflowSpec`, `FailureWorkflowSpec`, `NestedForkJoinSubWorkflowSpec`(MVP 타입 부분)에서 옮긴 시나리오. 자식 SIMPLE 태스크는 3c의 `WorkflowServer` poll·update 클라이언트 함수로 진행한다 | 3c | `lib/archon/runtime/sub_workflows.ex`, `test/archon/runtime/sub_workflow_test.exs` |
 | 3f | 결정 9: 일시정지·재개·재시도·재시작, `updateAndPushParents`, `adjustStateIfSubWorkflowChanged` | upstream `RetryPolicySpec`, `SubWorkflowRetrySpec`, `SubWorkflowRestartSpec`, `HierarchicalForkJoinSubworkflowRetrySpec`·`RestartSpec`(MVP 타입 부분), `TestWorkflowExecutor`의 retry·restart·pause·resume 사례 | 3d, 3e | `lib/archon/runtime/lifecycle.ex`, `lib/archon/runtime/step/lifecycle.ex`, `test/archon/runtime/lifecycle_test.exs` |
 
@@ -468,6 +478,8 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
   대신 사건으로 평가하므로 `pollCount`는 평가 횟수(예약 직후 + 관련 사건 수 + `:wake` 수)다. WAIT의 `pollCount`도 깨어난
   횟수다. upstream의 `pollCount`는 poller 간격에 따라 달라지는 값이다. 골든 픽스처 `workflow_get_completed_fork`와는 같다.
 - **큐 이름에 실행 네임스페이스와 격리 그룹이 없다.** 도메인만 지원한다.
+- **동시 실행 한도는 개수만 본다.** upstream `SqliteExecutionDAO#exceedsLimit`의 도착 순서 공정성 검사
+  (`findAllTasksInProgressInOrderOfArrival`)는 옮기지 않는다. 한도 안에서 어느 태스크가 먼저 나가는지는 큐 순서를 따른다.
 - **하위 워크플로우 완료 알림은 프로세스 메시지다.** upstream은 부모를 decider 큐 우선순위로 앞당긴다. 결과 상태는 같고
   반영 시점이 더 이르다.
 - **스키마 검증은 아직 하지 않는다**(결정 4). 결과 섹션의 조건대로 Phase 5 전에 붙인다.
@@ -494,7 +506,8 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
 
 - 이 ADR은 결정만 담는다. 구현은 결정 12의 조각 3a~3f로 하며, 마지막 조각이 머지되면 `승인`으로 바꾼다.
 - Phase 4 ADR은 결정 3의 behaviour를 Postgres로 구현하면서 저장용 인코딩(ADR 0014 결정 3), 큐의 원자성(저장과 같은
-  트랜잭션에 넣을지), 지연 활성화, 여러 노드의 소유권을 정한다.
+  트랜잭션에 넣을지), 지연 활성화, 여러 노드의 소유권, 그리고 종료 상태인데 실패 워크플로우를 아직 띄우지 못한
+  워크플로우의 복구(Phase 3는 프로세스가 비정상 종료 뒤 다시 뜰 때만 메운다)를 정한다.
 - Phase 5 REST는 결정 7의 API만 부르고, 응답 형태와 오류 코드를 ADR 0001의 MVP 계약에 맞춘다. upstream은
   `enforceSchema`가 켜져 있고 스키마가 있는 정의에서 입력·출력을 검증하므로, Phase 5가 정의 등록 REST를 열기 전에 스키마
   검증(검증기 채택)을 별도 ADR로 정해 붙인다. 그 전까지 스키마가 있는 정의는 검증 없이 실행된다.
