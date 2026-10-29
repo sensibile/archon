@@ -1,7 +1,7 @@
 # ADR 0014: Phase 2 Decider 설계
 
 - 상태: 제안
-- 날짜: 2026-10-29
+- 날짜: 2026-10-29 (2b에서 결정 1·2·5 갱신)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 
 ## 맥락
@@ -39,14 +39,22 @@ Decider가 이 필드를 읽는다(`TaskModel.firstScheduledTime`, `waitTimeout`
 
 ```elixir
 @spec decide(Workflow.t(), Context.t()) ::
-        {:ok, Outcome.t()} | {:terminate, reason :: String.t(), Outcome.t()}
+        {:ok, Outcome.t()} | {:terminate, Termination.t(), Outcome.t()}
 ```
 
 - `Outcome`은 upstream `DeciderOutcome`의 네 필드(`tasks_to_be_scheduled`, `tasks_to_be_updated`,
   `complete?`, `terminate_task`)에 갱신된 `workflow`를 더한다. upstream이 제자리에서 바꾸던 상태
   (`executed`, `COMPLETED_WITH_ERRORS`, 타임아웃 표시, 완료 시 `output`)는 갱신된 `workflow` 안에 담긴다.
-- upstream이 `TerminateWorkflowException`을 던지는 곳은 `{:terminate, reason, outcome}`을 돌려준다.
-  메시지는 upstream 문구를 그대로 쓴다. 예외로 흐름을 끊지 않으므로 그 시점까지의 `outcome`도 함께 준다.
+- upstream이 `TerminateWorkflowException`을 던지는 곳은 `{:terminate, termination, outcome}`을 돌려준다.
+  `Termination`은 예외의 세 값 `reason`(upstream 문구 그대로), `status`(워크플로우가 갈 상태, 기본
+  `:failed`), `task`(원인 태스크, 없으면 `nil`)를 담는다. 처음 제안은 `reason` 문자열만 돌려주는
+  것이었지만, upstream 런타임(`WorkflowExecutorOps#terminate`)이 `status`로 `COMPLETED`·`TIMED_OUT`·
+  `TERMINATED`를 가르고 `task`로 실패 태스크를 기록하므로 2b에서 구조체로 바꿨다. 예외로 흐름을 끊지
+  않으므로 그 시점까지의 `outcome`도 함께 준다. 이미 바뀐 태스크 상태(타임아웃 표시 등)와, 재시도가
+  끝나 종료할 때 upstream이 먼저 채우는 `output`이 `outcome.workflow`에 들어 있다.
+- `complete?`가 참이면 `outcome.workflow.output`은 upstream `completeWorkflow`가 부르는
+  `updateWorkflowOutput(workflow, null)`의 결과다. 상태를 `COMPLETED`로 바꾸고 `endTime`을 찍는 일은
+  런타임이 한다.
 - 저장, 큐 투입, 하위 워크플로우 시작, 알림은 Decider가 하지 않는다. `Outcome`을 받은 Phase 3 런타임이
   수행한다.
 
@@ -57,9 +65,10 @@ Decider가 이 필드를 읽는다(`TaskModel.firstScheduledTime`, `waitTimeout`
 | `now :: integer()` | `System.currentTimeMillis()` | 한 번의 `decide` 안에서 같은 값을 쓴다 |
 | `new_id :: (-> String.t())` | `IDGenerator.generate()` | 기본값은 UUID v4, 테스트는 결정적 생성기 |
 | `task_defs :: %{String.t() => TaskDef.t()}` | `MetadataDAO.getTaskDef` | 호출자가 정의에 나오는 이름으로 미리 채운다. 없으면 upstream의 `null`과 같다 |
-| `system_tasks` | `SystemTaskRegistry` | MVP 시스템 태스크 타입 목록과 `async_complete?` 판정 |
+| `system_tasks` | `SystemTaskRegistry` | 타입 → `isAsyncComplete` 규칙(`:by_task` 또는 고정 값). 기본은 MVP 시스템 태스크 `DECISION`, `SWITCH`, `FORK`, `JOIN`, `DO_WHILE`, `SUB_WORKFLOW`(항상 `true`), `WAIT` |
+| `jitter :: (max -> 0..max)` | `ThreadLocalRandom` | 2b에서 추가. 재시도 지연의 `backoffJitterMs`. 기본은 균등 난수, 테스트는 고정 함수 |
 
-`new_id`는 Decider가 받는 입력 중 유일하게 결정적이지 않은 값이다. 테스트에서는 결정적 생성기를 넣으므로
+`new_id`와 `jitter`는 Decider가 받는 입력 중 결정적이지 않은 값이다. 테스트에서는 결정적 생성기를 넣으므로
 같은 입력에 같은 결과가 나온다. "부수효과 없음"은 I/O·영속성·큐·프로세스 메시지가 없다는 뜻으로 쓴다.
 
 외부 payload 저장소는 [ADR 0001](0001-api-contract-scope.md)에서 Later로 분류했다. Archon은
@@ -114,9 +123,13 @@ MVP 정의에서 쓰는 경로는 위 부분집합 안에 있다.
 
 ### 5. 태스크 매퍼는 behaviour, 시스템 태스크 실행은 Phase 3
 
-- `Archon.Decider.Mapper` behaviour: `map(WorkflowTask.t(), MapperContext.t()) :: {:ok, [Task.t()]} | {:terminate, String.t()}`.
+- `Archon.Decider.Mapper` behaviour: `map(WorkflowTask.t(), Mapper.Context.t()) :: {:ok, [Task.t()]} | {:terminate, String.t()}`.
   타입 문자열로 모듈을 고르고, 등록되지 않은 타입은 upstream처럼 `USER_DEFINED` 매퍼
-  (`UserDefinedTaskMapper`)로 간다.
+  (`UserDefinedTaskMapper`)로 간다. 매퍼의 종료 문구는 `Decider`가 `status: :failed`인 `Termination`으로
+  감싼다. `Mapper.Context`는 upstream `TaskMapperContext`이고, 시계·ID·태스크 정의는 `decider` 필드의
+  `Context`에서 읽는다.
+- SIMPLE 매퍼는 upstream처럼 `WorkflowTask`에 박힌 태스크 정의만 본다(없으면 `TaskDef` 기본값). 정의를
+  박아 넣는 일(upstream `MetadataMapperService`)은 워크플로우를 시작하는 런타임이 한다.
 - MVP 매퍼: SIMPLE, SWITCH(`DECISION` 포함), FORK_JOIN, JOIN, DO_WHILE, SUB_WORKFLOW, WAIT.
 - SWITCH·JOIN·DO_WHILE의 "실행" 단계(upstream `WorkflowSystemTask.execute`)에서 상태만 판정하는 부분은
   순수 함수로 Phase 2에 둔다. 하위 워크플로우 시작처럼 바깥과 통신하는 부분은 Phase 3에서 붙인다.
@@ -170,6 +183,16 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
   정의로 꺼낼 수 있는 경로다. 정의 등록 시 `${...}` 참조 검사(ADR 0002의 `WorkflowDef.validate/2`)는
   upstream처럼 환경 변수 존재를 참조 유효성으로 인정하므로, 그런 정의는 등록되지만 실행 시 값은 `null`이다.
 - `javascript`·`graaljs`·`python` 평가기와 DO_WHILE은 별도 ADR 전까지 동작하지 않는다.
+- 완료 직전 permissive 태스크 실패가 여럿이면 upstream은 `HashMap` 순회 순서(Java 해시)로 메시지를
+  잇는다. Archon은 워크플로우의 태스크 순서로 잇는다. 실패가 하나면 같다.
+- 정의의 모든 태스크가 SKIPPED여서 시작할 태스크가 없으면 upstream은 `NullPointerException`을 낸다.
+  Archon은 아무것도 예약하지 않는다.
+- upstream `filterNextLoopOverTasks`는 넘겨받은 태스크 객체의 참조명을 제자리에서 바꾸므로, 워크플로우에
+  이미 있는 객체를 넘기면 워크플로우 안의 태스크도 바뀐다. `Decider`는 매퍼가 새로 만든 태스크만 넘기므로
+  결과는 같고, upstream 테스트 `testFilterNextLoopOverTasks`만 새 태스크로 고쳐 옮겼다.
+- 그대로 따른 upstream 부수효과: 재시도에서 `TaskModel.copy()`가 `inputData` 맵을 공유하므로 실패한
+  원래 태스크의 입력에서도 `subWorkflowId`가 빠진다. `tasks_to_be_updated`의 원래 태스크에 같은 변화를
+  담는다.
 
 ## 대안
 
@@ -184,9 +207,15 @@ upstream 테스트에서 옮긴 사례는 테스트 파일에 원본 테스트 �
 
 ## 결과
 
-- 2a(결정 3의 필드, 결정 4, 결정 7)를 첫 PR로 구현했다. 2b~2e는 아직 구현하지 않았다. 조각마다 PR을 올리고,
-  마지막 조각이 머지되면 이 ADR을 `승인`으로 바꾼다.
-- 결정 3의 내부 필드는 아직 아무도 쓰지 않는다. 2b Decider가 처음 읽고 쓴다.
+- 2a(결정 3의 필드, 결정 4, 결정 7)를 첫 PR로 구현했다. 2b(결정 1, 2, SIMPLE·USER_DEFINED 매퍼)를 두 번째
+  PR로 구현했다. 2c~2e는 아직 구현하지 않았다. 조각마다 PR을 올리고, 마지막 조각이 머지되면 이 ADR을
+  `승인`으로 바꾼다.
+- 2b의 재현 테스트(`test/archon/decider/simple_replay_test.exs`)는 런타임 역할을 테스트 안에서 흉내 낸다.
+  시작 시 태스크 정의 박아 넣기, `seq`·`firstScheduledTime` 부여, `tasks_to_be_updated`와 새 태스크만 저장,
+  완료 시 태스크를 갱신하지 않고 상태·출력만 저장하는 동작은 upstream `WorkflowExecutorOps`를 따랐고,
+  Phase 3 런타임이 같은 규칙을 지켜야 픽스처와 같아진다. 마지막 태스크의 `executed: false`가 그 결과다.
+- 결정 3의 내부 필드 중 `first_scheduled_time`, `callback_after_ms`는 2b Decider가 읽고 쓴다.
+  `wait_timeout`, `loop_task_id`, `previous_status`, `failed_task_id`는 2c 이후와 Phase 3에서 쓴다.
 - 입력 해석은 upstream처럼 결과 크기에 상한이 없다. `${workflow.input.x}`를 정의에 여러 번 쓰고 큰 `x`를 넣으면
   결과 문자열이 두 크기의 곱만큼 커진다(2a 로컬 보안 리뷰 지적). upstream도 같은 성질이고 아직 이를 부르는
   REST 경로가 없으므로 2a에서는 동작을 바꾸지 않는다. Phase 5에서 요청 본문 크기 제한과 함께 확장 상한을

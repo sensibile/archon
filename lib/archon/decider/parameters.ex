@@ -183,8 +183,13 @@ defmodule Archon.Decider.Parameters do
     if Task.loop_over_task?(task), do: remove_iteration(ref), else: ref
   end
 
-  # TaskUtils.removeIterationFromTaskRefName: Java's String#split drops trailing empty tokens.
-  defp remove_iteration(ref) do
+  @doc """
+  Upstream `TaskUtils.removeIterationFromTaskRefName`: the reference name before the first
+  `__`. Java's `String#split` drops trailing empty tokens, so a name made only of delimiters is
+  kept as is.
+  """
+  @spec remove_iteration(String.t()) :: String.t()
+  def remove_iteration(ref) do
     case ref
          |> String.split(@loop_task_delimiter)
          |> Enum.reverse()
