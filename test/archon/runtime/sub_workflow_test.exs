@@ -605,6 +605,7 @@ defmodule Archon.Runtime.SubWorkflowTest do
       {micros, :ok} = :timer.tc(fn -> Runtime.terminate_workflow(parent, "stop") end)
       assert micros < 5_000_000
       assert workflow(parent).status == :terminated
+      # the grandparent ends by the cancel or by the parent's notice, whichever comes first
       assert await_status(grandparent, :terminated).status == :terminated
     end
 

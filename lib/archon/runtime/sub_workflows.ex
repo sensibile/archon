@@ -110,7 +110,7 @@ defmodule Archon.Runtime.SubWorkflows do
     # ancestors. The parent itself is ending already (upstream terminates it again). An ancestor
     # would call back into this process while it waits (its own cancel reaches this workflow),
     # so it is cancelled from another process once this one is free; upstream's result is kept.
-    case Registry.keys(@registry, self()) do
+    case own_ids() do
       [^child_id] ->
         :ok
 
@@ -122,6 +122,13 @@ defmodule Archon.Runtime.SubWorkflows do
       _not_a_workflow ->
         cancel(child_id, reason)
     end
+  end
+
+  # The calling workflow's ID; none outside a workflow process or while the registry restarts.
+  defp own_ids do
+    Registry.keys(@registry, self())
+  rescue
+    ArgumentError -> []
   end
 
   defp ancestor?(id, target, seen) do
