@@ -141,7 +141,11 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
   박혀 있으면 `WorkflowDef.to_storage/1`).
 - **실행기 하나.** 워크플로우 프로세스는 outbox 실행기를 한 번에 하나만 둔다. outbox를 담은 Commit 뒤나 활성화 직후
   (남은 항목이 있을 때) 실행기가 없으면 `Archon.Runtime.TaskSupervisor`(`Task.Supervisor`)에서
-  `async_nolink`로 하나 띄운다. 실행기는 `pending_outbox/1`을 `id` 순으로 읽어 하나씩 실행하고, 끝난 항목마다
+  `async_nolink`로 하나 띄운다. **프로세스가 재시작해도 하나다.** 실행기는 시작할 때 `Archon.Runtime.Registry`에
+  `{:outbox, workflow_id}` 키로 자신을 등록하고, 이미 등록돼 있으면(이전 프로세스의 실행기가 아직 도는 중) 아무것도 하지
+  않고 끝난다. 다시 뜬 프로세스는 그 키의 pid를 감시하다가 끝나면 실행기를 띄운다. 이전 실행기는 소유 프로세스를 감시해
+  소유자가 없어지면 다음 항목으로 넘어가지 않고 끝난다(진행 중인 항목 하나는 끝까지 실행할 수 있고, 그 항목은 멱등이다).
+  실행기는 `pending_outbox/1`을 `id` 순으로 읽어 하나씩 실행하고, 끝난 항목마다
   `ack_outbox/2`를 부른다. 재시도할 실패를 만나면 그 자리에서 멈춘다(뒤 항목을 먼저 실행하지 않는다). 실행기가 끝나면
   프로세스가 결과를 받아, 그 사이 새 항목이 생겼으면 다시 띄우고, 재시도할 실패로 멈췄으면 지연(1초에서 두 배씩,
   `workflowOffsetTimeout` 30초 상한) 뒤 다시 띄운다. 그래서 살아 있는 프로세스도 실패한 항목을 다시 시도하고, 서로
@@ -312,7 +316,7 @@ Archon.Runtime.Supervisor (rest_for_one)
 | 4b | 결정 3·5·6의 behaviour: `Commit`의 새 필드, `Store`의 새 콜백과 `{:limit, name}` 오류, 메모리 구현(`Store.Memory`가 검사 뒤 `Queue.Memory`에 큐 연산 적용), 계약 시험 사례 | 계약 시험(메모리) | 없음 | `lib/archon/runtime/{commit,store}.ex`, `lib/archon/runtime/store/memory.ex`, `lib/archon/runtime/queue/memory.ex`, `test/support/runtime/store_contract.ex`, `test/archon/runtime/store_test.exs`(큐 연산 사례의 `Queue.Memory`는 `Archon.Runtime.now/0`과 같은 시계) |
 | 4c | 결정 2·3의 `Queue.Postgres`·`Metadata.Postgres`(Commit 트랜잭션에서 부를 큐 쓰기 함수 포함) | 큐·메타데이터 계약 시험(Postgres), 동시 pop | 4a | `lib/archon/runtime/queue/postgres.ex`, `lib/archon/runtime/metadata/postgres.ex`, `test/archon/runtime/{queue,metadata}_postgres_test.exs` |
 | 4d | 결정 3·5와 L5의 런타임: `WorkflowServer`가 큐 Effect를 `Commit.queue`로 옮김(시작 실패 정리 포함), `Step`이 `Commit.limits`를 채움, 한도 오류 재실행, `env` 실패 분류, 백엔드 혼합 거절(메모리 백엔드로) | 기존 런타임 시험 전부, 동시 poll 한도 시험, 큐 push 실패가 Commit 실패가 되는 시험, L5 재현 시험 | 4b | `lib/archon/runtime/{workflow_server,supervisor}.ex`, `lib/archon/runtime/step/{tasks,async,state}.ex`, `lib/archon/runtime/sub_workflows.ex`(시작 오류 분류만), `test/archon/runtime/{workflow_server,tasks,sub_workflow}_test.exs` |
-| 4e | 결정 4와 L1·L2·L6: outbox로 옮김, 실행기(하나, 순서, 재시도 지연, 결과 분류, 되먹임), outbox가 빌 때까지 끝나지 않기, `TaskSupervisor`와 조상 취소 이전, 소유 ID 명시 인자, `call`로 바꾼 부모 알림, `Env.outbox_pending?`와 복구 검사, `revivedTime` 찍기와 `revived_after?/2` | 기존 런타임 시험 전부, outbox 크래시 시험(Commit 뒤·ack 전), 실행기 순서·재시도 시험, L1·L2·L6 재현 시험 | 4a, 4d | `lib/archon/runtime/{workflow_server,effects,sub_workflows,supervisor}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/step/{effect,env,recover,lifecycle,terminate}.ex`, `test/archon/runtime/{workflow_server,lifecycle,sub_workflow,recovery}_test.exs`, `test/archon/runtime/outbox_test.exs` |
+| 4e | 결정 4와 L1·L2·L6: outbox로 옮김, 실행기(하나, Registry 울타리, 순서, 재시도 지연, 결과 분류, 되먹임), outbox가 빌 때까지 끝나지 않기, `TaskSupervisor`와 조상 취소 이전, 소유 ID 명시 인자, `call`로 바꾼 부모 알림, `Env.outbox_pending?`와 복구 검사, `revivedTime` 찍기와 `revived_after?/2` | 기존 런타임 시험 전부, outbox 크래시 시험(Commit 뒤·ack 전), 실행기 순서·재시도 시험, 실행기가 도는 중 소유 프로세스를 죽였을 때 실행기가 겹치지 않는 시험, L1·L2·L6 재현 시험 | 4a, 4d | `lib/archon/runtime/{workflow_server,effects,sub_workflows,supervisor}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/step/{effect,env,recover,lifecycle,terminate}.ex`, `test/archon/runtime/{workflow_server,lifecycle,sub_workflow,recovery}_test.exs`, `test/archon/runtime/outbox_test.exs` |
 | 4f | 결정 3·5의 `Store.Postgres`: 아홉 필드를 한 트랜잭션으로, 한도 advisory lock, 일관된 읽기, outbox·due 콜백 | 저장소 계약 시험(Postgres), 실패 Commit의 전체 되돌림, 동시 Commit 한도 | 4a, 4b, 4c | `lib/archon/runtime/store/postgres.ex`, `test/archon/runtime/store_postgres_test.exs` |
 | 4g | 결정 6: `Commit.wake` 기록, `Recovery` 선택 활성화, `Archon.Runtime.Waker`, 유휴 프로세스 종료(메모리 백엔드로, `evict_after`를 켠 시험) | 지연 활성화 시험(시계 주입), 키셋 페이지, 기존 `recovery_test.exs` | 4e | `lib/archon/runtime/{workflow_server,recovery,waker,supervisor}.ex`, `config/config.exs`, `test/archon/runtime/{recovery,waker}_test.exs` |
 | 4h | 결정 7·9의 통합: `NodeLock`, Postgres 백엔드 트리 연결, `ARCHON_BACKEND=postgres` 런타임 시험과 CI 단계, 내구성 시험, L11 | 런타임 시험 전부를 두 백엔드에서, 두 번째 노드 거절, 락 잃음 감지, Supervisor 재시작 내구성 시험 | 4f, 4g | `lib/archon/runtime/postgres/node_lock.ex`, `lib/archon/runtime/supervisor.ex`, `config/test.exs`, `test/test_helper.exs`(`public` 스키마 비우기), `.github/workflows/ci.yml`, `test/archon/runtime/{durability,node_lock}_test.exs`, 고정 ID를 쓰는 런타임 시험 |
