@@ -59,7 +59,7 @@ upstream Postgres 큐는 보일 시각을 먼저 본다. Archon은 이미 계약
   콜백). Postgres 인스턴스는 `%Archon.Runtime.Postgres{repo, prefix, clock}`이다. `prefix`는 Postgres 스키마 이름이고
   (런타임은 `public`), `clock`은 큐의 보일 시각 계산에 쓰는 시계다. 런타임 인스턴스의 `clock`은 `Archon.Runtime.now/0`
   (시험에서는 주입한 시계)이라 `Env.now`로 계산한 보일 시각과 pop의 비교가 같은 시계를 쓴다. 개발·시험의 마이그레이션은
-  런타임 스키마와 계약 시험 스키마(`archon_contract`)에 모두 적용하고, `Archon.Release.migrate/0`는 런타임 스키마에만 적용한다.
+  런타임 스키마와 계약 시험 스키마(`archon_contract`, 먼저 `CREATE SCHEMA IF NOT EXISTS`)에 모두 적용하고, `Archon.Release.migrate/0`는 런타임 스키마에만 적용한다.
 - 시험은 `Ecto.Adapters.SQL.Sandbox`를 쓰지 않는다. 런타임 시험은 여러 프로세스(워크플로우 프로세스, 감독되는 Task)가
   같은 데이터를 쓰므로 Sandbox 소유권을 넘기기 번거롭다(결정 9).
 
@@ -164,7 +164,9 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
 
   모양이 아니라 허용 목록으로 가른다. 예외 격리의 응답도 `{:error, {kind, _}}` 모양이라, 모양으로 가르면 DB 장애로 실패한
   부모 재개를 업무 오류로 보고 지우게 된다. `:start_failure_workflow`의 업무 오류는 시작 오류 태그 `:not_found`·`:invalid`·
-  `:terminate`(3c, `SubWorkflows.start_failure_workflow/1`)이며 아래 되먹임으로 처리한다. 지금 `notify_parent`·`revive_parent`·
+  `:terminate`(3c)이며 아래 되먹임으로 처리한다. 지금 `SubWorkflows.start_failure_workflow/1`은 모든 오류를 문구 하나로
+  돌려주므로, 조각 4e가 `start_child/1`처럼 일시적 오류를 `{:error, :transient, message}`로 구분하게 고친다. 일시적 오류는
+  재시도한다. 지금 `notify_parent`·`revive_parent`·
   `retry_child`가 실패를 기록하고 항상 `:ok`를 돌려주는 것은 이 분류를 따르는 결과로 바꾼다.
 - **실패 워크플로우 시작의 되먹임.** `:start_failure_workflow`가 업무 오류(정의 없음 등)로 끝나면 지금처럼
   `{:failure_workflow_started, {:error, reason}}` 이벤트가 필요하다(ADR 0018 결정 8 (a)). 실행기는 그 항목을 ack하지 않고
@@ -187,6 +189,9 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
   outbox가 같은 일을 하고 있기 때문이다. 항목이 없을 때는 이 결정 전에 저장된 워크플로우를 위해 남겨 둔다. 자식의 활성화
   복구 검사 "부모가 종료 상태이고 자기 부모 태스크가 `CANCELED`이면 스스로 종료"와 "`parentWorkflowId`의 기록이 없으면
   스스로 종료"도 그대로 둔다.
+- **빈 Commit 판정.** `WorkflowServer`는 지금 Phase 3의 네 필드가 비면 Commit을 건너뛴다. 새 필드(`queue`, `outbox`,
+  `outbox_ack`, `limits`, `wake`가 `:keep`이 아님)만 있어도 빈 Commit이 아니다. 앞의 넷은 조각 4d·4e, `wake`는 4g가 이 판정에
+  더한다. 그러지 않으면 출력이 이미 오류인 되먹임 재실행의 `outbox_ack`만 담은 Commit이 건너뛰어져 항목이 지워지지 않는다.
 - **멱등.** 항목은 한 번 이상 실행된다. 각 Effect가 두 번 실행돼도 결과가 같아야 한다: 자식 종료는 이미 끝난 자식에
   `:ok`, 부모 알림은 저장소의 자식 상태를 반영할 뿐이고, 실패 워크플로우 시작은 저장된 ID의 `:conflict`를 성공으로
   본다(3e 구현). `child_revived`와 `retry`가 이미 실행 중인 대상에 무해한지는 조각 4e가 시험으로 확인하고, 아니면 그
@@ -235,7 +240,8 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
 - `Archon.Runtime.Postgres.NodeLock`은 풀 밖의 전용 Postgrex 연결(`backoff_type: :stop`, 링크)로 `pg_try_advisory_lock`
   (고정 키)을 잡는다. 못 잡으면 짧은 시간(설정값, 기본 10초) 동안 다시 시도한 뒤 시작에 실패한다
   (`{:stop, :another_node_holds_the_database}`). 같은 노드의 NodeLock이 다시 뜰 때 이전 연결의 락이 서버에서 아직 풀리지
-  않았을 수 있기 때문이다. 정상 종료(`terminate`)에서는 `pg_advisory_unlock`을 부르고 연결을 닫는다. DBConnection은 기본으로
+  않았을 수 있기 때문이다. NodeLock은 exit를 가로채(`trap_exit`) 정상 종료(`terminate`)에서 `pg_advisory_unlock`을 부르고 연결을 닫으며, 링크한
+  연결의 `{:EXIT, conn, _}`를 받으면 스스로 끝난다. DBConnection은 기본으로
   조용히 다시 연결하고 그러면 세션 락이 풀린 채 남으므로, 다시 연결하지 않게 하고 주기(기본 5초)마다 자기 연결이 락을
   쥐고 있는지 `pg_locks`로 확인한다. 연결이 끊기거나 락이 없으면 프로세스가 죽고, `rest_for_one`이라 그 뒤의 런타임
   전체가 다시 뜨며 락을 다시 잡는다. 그 사이 다른 노드가 잡았으면 이 노드는 다시 뜨지 못한다.
@@ -303,7 +309,7 @@ Archon.Runtime.Supervisor (rest_for_one)
 | 조각 | 범위 | 시험·정답 기준 | 선행 | 건드리는 파일·모듈 |
 |---|---|---|---|---|
 | 4a | 결정 1·2: 의존성, `Archon.Repo`, `Archon.Runtime.Postgres` 인스턴스 구조체, 마이그레이션(결정 2의 표 전부, 두 스키마), 저장 인코딩(`to_storage/1`·`from_storage/1`, `Codec`의 옵션 인자), `Workflow`의 `revivedTime` 내부 필드 정의(L2, 값은 아직 쓰지 않음), `Archon.Release.migrate/0`, CI Postgres 서비스와 `:postgres` 태그·`ARCHON_REQUIRE_POSTGRES` 처리 | 골든 픽스처와 내부 필드가 찬 struct의 저장 인코딩 왕복, `\u0000` 왕복, 마이그레이션 적용·되돌리기 | 없음 | `mix.exs`, `mix.lock`, `lib/archon/repo.ex`, `lib/archon/release.ex`, `lib/archon/runtime/postgres.ex`, `priv/repo/migrations/*`, `lib/archon/domain/{codec,workflow,task,workflow_def,task_def}.ex`, `config/{config,test,runtime}.exs`, `.github/workflows/ci.yml`, `test/test_helper.exs`, `test/archon/domain/storage_codec_test.exs` |
-| 4b | 결정 3·5·6의 behaviour: `Commit`의 새 필드, `Store`의 새 콜백과 `{:limit, name}` 오류, 메모리 구현(`Store.Memory`가 검사 뒤 `Queue.Memory`에 큐 연산 적용), 계약 시험 사례 | 계약 시험(메모리) | 없음 | `lib/archon/runtime/{commit,store}.ex`, `lib/archon/runtime/store/memory.ex`, `lib/archon/runtime/queue/memory.ex`, `test/support/runtime/store_contract.ex`, `test/archon/runtime/store_test.exs` |
+| 4b | 결정 3·5·6의 behaviour: `Commit`의 새 필드, `Store`의 새 콜백과 `{:limit, name}` 오류, 메모리 구현(`Store.Memory`가 검사 뒤 `Queue.Memory`에 큐 연산 적용), 계약 시험 사례 | 계약 시험(메모리) | 없음 | `lib/archon/runtime/{commit,store}.ex`, `lib/archon/runtime/store/memory.ex`, `lib/archon/runtime/queue/memory.ex`, `test/support/runtime/store_contract.ex`, `test/archon/runtime/store_test.exs`(큐 연산 사례의 `Queue.Memory`는 `Archon.Runtime.now/0`과 같은 시계) |
 | 4c | 결정 2·3의 `Queue.Postgres`·`Metadata.Postgres`(Commit 트랜잭션에서 부를 큐 쓰기 함수 포함) | 큐·메타데이터 계약 시험(Postgres), 동시 pop | 4a | `lib/archon/runtime/queue/postgres.ex`, `lib/archon/runtime/metadata/postgres.ex`, `test/archon/runtime/{queue,metadata}_postgres_test.exs` |
 | 4d | 결정 3·5와 L5의 런타임: `WorkflowServer`가 큐 Effect를 `Commit.queue`로 옮김(시작 실패 정리 포함), `Step`이 `Commit.limits`를 채움, 한도 오류 재실행, `env` 실패 분류, 백엔드 혼합 거절(메모리 백엔드로) | 기존 런타임 시험 전부, 동시 poll 한도 시험, 큐 push 실패가 Commit 실패가 되는 시험, L5 재현 시험 | 4b | `lib/archon/runtime/{workflow_server,supervisor}.ex`, `lib/archon/runtime/step/{tasks,async,state}.ex`, `lib/archon/runtime/sub_workflows.ex`(시작 오류 분류만), `test/archon/runtime/{workflow_server,tasks,sub_workflow}_test.exs` |
 | 4e | 결정 4와 L1·L2·L6: outbox로 옮김, 실행기(하나, 순서, 재시도 지연, 결과 분류, 되먹임), outbox가 빌 때까지 끝나지 않기, `TaskSupervisor`와 조상 취소 이전, 소유 ID 명시 인자, `call`로 바꾼 부모 알림, `Env.outbox_pending?`와 복구 검사, `revivedTime` 찍기와 `revived_after?/2` | 기존 런타임 시험 전부, outbox 크래시 시험(Commit 뒤·ack 전), 실행기 순서·재시도 시험, L1·L2·L6 재현 시험 | 4a, 4d | `lib/archon/runtime/{workflow_server,effects,sub_workflows,supervisor}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/step/{effect,env,recover,lifecycle,terminate}.ex`, `test/archon/runtime/{workflow_server,lifecycle,sub_workflow,recovery}_test.exs`, `test/archon/runtime/outbox_test.exs` |
@@ -336,6 +342,8 @@ Archon.Runtime.Supervisor (rest_for_one)
   다시 보일 수 있다. Archon은 계약대로 꺼낸 때부터 잰다.
 - **시각은 애플리케이션 시계의 epoch ms다.** upstream은 DB `current_timestamp`로 `deliver_on`을 계산한다.
 - **보조 표와 색인 표가 없다**(결정 2). LISTEN/NOTIFY 큐 리스너도 아직 없다. 빈 pop은 upstream처럼 100ms 간격으로 다시 묻는다.
+- **실패 워크플로우 시작의 일시적 오류를 재시도한다**(결정 4). upstream `terminateWorkflow`는 실패 워크플로우 시작의 모든
+  예외를 잡아 오류 출력을 쓴다. Archon은 업무 오류만 출력에 쓰고 DB 장애 같은 일시적 오류는 outbox로 다시 시도한다.
 - **동시 실행 한도를 원자적으로 지킨다**(결정 5). upstream `exceedsLimit`은 개수 질의와 poll 저장이 원자적이지 않다.
 - **여러 노드를 막는다**(결정 7). upstream Postgres 배포는 `locks` 표의 lease 락으로 여러 노드를 허용한다.
 
