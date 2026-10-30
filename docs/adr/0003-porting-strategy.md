@@ -27,7 +27,7 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
    | Phase 1 | 도메인 모델: 계약을 통과하는 struct와 JSON 코덱 | [ADR 0002](0002-domain-model-representation.md) |
    | Phase 2 | Decider를 부수효과 없는 순수 함수로 | [ADR 0014](0014-phase2-decider.md) |
    | Phase 3 | OTP 런타임: 워크플로우 인스턴스당 GenServer, 레지스트리, DynamicSupervisor | [ADR 0018](0018-phase3-otp-runtime.md) |
-   | Phase 4 | 영속성과 큐: PostgreSQL 우선 | 미작성 |
+   | Phase 4 | 영속성과 큐: PostgreSQL 우선 | [ADR 0021](0021-phase4-postgres-persistence.md) |
    | Phase 5 | Phoenix REST: MVP 엔드포인트부터 | 미작성 |
 
 4. **MVP 태스크 타입은 SIMPLE, SWITCH, FORK_JOIN, JOIN, DO_WHILE, SUB_WORKFLOW, WAIT로 제한한다.**
