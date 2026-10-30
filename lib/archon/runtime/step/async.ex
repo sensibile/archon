@@ -53,11 +53,18 @@ defmodule Archon.Runtime.Step.Async do
     end)
   end
 
-  # A JOIN waits on a task a save made terminal.
-  defp triggered?(%State{terminated_refs: refs}, %Task{task_type: "JOIN"} = task),
-    do: Enum.any?(join_on(task), &MapSet.member?(refs, &1))
+  # A JOIN waits on a task a save made terminal. A SCHEDULED one with a delay waits for it first
+  # (ADR 0018, decision 6: no evaluation of any kind before the delay is over).
+  defp triggered?(%State{now: now} = state, %Task{task_type: "JOIN", status: :scheduled} = task)
+       when task.callback_after_ms > 0 or task.callback_after_seconds > 0 do
+    if due_time(task) > now, do: false, else: triggered_join?(state, task)
+  end
 
+  defp triggered?(state, %Task{task_type: "JOIN"} = task), do: triggered_join?(state, task)
   defp triggered?(_state, _task), do: false
+
+  defp triggered_join?(%State{terminated_refs: refs}, task),
+    do: Enum.any?(join_on(task), &MapSet.member?(refs, &1))
 
   defp join_on(%Task{input_data: input} = task) do
     refs = Map.get(input, "joinOn") || []

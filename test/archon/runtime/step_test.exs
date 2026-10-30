@@ -459,6 +459,40 @@ defmodule Archon.Runtime.StepTest do
       assert stored.status == :completed
     end
 
+    test "a SCHEDULED JOIN with a delay is not evaluated before the delay is over" do
+      join = system("JOIN", "join", join_on: ["a"])
+      fork = system("FORK_JOIN", "fork", fork_tasks: [[simple("a")]])
+      {stored, _post} = start([fork, join])
+
+      delayed = %{
+        task(stored, "join")
+        | status: :scheduled,
+          callback_after_seconds: 10,
+          poll_count: 0,
+          update_time: 0
+      }
+
+      a = %{task(stored, "a") | status: :in_progress}
+
+      stored = %{
+        stored
+        | tasks:
+            Enum.map(
+              stored.tasks,
+              &(%{"join" => delayed, "a" => a}[&1.reference_task_name] || &1)
+            )
+      }
+
+      result = %Archon.Domain.TaskResult{
+        workflow_instance_id: "wf",
+        task_id: a.task_id,
+        status: :completed
+      }
+
+      {%Task{status: :completed}, stored, [], _post} = run(stored, {:update, result})
+      assert %Task{status: :scheduled, poll_count: 0} = task(stored, "join")
+    end
+
     test "a JOIN in a terminated workflow is canceled" do
       join = system("JOIN", "join", join_on: ["a"])
       fork = system("FORK_JOIN", "fork", fork_tasks: [[simple("a")]])
