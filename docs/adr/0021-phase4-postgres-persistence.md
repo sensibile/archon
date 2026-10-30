@@ -261,7 +261,9 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
   자기 epoch를 받는다. Postgres 구현의 모든 쓰기 트랜잭션(`Store.commit/2`, `remove_workflow/1`,
   `ack_outbox/2`, 큐의 push·pop·ack·remove·postpone, poll 데이터·메타데이터 쓰기)은 첫 문장에서
   `pg_advisory_xact_lock_shared(펜스 키)`(공유)를 잡고 `SELECT epoch FROM node_lease WHERE id = 1`을 읽어 자기 epoch와 다르면
-  `{:error, :fenced}`로 되돌린다. 배타 잠금은 진행 중인 공유 잠금이 끝나기를 기다리고, 그 뒤 시작한 이전 노드의 트랜잭션은
+  `{:error, :fenced}`로 되돌린다. 잠금과 epoch 읽기는 반드시 서로 다른 SQL 문이다(READ COMMITTED는 문마다 스냅샷을 잡으므로,
+  한 문으로 합치면 잠금을 기다리기 전의 스냅샷으로 예전 epoch를 읽는다). 펜스 키는 NodeLock의 세션 락 키와 다른 고정 키다
+  (같으면 NodeLock의 세션 배타 잠금이 모든 공유 잠금을 막는다). 배타 잠금은 진행 중인 공유 잠금이 끝나기를 기다리고, 그 뒤 시작한 이전 노드의 트랜잭션은
   공유 잠금을 얻은 다음 올라간 epoch를 읽으므로, 새 노드가 epoch를 올린 뒤에는 이전 노드의 어떤 쓰기도 커밋되지 않는다.
   행 잠금(`FOR SHARE`) 대신 advisory 잠금을 쓰는 이유는 쓰기마다 한 행에 잠금 기록(MultiXact)을 남기지 않기 위해서다.
   긴 poll은 100ms마다의 pop 시도를 각각 펜싱된 트랜잭션 하나로 하고, 5초 동안 트랜잭션을 잡고 있지 않는다.
@@ -336,7 +338,7 @@ Archon.Runtime.Supervisor (rest_for_one)
 | 4e | 결정 4와 L1·L2·L6: outbox로 옮김, 실행기(하나, Registry 울타리, 순서, 재시도 지연, 결과 분류, 되먹임), outbox가 빌 때까지 끝나지 않기, `TaskSupervisor`와 조상 취소 이전, 소유 ID 명시 인자, `call`로 바꾼 부모 알림, `Env.outbox_pending?`와 복구 검사, `revivedParentEndTime` 찍기와 `revived_after?/2` | 기존 런타임 시험 전부, outbox 크래시 시험(Commit 뒤·ack 전), 실행기 순서·재시도 시험, 실행기가 도는 중 소유 프로세스를 죽였을 때 실행기가 겹치지 않는 시험, L1·L2·L6 재현 시험 | 4a, 4d | `lib/archon/runtime/{workflow_server,effects,sub_workflows,supervisor}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/step/{effect,env,recover,lifecycle,terminate}.ex`, `test/archon/runtime/{workflow_server,lifecycle,sub_workflow,recovery}_test.exs`, `test/archon/runtime/outbox_test.exs` |
 | 4f | 결정 3·5의 `Store.Postgres`: 아홉 필드를 한 트랜잭션으로, 한도 advisory lock, 일관된 읽기, outbox·due 콜백 | 저장소 계약 시험(Postgres), 실패 Commit의 전체 되돌림, 동시 Commit 한도, 쓰기마다 펜싱 도우미 호출 | 4a, 4b, 4c | `lib/archon/runtime/store/postgres.ex`, `test/archon/runtime/store_postgres_test.exs` |
 | 4g | 결정 6: `Commit.wake` 기록(예외 격리 기한의 최선 노력 저장 포함), `Recovery` 선택 활성화, `Archon.Runtime.Waker`, 유휴 프로세스 종료(메모리 백엔드로, `evict_after`를 켠 시험) | 지연 활성화 시험(시계 주입), 키셋 페이지, 기존 `recovery_test.exs` | 4e | `lib/archon/runtime/{workflow_server,recovery,waker,supervisor}.ex`, `config/config.exs`, `test/archon/runtime/{recovery,waker}_test.exs` |
-| 4h | 결정 7·9의 통합: `NodeLock`(epoch 발급 포함), Postgres 백엔드 트리 연결, `ARCHON_BACKEND=postgres` 런타임 시험과 CI 단계, 내구성 시험, L11 | 런타임 시험 전부를 두 백엔드에서, 두 번째 노드 거절, 락 잃음 감지, epoch가 오른 뒤 이전 노드의 쓰기가 `:fenced`로 거절됨, Supervisor 재시작 내구성 시험 | 4f, 4g | `lib/archon/runtime/postgres/node_lock.ex`, `lib/archon/runtime/supervisor.ex`, `config/test.exs`, `test/test_helper.exs`(`public` 스키마 비우기), `.github/workflows/ci.yml`, `test/archon/runtime/{durability,node_lock}_test.exs`, 고정 ID를 쓰는 런타임 시험 |
+| 4h | 결정 7·9의 통합: `NodeLock`(epoch 발급 포함), Postgres 백엔드 트리 연결, `ARCHON_BACKEND=postgres` 런타임 시험과 CI 단계, 내구성 시험, L11 | 런타임 시험 전부를 두 백엔드에서, 두 번째 노드 거절, 락 잃음 감지, epoch가 오른 뒤 이전 노드의 쓰기가 `:fenced`로 거절됨(배타 잠금을 쥔 채 epoch를 올리는 동안 기다리던 이전 노드의 쓰기 포함), Supervisor 재시작 내구성 시험 | 4f, 4g | `lib/archon/runtime/postgres/node_lock.ex`, `lib/archon/runtime/supervisor.ex`, `config/test.exs`, `test/test_helper.exs`(`public` 스키마 비우기), `.github/workflows/ci.yml`, `test/archon/runtime/{durability,node_lock}_test.exs`, 고정 ID를 쓰는 런타임 시험 |
 
 - **병렬로 진행할 수 있는 묶음.**
   - 4a와 4b: 파일이 겹치지 않는다. 동시에 시작한다.
