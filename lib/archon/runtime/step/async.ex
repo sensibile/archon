@@ -188,7 +188,10 @@ defmodule Archon.Runtime.Step.Async do
         {State.save_task(state, %{task | end_time: now}), true}
 
       true ->
-        task = %{task | callback_after_seconds: evaluation_offset(state, task)}
+        # Upstream postpones the message by the offset; a retry's callbackAfterMs only delayed
+        # the first enqueue, so it no longer counts.
+        offset = evaluation_offset(state, task)
+        task = %{task | callback_after_seconds: offset, callback_after_ms: 0}
         {State.save_task(state, task), false}
     end
   end

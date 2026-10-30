@@ -378,22 +378,32 @@ defmodule Archon.Runtime.StepTest do
       assert %Workflow{status: :running} = stored
     end
 
-    # Wait#start: a retried WAIT is SCHEDULED and starts IN_PROGRESS.
-    test "a retried WAIT starts again" do
+    # Wait#start: a retried WAIT is SCHEDULED and starts IN_PROGRESS once its retry delay is
+    # over; from then on its evaluation offset decides when it is looked at again.
+    test "a retried WAIT starts again after its retry delay and completes" do
       wait =
         system("WAIT", "wait",
           input_parameters: %{"duration" => "10 seconds"},
-          task_definition: %TaskDef{name: "wait", retry_count: 1, retry_delay_seconds: 0}
+          task_definition: %TaskDef{name: "wait", retry_count: 1, retry_delay_seconds: 60}
         )
 
       {stored, _post} = start([wait])
       failed = %{hd(stored.tasks) | status: :failed}
+      retry_env = env(now: @now + 1_000, jitter: fn _max -> 0 end, new_id: fn -> "retried" end)
+      {:ok, stored, [], _post} = run(%{stored | tasks: [failed]}, :wake, retry_env)
+      assert [_failed, %Task{status: :scheduled, callback_after_ms: 60_000}] = stored.tasks
 
-      {:ok, stored, [], _post} =
-        run(%{stored | tasks: [failed]}, :wake, env(new_id: fn -> "retried" end))
+      {:ok, stored, [], _post} = run(stored, :wake, env(now: @now + 61_000))
 
-      assert [_failed, %Task{status: :in_progress, poll_count: 1, retry_count: 1}] =
+      # The copy keeps the original waitTimeout, already past: a negative offset, due at once.
+      assert [_failed, %Task{status: :in_progress, poll_count: 1, callback_after_ms: 0} = retried] =
                stored.tasks
+
+      assert retried.callback_after_seconds < 0
+      {:ok, stored, [], []} = run(stored, :wake, env(now: @now + 62_000))
+
+      assert [_failed, %Task{status: :completed}] = stored.tasks
+      assert stored.status == :completed
     end
   end
 
