@@ -2,12 +2,12 @@
 
 상태: 2026-10-28 BOSS 확인으로 승인. 현행 본문은 [검증과 측정](../verification.md#ver-005)의 VER-005 1.0이며 승인 범위는 [승인 기록](../approvals.md#approval-2026-10-28)을 따른다. 이 문서는 개정 근거로 보존하며 실행 권한을 부여하지 않는다.
 
-작성: 2026-10-28. 근거: 같은 날 BOSS가 Phase 2 종료 조건과 상향 조건을 공통 기준으로 확정했다. 이어서 이 기준을 `docs/rules`의 정식 규칙으로 등록하기로 결정하면서, 등록은 별도 개정안으로 하라고 지시했다. 확정 내용은 [작업 단계](https://github.com/sensibile/taeguk/blob/b7b4b581c27a70be13f521cb6f30fb2fc29e64bf/codex/skills/taeguk-work-contract/references/phases.md)에 운영 기준으로 반영되어 있다. 이 개정안은 그 기준을 규칙 ID와 버전으로 고정하기 위한 것이다.
+작성: 2026-10-28. 근거: 같은 날 BOSS가 Phase 2 종료 조건과 상향 조건을 공통 기준으로 확정했다. 이어서 이 기준을 `docs/rules`의 정식 규칙으로 등록하기로 결정하면서, 등록은 별도 개정안으로 하라고 지시했다. 확정 내용은 [작업 단계](https://github.com/sensibile/taeguk/blob/81817cf899e22bc193205f6a3de3863ea52f3b70/codex/skills/taeguk-work-contract/references/phases.md)에 운영 기준으로 반영되어 있다. 이 개정안은 그 기준을 규칙 ID와 버전으로 고정하기 위한 것이다.
 
 ## 현행 규칙과 공백
 
 - VER-003 1.0: 상태 다섯 가지를 구분하고 미실행을 성공으로 보지 않는다. 다만 어떤 미확인 항목이 완료를 막는지는 "해당 작업의 승인된 필수 기준"에 맡긴다. 리뷰 지적에 대한 공통 기준은 없다.
-- [목적에 대한 완료 검토](https://github.com/sensibile/taeguk/blob/b7b4b581c27a70be13f521cb6f30fb2fc29e64bf/codex/skills/taeguk-work-contract/references/completion-review.md): "새 규칙이나 공통 통과 기준이 아니다"라고 명시한다.
+- [목적에 대한 완료 검토](https://github.com/sensibile/taeguk/blob/81817cf899e22bc193205f6a3de3863ea52f3b70/codex/skills/taeguk-work-contract/references/completion-review.md): "새 규칙이나 공통 통과 기준이 아니다"라고 명시한다.
 - DEV-002 1.1: "공통 작업 크기·재시도 수치를 새로 강제하지 않는다."
 - GOV-005 0.1(제안): 작업·정리·재시도 한도 후보다. 전역 횟수·시간·예산은 합의하지 않았다.
 - REQ-006 1.0: 대상이 바뀌면 다시 검증한다. Phase 3 구조 변경 뒤의 재검증은 이 규칙으로 이미 요구되므로 새 규칙이 필요 없다.
@@ -38,7 +38,7 @@ ID: archive 후보 VER-001·VER-002, 현행 VER-003·VER-004와 겹치지 않도
 
 ## 변경 전후 판정
 
-비교 기준은 두 가지다. 첫째는 2026-10-28 이전으로, 공통 기준이 없었다. 둘째는 현재로, BOSS가 확정한 [작업 단계](https://github.com/sensibile/taeguk/blob/b7b4b581c27a70be13f521cb6f30fb2fc29e64bf/codex/skills/taeguk-work-contract/references/phases.md)의 운영 기준이 있지만 규칙 ID는 없다. 종료·상향 판정의 의미는 현재 운영 기준과 같게 옮긴다. 실질적으로 새로 들어가는 것은 등급 확정 주체와 기록 의무뿐이다.
+비교 기준은 두 가지다. 첫째는 2026-10-28 이전으로, 공통 기준이 없었다. 둘째는 현재로, BOSS가 확정한 [작업 단계](https://github.com/sensibile/taeguk/blob/81817cf899e22bc193205f6a3de3863ea52f3b70/codex/skills/taeguk-work-contract/references/phases.md)의 운영 기준이 있지만 규칙 ID는 없다. 종료·상향 판정의 의미는 현재 운영 기준과 같게 옮긴다. 실질적으로 새로 들어가는 것은 등급 확정 주체와 기록 의무뿐이다.
 
 | 사례 | 10-28 이전 | 현재 운영 기준 | VER-005 등록 후 |
 | --- | --- | --- | --- |
@@ -71,7 +71,7 @@ ID: archive 후보 VER-001·VER-002, 현행 VER-003·VER-004와 겹치지 않도
 전환:
 
 1. BOSS 확인 후 `verification.md`에 VER-005 1.0 본문, registry 항목(approved), 승인 기록을 같은 변경으로 추가한다.
-2. [작업 단계](https://github.com/sensibile/taeguk/blob/b7b4b581c27a70be13f521cb6f30fb2fc29e64bf/codex/skills/taeguk-work-contract/references/phases.md)의 "등록 대기" 문장을 VER-005 참조로 바꾸고, completion-review 문장을 위와 같이 고친다.
+2. [작업 단계](https://github.com/sensibile/taeguk/blob/81817cf899e22bc193205f6a3de3863ea52f3b70/codex/skills/taeguk-work-contract/references/phases.md)의 "등록 대기" 문장을 VER-005 참조로 바꾸고, completion-review 문장을 위와 같이 고친다.
 3. 승인일 이후 새로 시작하는 작업부터 적용한다. 진행 중인 작업은 기존 판단을 유지하고, 채택할 때 기록한다.
 4. 시험 프로젝트에는 다음 설치 갱신 때 규칙 스냅샷으로 전달한다. 설치 dry-run 확인과 프로젝트별 BOSS 승인을 거친다.
 

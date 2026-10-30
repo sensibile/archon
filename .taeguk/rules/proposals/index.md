@@ -1,6 +1,6 @@
 # 미승인 규칙 후보
 
-Taeguk 저장소의 [기존 규칙 목록](https://github.com/sensibile/taeguk/blob/b7b4b581c27a70be13f521cb6f30fb2fc29e64bf/docs/research/archive/규칙-목록.md) 후보 중 현행 registry에 등록되지 않은 항목은 계속 제안 상태다. archive는 원본을 보존하며 현행 규칙의 승인 목록으로 사용하지 않는다.
+Taeguk 저장소의 [기존 규칙 목록](https://github.com/sensibile/taeguk/blob/81817cf899e22bc193205f6a3de3863ea52f3b70/docs/research/archive/규칙-목록.md) 후보 중 현행 registry에 등록되지 않은 항목은 계속 제안 상태다. archive는 원본을 보존하며 현행 규칙의 승인 목록으로 사용하지 않는다.
 
 ## GOV-005
 

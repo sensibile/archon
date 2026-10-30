@@ -13,7 +13,7 @@ On 2026-10-29 BOSS set cleanup to run daily, with items that Codex agrees are ne
 
 ## Where it runs
 
-The Taeguk repository (`sensibile/taeguk`), and an installed project only when that project records a BOSS authorization for this worker: its schedule, its merge authority, and standing authority to send diffs to Codex for review. On 2026-10-29 BOSS chose archon (`sensibile/archon`) as the first such project; other pilot projects need the Codex transmission authority extended first. Without that record, do not run in the project. Without Codex transmission authority the necessity review in step 7 cannot run, so the run stops before a PR as NOT_RUN. In an installed project, its own AGENTS.md validation commands, worktree rules, delivery document and `.taeguk/daily-cleanup/` replace the Taeguk ones named below.
+The Taeguk repository (`sensibile/taeguk`), and an installed project only when that project records a BOSS authorization for this worker: its schedule and its merge authority. On 2026-10-29 BOSS chose archon (`sensibile/archon`) as the first such project. Without that record, do not run in the project. If the Codex CLI cannot run there, the necessity review in step 7 is NOT_RUN and the run stops before a PR. In an installed project, its own AGENTS.md validation commands, worktree rules, delivery document and `.taeguk/daily-cleanup/` replace the Taeguk ones named below.
 
 ## Cleanup versus restructuring
 
