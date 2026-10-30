@@ -8,7 +8,8 @@ defmodule Archon.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      Archon.Script.Pool
+      Archon.Script.Pool,
+      Archon.Runtime.Supervisor
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

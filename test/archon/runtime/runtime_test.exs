@@ -1,0 +1,165 @@
+# Copyright 2026 sensibile
+#
+# Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+defmodule Archon.Runtime.RuntimeTest do
+  @moduledoc """
+  `Archon.Runtime` with the application's process tree: the captured start, terminate and get
+  exchanges replayed through processes (ADR 0018, decisions 7 and 10), and the start errors of
+  upstream `startWorkflow`.
+  """
+
+  use Archon.RuntimeCase
+
+  alias Archon.Contract
+  alias Archon.Domain.{Task, WorkflowDef, WorkflowTask}
+  alias Archon.Runtime.Queue.Memory, as: Queue
+
+  import Archon.StepReplay, only: [assert_matches: 2]
+
+  describe "golden fixtures through processes" do
+    test "workflow_start_to_terminate, workflow_terminate, workflow_get_terminated" do
+      start = Contract.fixture("workflow_start_to_terminate")
+      assert start["request"]["path"] == "/api/workflow/archon_simple"
+
+      id = start_simple(start["request"]["body"])
+      assert Contract.normalize(id) == Contract.normalize(start["response"]["body"])
+      assert Queue.contains?("archon_task_a", task(id, "task_a_ref").task_id)
+
+      terminate = Contract.fixture("workflow_terminate")
+      %URI{query: query} = URI.parse(terminate["request"]["path"])
+      %{"reason" => reason} = URI.decode_query(query)
+
+      assert Runtime.terminate_workflow(id, reason) == :ok
+      assert terminate["response"]["body"] == nil
+
+      {:ok, workflow} = Runtime.get_workflow(id)
+      assert_matches(workflow, "workflow_get_terminated")
+      refute Queue.contains?("archon_task_a", task(id, "task_a_ref").task_id)
+      await_down(id)
+    end
+
+    test "workflow_start_simple, a poll, workflow_get_running" do
+      start = Contract.fixture("workflow_start_simple")
+      %URI{query: query} = URI.parse(start["request"]["path"])
+      %{"correlationId" => correlation_id} = URI.decode_query(query)
+
+      id = start_simple(start["request"]["body"], correlation_id: correlation_id)
+      task_id = task(id, "task_a_ref").task_id
+
+      assert %Task{status: :in_progress, task_id: ^task_id} =
+               WorkflowServer.poll(id, task_id, "archon-contract")
+
+      assert Queue.ack("archon_task_a", task_id)
+
+      {:ok, workflow} = Runtime.get_workflow(id)
+      assert_matches(workflow, "workflow_get_running")
+      assert WorkflowServer.whereis(id)
+    end
+  end
+
+  describe "start_workflow/1" do
+    test "embeds the registered task definitions and stamps the workflow" do
+      id = start_simple(%{"x" => 1}, priority: 3, task_to_domain: %{"a" => "b"})
+      {:ok, workflow} = Runtime.get_workflow(id)
+
+      assert %{priority: 3, owner_app: "", status: :running, task_to_domain: %{"a" => "b"}} =
+               workflow
+
+      assert [%WorkflowTask{task_definition: %{retry_count: 0, timeout_seconds: 300}} | _rest] =
+               workflow.workflow_definition.tasks
+
+      assert workflow.create_time > 0
+    end
+
+    test "an unknown definition and a nil input are refused before anything is created" do
+      assert Runtime.start_workflow(%{name: "archon_none", input: %{}}) ==
+               {:error, {:not_found, "No such workflow defined. name=archon_none, version=null"}}
+
+      assert Runtime.start_workflow(%{name: "archon_simple", version: 7, input: %{}}) ==
+               {:error, {:not_found, "No such workflow defined. name=archon_simple, version=7"}}
+
+      assert Runtime.start_workflow(%{name: "archon_simple", workflow_id: "none-input"}) ==
+               {:error, {:invalid, "NULL input passed when starting workflow"}}
+
+      assert Runtime.get_workflow("none-input") == {:error, :not_found}
+      assert WorkflowServer.whereis("none-input") == nil
+    end
+
+    test "a SUB_WORKFLOW without a registered definition is refused" do
+      definition = %WorkflowDef{
+        name: "archon_parent",
+        tasks: [
+          %WorkflowTask{
+            name: "sub",
+            task_reference_name: "sub_ref",
+            type: "SUB_WORKFLOW",
+            sub_workflow_param: %Archon.Domain.SubWorkflowParams{name: "archon_missing"}
+          }
+        ]
+      }
+
+      assert Runtime.start_workflow(%{definition: definition, input: %{}}) ==
+               {:error,
+                {:terminate,
+                 "The Task archon_missing defined as a sub-workflow has no workflow definition available "}}
+    end
+
+    test "an ID that exists is a conflict" do
+      id = start_simple(%{"x" => 1})
+
+      assert Runtime.start_workflow(%{name: "archon_simple", workflow_id: id, input: %{}}) ==
+               {:error, :conflict}
+    end
+
+    test "an empty input is stored as an empty map" do
+      id = start_simple(%{})
+      assert {:ok, %{input: %{}}} = Runtime.get_workflow(id)
+    end
+  end
+
+  describe "start_workflow_idempotent/1" do
+    test "creates once, decides after answering and returns the stored one again" do
+      input = %{name: "archon_simple", workflow_id: "idem-1", input: %{"x" => 2}}
+
+      assert {:ok, %{workflow_id: "idem-1", tasks: []}} = Runtime.start_workflow_idempotent(input)
+      eventually(fn -> task("idem-1", "task_a_ref") end)
+
+      assert {:ok, %{workflow_id: "idem-1", tasks: [_task]}} =
+               Runtime.start_workflow_idempotent(input)
+    end
+
+    test "needs a workflow ID and the same parent" do
+      assert Runtime.start_workflow_idempotent(%{name: "archon_simple", input: %{}}) ==
+               {:error, {:invalid, "workflowId must be present for idempotent workflow start"}}
+
+      input = %{name: "archon_simple", workflow_id: "idem-2", input: %{}}
+      assert {:ok, _created} = Runtime.start_workflow_idempotent(input)
+
+      assert {:error, "Workflow id idem-2 already belongs to parent workflow null task null" <> _} =
+               Runtime.start_workflow_idempotent(
+                 Map.merge(input, %{parent_workflow_id: "p", parent_workflow_task_id: "t"})
+               )
+    end
+  end
+
+  describe "get_workflow/2 and terminate_workflow/2" do
+    test "read the store and refuse unknown IDs" do
+      assert Runtime.get_workflow("unknown") == {:error, :not_found}
+      assert Runtime.terminate_workflow("unknown", "r") == {:error, :not_found}
+      assert WorkflowServer.whereis("unknown") == nil
+
+      id = start_simple(%{"x" => 1})
+      assert {:ok, %{tasks: []}} = Runtime.get_workflow(id, false)
+    end
+
+    test "terminating a terminated workflow is a no-op" do
+      id = start_simple(%{"x" => 1})
+      assert Runtime.terminate_workflow(id, "first") == :ok
+      await_down(id)
+      assert Runtime.terminate_workflow(id, "second") == :ok
+      assert {:ok, %{reason_for_incompletion: "first"}} = Runtime.get_workflow(id)
+      await_down(id)
+    end
+  end
+end

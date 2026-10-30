@@ -1,7 +1,7 @@
 # ADR 0018: Phase 3 OTP 런타임 설계
 
 - 상태: 제안
-- 날짜: 2026-10-30, 갱신 2026-10-30(조각 3b: 결정 2의 이벤트·Env·Effect 목록, 결정 8 (a)의 출력)
+- 날짜: 2026-10-30, 갱신 2026-10-30(조각 3b: 결정 2의 이벤트·Env·Effect 목록, 결정 8 (a)의 출력), 갱신 2026-10-30(조각 3c: 결정 2의 Env 채우기와 큐 push 실패, 결정 7의 시작 오류, 결정 12의 3c·3e 경계)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 
 ## 맥락
@@ -179,6 +179,10 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
   (3b 갱신) `Env.workflows`는 `Step`이 읽는 다른 워크플로우(진행 중 SUB_WORKFLOW의 자식, 부모, 실패 워크플로우)를 ID로
   담는다. 값이 `nil`이면 저장소에 없다는 뜻이고, 키가 없으면 읽지 않았다는 뜻이라 그 값이 필요한 검사를 건너뛴다. 3e가
   자식을 읽어 채우면 `:wake`·`:recover`의 자식 반영(결정 5의 30초 재평가)이 동작한다.
+  (3c 갱신) `Env`는 `WorkflowServer`가 이벤트마다 채운다. `task_defs`는 정의를 박아 넣지 않은 태스크 이름, `latest_workflow_versions`는
+  버전이 없는 SUB_WORKFLOW 이름, `poll_data`는 `taskToDomain`이 있을 때 워커 태스크 타입 × 그 도메인, `in_progress`는
+  `concurrentExecLimit`이 있는 태스크 정의마다 읽는다. `queued`와 `workflows`(부모, `IN_PROGRESS`·`CANCELED` SUB_WORKFLOW의 자식,
+  출력의 실패 워크플로우)는 그것을 읽는 `:wake`·`:recover`에서만 읽는다. 그래서 3e는 `WorkflowServer`를 고치지 않는다.
 - `reply`는 호출자에게 돌려줄 값이다: 시작한 workflowId, poll로 내줄 태스크(건너뛰면 `nil`), 갱신한 태스크,
   `{:error, :conflict | :not_found | ...}`.
 - 반환하는 `Workflow`는 **저장한 뒤의 상태**다. upstream이 메모리에서만 바꾸고 저장하지 않은 값은 넣지 않는다
@@ -210,7 +214,8 @@ Effect를 실행하다 프로세스가 죽거나 Effect가 실패하면 다음 �
 
 - 워커 큐 Effect: 결정 7의 복구 검사(활성화 직후, 예외 격리 뒤의 `:recover`, 그리고 상태를 바꾸지 않은 `:wake`)가
   큐에 없는 `SCHEDULED` 태스크를 다시 넣는다. upstream도 `createTasks` 뒤
-  `addTaskToQueue` 실패를 스위퍼 복구에 맡긴다.
+  `addTaskToQueue` 실패를 스위퍼 복구에 맡긴다. (3c 갱신) 그래서 `post`의 큐 push 실패는 시작뿐 아니라 어느 이벤트에서도 기록하고
+  넘어가며 예외 격리로 보내지 않는다. 다른 Effect의 실패는 예외 격리다.
 - 하위 워크플로우 종료 Effect: 결정 8의 종료 순서가 "자식 종료(`pre`) 먼저, 부모 Commit 나중"이라 부모가 종료 상태로
   저장되었으면 자식 종료는 이미 끝났다. 완료 경로는 upstream처럼 완료 뒤에 남은 태스크를 취소하지만, 취소한 태스크
   상태(`CANCELED`)는 완료와 같은 Commit에 넣고 자식 종료 요청만 `post`로 보낸다. 그래서 Commit 뒤 자식 종료 전에 죽어도
@@ -382,7 +387,7 @@ upstream의 decider 큐와 스위퍼, 시스템 태스크 큐의 지연 재평�
 
 | 함수 | upstream | 비고 |
 |---|---|---|
-| `Archon.Runtime.start_workflow(input)` | `startWorkflow` | 호출자 쪽에서 정의 확인, 태스크 정의 박아 넣기, 입력 `null` 검사(문구 그대로), workflowId 생성. 그 ID로 프로세스를 띄워 `{:start, input}`을 보내면 프로세스가 기록을 만들고 첫 decide까지 하고 답한다. workflowId를 돌려준다 |
+| `Archon.Runtime.start_workflow(input)` | `startWorkflow` | 호출자 쪽에서 정의 확인, 태스크 정의 박아 넣기, 입력 `null` 검사(문구 그대로), workflowId 생성. 그 ID로 프로세스를 띄워 `{:start, input}`을 보내면 프로세스가 기록을 만들고 첫 decide까지 하고 답한다. workflowId를 돌려준다. (3c 갱신) 정의가 없으면 `{:error, {:not_found, 문구}}`, 입력이 `nil`이면 `{:error, {:invalid, 문구}}`, 버전 없는 SUB_WORKFLOW의 정의가 없으면 upstream `populateVersionForSubWorkflow`처럼 `{:error, {:terminate, 문구}}`다 |
 | `get_workflow(id, include_tasks?)` | `getExecutionStatus` | 저장소 읽기. `GET /api/workflow/{id}/status` 요약도 이 결과로 만든다 |
 | `terminate_workflow(id, reason)` | `terminateWorkflow(String, String)` | 결정 8 (b) |
 | `Tasks.poll(task_type, worker_id, domain, count, timeout_ms)` | `ExecutionService#poll` | 결정 3의 큐에서 꺼내 태스크마다 소유 프로세스에 `{:poll, ...}`를 보낸다 |
@@ -530,6 +535,10 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
     `workflow_server.ex`나 `step` 파일을 고쳐야 하면 병렬 조건이 깨진 것이므로, 그 변경은 먼저 머지된 쪽에 맞춰 다른
     쪽이 rebase한다.
 - 3b의 `Step`에는 하위 워크플로우 Effect를 내는 부분까지 들어간다. 3e는 그 Effect를 실행하는 쪽만 맡는다.
+- (3c 갱신) 3c는 `Archon.Runtime.start_workflow_idempotent/1`과 `WorkflowServer`의 `{:start_idempotent}`·`{:cancel_by_parent}`·
+  `{:child_changed}` 처리, 클라이언트 함수 `cancel_by_parent/2`·`child_changed/3`, Effect 결과의 되먹임까지 넣는다.
+  `Archon.Runtime.SubWorkflows`의 자리 함수는 `start_child/1`, `terminate_child/2`, `notify_parent/3`,
+  `start_failure_workflow/1`이고(인자와 반환은 그 moduledoc), 3e는 이 네 함수만 채운다.
 - 3f는 `Step`에 생명주기 이벤트를 더하므로 다른 조각과 병렬로 하지 않는다.
 - 각 조각은 이 ADR의 결정 번호와 조각 이름을 PR에 적는다. 조각 중에 결정이 바뀌면 이 ADR의 해당 결정과 날짜 줄에
   갱신 사실을 적는다(ADR 0014와 같은 방식).
