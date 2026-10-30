@@ -1,12 +1,15 @@
 # ADR 0011: Codex 리뷰 게이트를 없애고 push 전 로컬 리뷰 후 auto-merge
 
-- 상태: 승인 (결정 3의 리뷰 순서와 모델·effort는 [ADR 0016](0016-taeguk-review-order-and-model.md)이 대체)
+- 상태: 승인 (결정 3의 리뷰 순서와 모델·effort는 [ADR 0016](0016-taeguk-review-order-and-model.md), 결정 3의 전송 권한 근거는
+  [ADR 0020](0020-taeguk-codex-transmission-list-removal.md)이 대체)
 - 날짜: 2026-10-29
 - 대체: [ADR 0010](0010-codex-gate-status-only.md) 전체, [ADR 0008](0008-codex-review-gate-hardening.md) 전체,
   [ADR 0006](0006-merge-policy.md) 결정 2의 필수 체크 중 `codex-review`와 결정 5의 "머지 게이트는 필수 체크와 Codex 리뷰".
   ADR 0006의 나머지 결정은 그대로 유효하다.
 - 출처: 태극(sensibile/taeguk) #21 `6162cba`의 `taeguk-codex-local-review` 스킬, #22 `3876ffe`의 gate 제거와
   `docs/repository-operations.md` PR 플로우, #28의 archon 전송 권한 기록
+- 비고(2026-10-30): 태극 #39가 Codex 전송 저장소 허용 목록을 없앴다. 맥락의 "archon도 상시 허용"은 그날의 사실
+  기록으로 남기고, Codex 실행 가능 여부는 Codex CLI 설정이 정한다([ADR 0020](0020-taeguk-codex-transmission-list-removal.md)).
 
 ## 맥락
 

@@ -16,7 +16,7 @@ On 2026-10-29 BOSS approved two modes:
 
 ## Where it runs
 
-The Taeguk repository (`sensibile/taeguk`), and an installed project only when that project records a BOSS authorization for this worker: its schedule, its merge authority, and standing authority to send diffs to Codex for review. On 2026-10-29 BOSS chose archon (`sensibile/archon`) as the first such project; other pilot projects need the Codex transmission authority extended first. Without a recorded authorization, a run in an installed project is report mode at most, and without Codex transmission authority reinforce mode stops before review as NOT_RUN. In an installed project, its own AGENTS.md validation commands, worktree rules, delivery document and test locations replace the Taeguk ones named below, and its run reports go under its own `.taeguk/test-gap/`.
+The Taeguk repository (`sensibile/taeguk`), and an installed project only when that project records a BOSS authorization for this worker: its schedule and its merge authority. On 2026-10-29 BOSS chose archon (`sensibile/archon`) as the first such project. Without a recorded authorization, a run in an installed project is report mode at most, and if the Codex CLI cannot run there, reinforce mode stops before review as NOT_RUN. In an installed project, its own AGENTS.md validation commands, worktree rules, delivery document and test locations replace the Taeguk ones named below, and its run reports go under its own `.taeguk/test-gap/`.
 
 ## Coverage is not a target
 

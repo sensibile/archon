@@ -2,7 +2,7 @@
 
 ## Approval-2026-10-05
 
-근거: 이 대화에서 BOSS가 “규칙의 적용은 에이전트가 자유롭게 사용하고 규칙의 변경은 사용자 확인으로 하면 되겠다”라고 지시했다. GOV-001과 GOV-002의 기존 합의를 유지한다. 원래 기록은 [규칙 목록](https://github.com/sensibile/taeguk/blob/b7b4b581c27a70be13f521cb6f30fb2fc29e64bf/docs/research/archive/규칙-목록.md)과 [규칙 관리](https://github.com/sensibile/taeguk/blob/b7b4b581c27a70be13f521cb6f30fb2fc29e64bf/docs/research/archive/규칙-관리.md)에 보존한다.
+근거: 이 대화에서 BOSS가 “규칙의 적용은 에이전트가 자유롭게 사용하고 규칙의 변경은 사용자 확인으로 하면 되겠다”라고 지시했다. GOV-001과 GOV-002의 기존 합의를 유지한다. 원래 기록은 [규칙 목록](https://github.com/sensibile/taeguk/blob/81817cf899e22bc193205f6a3de3863ea52f3b70/docs/research/archive/규칙-목록.md)과 [규칙 관리](https://github.com/sensibile/taeguk/blob/81817cf899e22bc193205f6a3de3863ea52f3b70/docs/research/archive/규칙-관리.md)에 보존한다.
 
 ## Approval-2026-10-11
 

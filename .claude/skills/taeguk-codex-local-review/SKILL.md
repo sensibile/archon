@@ -9,7 +9,7 @@ Run `codex exec review` from the local Codex CLI against one exact target and re
 
 ## Authority
 
-Running the CLI sends the diff and repository context to OpenAI. On 2026-10-28 BOSS approved this transmission as standing authority for work in the Taeguk repository (`sensibile/taeguk`), and on 2026-10-29 extended it to the archon repository (`sensibile/archon`). Any other repository, including the other pilot projects, needs explicit BOSS authorization for that task; without it, record the review as NOT_RUN with that reason. This skill grants no other external effect.
+Running the CLI sends the diff, the prompt and repository context to OpenAI. Whether Codex may run in a repository is set in the Codex CLI's own configuration (login and its settings), not by a repository list in this skill; on 2026-10-30 BOSS removed the earlier list. If the CLI refuses to run in the repository, record the review as NOT_RUN with the CLI's reason. This skill grants no other external effect.
 
 ## Before running
 
