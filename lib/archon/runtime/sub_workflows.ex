@@ -52,6 +52,8 @@ defmodule Archon.Runtime.SubWorkflows do
   alias Archon.Runtime.Step.{Effect, Event, SubWorkflow}
   alias Archon.Runtime.WorkflowServer
 
+  @registry Archon.Runtime.Registry
+
   @doc "Starts the child of a `SUB_WORKFLOW` task (upstream `startWorkflowIdempotent`)."
   @spec start_child(Effect.start()) :: Event.sub_workflow_result()
   def start_child(%{workflow_id: id, parent_workflow_id: id} = start) when is_binary(id) do
@@ -99,16 +101,47 @@ defmodule Archon.Runtime.SubWorkflows do
 
   @doc """
   Terminates a child because its parent ended (upstream `SubWorkflow#cancel`). A child that does
-  not exist, or one that is the calling workflow itself, counts as terminated (ADR 0018,
-  decision 5).
+  not exist, or one that is the calling workflow itself, counts as terminated; an ancestor of the
+  calling workflow is cancelled from another process (ADR 0018, decision 5).
   """
   @spec terminate_child(String.t(), String.t()) :: :ok | {:error, term()}
   def terminate_child(child_id, reason) do
-    # A worker-supplied subWorkflowId (ADR 0018) may name the parent itself, which is ending
-    # already; upstream terminates that workflow again, here it cannot call its own process.
-    if WorkflowServer.whereis(child_id) == self(),
-      do: :ok,
-      else: cancel(child_id, reason)
+    # A worker-supplied subWorkflowId (ADR 0018) may name the parent itself or one of its
+    # ancestors. The parent itself is ending already (upstream terminates it again). An ancestor
+    # would call back into this process while it waits (its own cancel reaches this workflow),
+    # so it is cancelled from another process once this one is free; upstream's result is kept.
+    case Registry.keys(@registry, self()) do
+      [^child_id] ->
+        :ok
+
+      [own_id] ->
+        if ancestor?(own_id, child_id, []),
+          do: cancel_later(child_id, reason),
+          else: cancel(child_id, reason)
+
+      _not_a_workflow ->
+        cancel(child_id, reason)
+    end
+  end
+
+  defp ancestor?(id, target, seen) do
+    with false <- id in seen,
+         {:ok, %Workflow{parent_workflow_id: parent}} when parent not in [nil, ""] <-
+           Runtime.get_workflow(id, false) do
+      parent == target or ancestor?(parent, target, [id | seen])
+    else
+      _root -> false
+    end
+  end
+
+  defp cancel_later(child_id, reason) do
+    {:ok, _pid} =
+      Elixir.Task.start(fn ->
+        with {:error, error} <- cancel(child_id, reason),
+             do: Logger.warning("workflow #{child_id} was not cancelled: #{inspect(error)}")
+      end)
+
+    :ok
   end
 
   defp cancel(child_id, reason) do

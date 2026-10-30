@@ -569,8 +569,43 @@ defmodule Archon.Runtime.SubWorkflowTest do
       assert Runtime.terminate_workflow(id, "stop") == :ok
       assert workflow(id).status == :terminated
       assert task(id, "t2").status == :canceled
-      # the task no longer names the real child, so it is left as upstream leaves it
+      # the task no longer names the real child: it is not cancelled now (the recovery check ends
+      # it later)
       assert workflow(child_id).status == :running
+    end
+
+    test "a worker-supplied child ID naming an ancestor terminates it without a deadlock" do
+      input = %{
+        "param1" => "p1 value",
+        "param2" => "p2 value",
+        "subwf" => "integration_test_wf_with_sub_wf",
+        "nextSubwf" => "sub_workflow"
+      }
+
+      grandparent = start("integration_test_wf_with_sub_wf", input)
+      complete(grandparent, "t1")
+      parent = child_of(grandparent, "t2")
+      complete(parent, "t1")
+
+      sub_task =
+        eventually(fn ->
+          t = task(parent, "t2")
+          t.sub_workflow_id && t
+        end)
+
+      assert %Task{} =
+               WorkflowServer.update(%TaskResult{
+                 workflow_instance_id: parent,
+                 task_id: sub_task.task_id,
+                 status: :in_progress,
+                 sub_workflow_id: grandparent
+               })
+
+      # a synchronous cancel would wait for the grandparent, which calls back into the parent
+      {micros, :ok} = :timer.tc(fn -> Runtime.terminate_workflow(parent, "stop") end)
+      assert micros < 5_000_000
+      assert workflow(parent).status == :terminated
+      assert await_status(grandparent, :terminated).status == :terminated
     end
 
     test "a child ID that names the parent itself fails the ownership check" do
