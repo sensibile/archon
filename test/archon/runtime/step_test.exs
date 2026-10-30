@@ -311,6 +311,10 @@ defmodule Archon.Runtime.StepTest do
 
       assert stored.output["conductor.failure_workflow"] ==
                "Error workflow on_failure failed to start.  reason: no such workflow"
+
+      # The error message is not an ID to start again.
+      message = stored.output["conductor.failure_workflow"]
+      assert {:ok, ^stored, [], []} = run(stored, :recover, env(workflows: %{message => nil}))
     end
 
     # terminate(): the name after the second `.` is the input key, so the braces of

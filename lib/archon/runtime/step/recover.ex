@@ -127,7 +127,9 @@ defmodule Archon.Runtime.Step.Recover do
   end
 
   defp restart_failure_workflow(%State{wf: wf, env: env} = state) do
+    # After a failed start the output holds upstream's error message instead of an ID.
     with id when is_binary(id) <- Map.get(wf.output, "conductor.failure_workflow"),
+         false <- String.starts_with?(id, "Error workflow "),
          {:ok, nil} <- Map.fetch(env.workflows, id),
          {:ok, start} <- Terminate.failure_start(wf, id) do
       State.post(state, {:start_failure_workflow, start})
