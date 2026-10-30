@@ -185,9 +185,18 @@ defmodule Archon.Runtime.Step do
         {:notify_parent, parent, task, _child} -> {:notify_parent, parent, task, state.stored}
         effect -> effect
       end)
+      |> Enum.filter(&still_wanted?(state, &1))
 
     {reply, state.stored, Enum.reverse(state.pre), State.commit(state), post ++ wake(state)}
   end
+
+  # A child start asked for earlier in the step is dropped when the same step ended its task
+  # (the parent terminated): the child termination already ran before the commit, so a start
+  # after it would leave the child running (ADR 0018, decision 8).
+  defp still_wanted?(state, {:start_sub_workflow, task_id, _start}),
+    do: match?(%{status: :scheduled}, State.task(state, task_id))
+
+  defp still_wanted?(_state, _effect), do: true
 
   defp wake(%State{stored: nil}), do: []
   defp wake(%State{halted?: true}), do: []

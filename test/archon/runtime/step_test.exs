@@ -599,6 +599,25 @@ defmodule Archon.Runtime.StepTest do
       assert stored.status == :failed
     end
 
+    test "a parent that ends on the wake its child becomes due does not start the child" do
+      {stored, _post} = start([sub_workflow() |> Map.put(:start_delay, 5)])
+
+      definition = %{
+        stored.workflow_definition
+        | timeout_seconds: 5,
+          timeout_policy: :time_out_wf
+      }
+
+      stored = %{stored | workflow_definition: definition}
+
+      {:ok, stored, pre, post} = run(stored, :wake, env(now: @now + 6_000))
+
+      assert stored.status == :timed_out
+      assert %Task{status: :canceled} = task(stored, "sub")
+      assert [{:terminate_sub_workflow, _id, _reason}] = pre
+      refute Enum.any?(post, &match?({:start_sub_workflow, _, _}, &1))
+    end
+
     test "a start delay holds the start until it is over" do
       {stored, post} = start([sub_workflow() |> Map.put(:start_delay, 5)])
       assert %Task{status: :scheduled, poll_count: 0} = task(stored, "sub")
