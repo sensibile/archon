@@ -1594,9 +1594,14 @@ defmodule Archon.Runtime.LifecycleTest do
       RuntimeHooks.advance(60_000)
       send(WorkflowServer.whereis(id), :wake)
 
-      eventually(fn ->
-        Enum.find(workflow(id).tasks, &(&1.task_id == polled.task_id)).status == :timed_out
-      end)
+      timed_out =
+        eventually(fn ->
+          task = Enum.find(workflow(id).tasks, &(&1.task_id == polled.task_id))
+          task.status == :timed_out and task
+        end)
+
+      # the total timeout fired, not the response timeout that is also exceeded
+      assert timed_out.reason_for_incompletion =~ "exceeded total timeout of 5 seconds"
     end
   end
 end
