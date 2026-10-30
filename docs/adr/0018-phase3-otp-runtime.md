@@ -1,7 +1,7 @@
 # ADR 0018: Phase 3 OTP 런타임 설계
 
 - 상태: 제안
-- 날짜: 2026-10-30, 갱신 2026-10-30(조각 3b: 결정 2의 이벤트·Env·Effect 목록, 결정 8 (a)의 출력), 갱신 2026-10-30(조각 3c: 결정 2의 Env 채우기와 큐 push 실패, 결정 7의 시작 오류, 결정 12의 3c·3e 경계), 갱신 2026-10-30(조각 3d: 결정 7의 워커 API 형태와 poll 실패 처리)
+- 날짜: 2026-10-30, 갱신 2026-10-30(조각 3b: 결정 2의 이벤트·Env·Effect 목록, 결정 8 (a)의 출력), 갱신 2026-10-30(조각 3c: 결정 2의 Env 채우기와 큐 push 실패, 결정 7의 시작 오류, 결정 12의 3c·3e 경계), 갱신 2026-10-30(조각 3d: 결정 7의 워커 API 형태와 poll 실패 처리), 갱신 2026-10-30(조각 3e: 결정 5의 시작 오류 분류와 부모 알림, 결정 8 (a)의 실패 워크플로우 시작 결과, 결정 12의 3e 시험 범위)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 
 ## 맥락
@@ -340,6 +340,15 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   설정값(기본 30초)이고, 시간이 넘으면 결정 1의 예외 격리 규칙으로 부모 종료를 실패로 처리한다. Decider 종료(결정 8 (a))는 다음 decide에서
   같은 종료가 다시 나오므로 다시 시도되고, 종료 요청(결정 8 (b))은 호출자가 오류를 받고 끝난다(upstream도 같다).
 - **실패 워크플로우.** 결정 8 (a).
+- **(3e 갱신) 시작 오류의 분류.** upstream `SubWorkflow.start`는 `TransientException`(저장소 장애)이면 태스크를 `SCHEDULED`로
+  두고 그 밖의 예외면 `FAILED`로 만든다. `Archon.Runtime.SubWorkflows.start_child/1`은 `start_workflow_idempotent/1`의 오류를
+  이렇게 나눈다. 워크플로우를 만들기 전의 거절(정의 없음 `{:not_found, …}`, `nil` 입력 `{:invalid, …}`, 정의 없는
+  SUB_WORKFLOW `{:terminate, …}`, 다른 부모의 자식이라는 소유자 확인 문구)과 자식이 시작을 처리하다 낸 예외는 그 문구로
+  `FAILED`다. 나머지(자식 프로세스 활성화 실패, 호출 타임아웃·종료, 자식 Commit 실패)는 저장소 장애에 해당하므로 일시적
+  오류이고, 태스크의 지연(`callbackAfterSeconds`)이 지난 다음 `:wake`에서 다시 시작한다.
+- **(3e 갱신) 부모 알림.** 자식의 부모 알림 Effect는 부모 태스크 ID가 없거나 부모를 활성화하지 못하면(부모 기록 없음 등)
+  기록만 남기고 성공으로 끝낸다. 알림이 사라져도 부모의 30초 재평가가 저장소에서 자식을 읽어 메우므로, 자식의 Effect를
+  실패로 만들 이유가 없다.
 
 ### 6. 타이머와 재평가
 
@@ -446,7 +455,9 @@ upstream의 두 종료 경로를 그대로 나눈다. 둘 다 순서는 "남은 
 - 정의의 `failureWorkflow`(`$`로 시작하면 입력에서 이름을 읽는다)가 있으면 실패 워크플로우 ID를 `Env.new_id`로 미리
   만들어 `conductor.failure_workflow` 출력과 함께 같은 Commit에 넣고, Commit 뒤 그 ID로 시작한다. 입력은 upstream과 같다
   (`workflowId`, `reason`, `failureStatus`, `failureTaskId`, `failedWorkflow`). 시작이 실패하면 출력을 upstream 문구
-  `Error workflow <이름> failed to start.  reason: <사유>`로 바꿔 다시 Commit한다. 시작 Effect를 실행하기 전에 프로세스가
+  `Error workflow <이름> failed to start.  reason: <사유>`로 바꿔 다시 Commit한다. (3e 갱신) 사유는 시작 오류의 문구(정의가 없으면
+  `No such workflow defined. name=<이름>, version=null`)다. 저장해 둔 ID가 이미 있다는 `:conflict`는 앞선 시도가 그 ID로
+  시작한 것이므로 시작 성공으로 본다. 시작 Effect를 실행하기 전에 프로세스가
   죽으면, 활성화 복구는 출력에 ID가 있는데 그 워크플로우가 저장소에 없으면 다시 시작한다(같은 ID라 멱등이다). (3b 갱신) 다시 시작할 때 입력은 저장된 워크플로우에서 출력의 그 키를 빼고 만든다. `failedWorkflow`의 태스크는 저장된 상태라, 첫 시작이 담은 메모리 상태(저장하지 않은 `executed` 등)와 다를 수 있다. 출력이 실패 문구면 다시 시작하지 않는다. 출력은 태스크(워커)가 채울 수 있으므로, 다시 시작은 Decider 종료로 끝난 워크플로우(`FAILED`·`TIMED_OUT`, 또는 원인 태스크가 있는 `TERMINATED`이고 실행 상태에서 바로 끝난 것)에만 한다. `FAILED` 뒤에 종료 요청으로 `TERMINATED`가 된 워크플로우는 `failed_task_id`가 남지만 다시 시작하지 않는다. 원인 태스크 없이 `TERMINATED`로 끝난 Decider 종료는 다시 시작하지 못하며, 이 빈틈은 결과 절의 Phase 4 복구에 남긴다.
 
 **(b) 종료 요청**(`terminate_workflow`, REST `DELETE /api/workflow/{id}`). upstream `terminateWorkflow(String, String)`.
@@ -544,6 +555,11 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
   `{:child_changed}` 처리, 클라이언트 함수 `cancel_by_parent/2`·`child_changed/3`, Effect 결과의 되먹임까지 넣는다.
   `Archon.Runtime.SubWorkflows`의 자리 함수는 `start_child/1`, `terminate_child/2`, `notify_parent/3`,
   `start_failure_workflow/1`이고(인자와 반환은 그 moduledoc), 3e는 이 네 함수만 채운다.
+- (3e 갱신) 3e는 `sub_workflows.ex`만 고쳤고 `workflow_server.ex`·`step` 파일은 건드리지 않았다(병렬 조건 유지). 3c의
+  `test/archon/runtime/runtime_test.exs`에 자리 함수의 일시적 오류를 단정한 시험 하나가 있어, 자식이 실제로 시작되고 부모
+  종료로 함께 종료되는지 보도록 고쳤다(3d가 건드리지 않는 파일). upstream 시나리오의 LAMBDA·TERMINATE는 MVP 타입이 아니므로
+  (ADR 0003) 같은 출력을 내는 SIMPLE 태스크(워커가 완료)와 워커가 실패시키는 SIMPLE 태스크로 바꿔 옮겼다. 그래서
+  `FailureWorkflowSpec`의 `Workflow is FAILED by TERMINATE task` 사유 대신 실패 태스크의 사유를 확인한다.
 - 3f는 `Step`에 생명주기 이벤트를 더하므로 다른 조각과 병렬로 하지 않는다.
 - 각 조각은 이 ADR의 결정 번호와 조각 이름을 PR에 적는다. 조각 중에 결정이 바뀌면 이 ADR의 해당 결정과 날짜 줄에
   갱신 사실을 적는다(ADR 0014와 같은 방식).

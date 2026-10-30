@@ -120,17 +120,20 @@ defmodule Archon.Runtime.RuntimeTest do
 
       assert {:ok, id} = Runtime.start_workflow(%{definition: definition, input: %{}})
 
-      # the 3c placeholder answers a transient error: the task stays SCHEDULED with it
       task =
         eventually(fn ->
           t = task(id, "sub_ref")
-          Map.has_key?(t.output_data, "subWorkflowLaunchError") and t
+          t.status == :in_progress and t
         end)
 
-      assert task.status == :scheduled
       assert task.input_data["subWorkflowVersion"] == 1
+
+      assert {:ok, %{status: :running, parent_workflow_id: ^id}} =
+               Runtime.get_workflow(task.sub_workflow_id)
+
       assert Runtime.terminate_workflow(id, "stop") == :ok
       assert task(id, "sub_ref").status == :canceled
+      assert {:ok, %{status: :terminated}} = Runtime.get_workflow(task.sub_workflow_id)
     end
 
     test "an ID that exists is a conflict" do
