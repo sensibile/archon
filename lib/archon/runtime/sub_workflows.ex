@@ -6,7 +6,7 @@
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/tasks/SubWorkflow.java
 # (start's exception handling, cancel, terminateSubWorkflow) and
 # core/.../execution/WorkflowExecutorOps.java (terminateWorkflow's failure workflow start,
-# updateParentWorkflow) at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
+# updateParentWorkflowTask) at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: each call is an effect of the calling workflow's process, and a parent
 # hears of its child by a message instead of the decider queue (ADR 0018, decisions 1 and 5).
 
@@ -49,11 +49,31 @@ defmodule Archon.Runtime.SubWorkflows do
 
   alias Archon.Domain.Workflow
   alias Archon.Runtime
-  alias Archon.Runtime.Step.{Effect, Event}
+  alias Archon.Runtime.Step.{Effect, Event, SubWorkflow}
   alias Archon.Runtime.WorkflowServer
 
   @doc "Starts the child of a `SUB_WORKFLOW` task (upstream `startWorkflowIdempotent`)."
   @spec start_child(Effect.start()) :: Event.sub_workflow_result()
+  def start_child(%{workflow_id: id, parent_workflow_id: id} = start) when is_binary(id) do
+    # A task whose subWorkflowId (worker-supplied, ADR 0018) names its own workflow: the
+    # process cannot call itself, so the ownership check upstream would fail it runs here.
+    case Runtime.get_workflow(id, false) do
+      {:ok, existing} ->
+        owner = %Workflow{
+          parent_workflow_id: id,
+          parent_workflow_task_id: Map.get(start, :parent_workflow_task_id)
+        }
+
+        case SubWorkflow.owned_by?(existing, owner) do
+          {:error, message} -> {:error, message}
+          :ok -> {:error, "Workflow id #{id} cannot be its own sub workflow"}
+        end
+
+      {:error, reason} ->
+        start_error(reason)
+    end
+  end
+
   def start_child(start) do
     case Runtime.start_workflow_idempotent(start) do
       {:ok, %Workflow{} = child} -> {:ok, child}
@@ -67,7 +87,15 @@ defmodule Archon.Runtime.SubWorkflows do
   # validateIdempotentWorkflowOwnership
   defp start_error(message) when is_binary(message), do: {:error, message}
   defp start_error(%{__exception__: true} = exception), do: {:error, Exception.message(exception)}
-  defp start_error(reason), do: {:error, :transient, inspect(reason)}
+  defp start_error(reason), do: {:error, :transient, message(reason)}
+
+  # The message of an error, as upstream's `getMessage()` of the exception it caught.
+  defp message({tag, %{__exception__: true} = exception}) when is_atom(tag),
+    do: "#{tag}: #{Exception.message(exception)}"
+
+  defp message(%{__exception__: true} = exception), do: Exception.message(exception)
+  defp message(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp message(reason), do: inspect(reason)
 
   @doc """
   Terminates a child because its parent ended (upstream `SubWorkflow#cancel`). A child that does
@@ -83,7 +111,7 @@ defmodule Archon.Runtime.SubWorkflows do
   end
 
   @doc """
-  Tells the parent that its child changed (upstream `updateParentWorkflow`). Without the parent
+  Tells the parent that its child changed (upstream `updateParentWorkflowTask`). Without the parent
   task, or when the parent cannot be reached, the notice is dropped: the parent's re-evaluation
   reads the child from the store.
   """
@@ -116,8 +144,7 @@ defmodule Archon.Runtime.SubWorkflows do
       {:ok, _id} -> :ok
       {:error, :conflict} -> :ok
       {:error, {tag, message}} when tag in [:not_found, :invalid, :terminate] -> {:error, message}
-      {:error, %{__exception__: true} = exception} -> {:error, Exception.message(exception)}
-      {:error, reason} -> {:error, inspect(reason)}
+      {:error, reason} -> {:error, message(reason)}
     end
   end
 end

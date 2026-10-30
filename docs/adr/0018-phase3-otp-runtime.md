@@ -345,7 +345,13 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   이렇게 나눈다. 워크플로우를 만들기 전의 거절(정의 없음 `{:not_found, …}`, `nil` 입력 `{:invalid, …}`, 정의 없는
   SUB_WORKFLOW `{:terminate, …}`, 다른 부모의 자식이라는 소유자 확인 문구)과 자식이 시작을 처리하다 낸 예외는 그 문구로
   `FAILED`다. 나머지(자식 프로세스 활성화 실패, 호출 타임아웃·종료, 자식 Commit 실패)는 저장소 장애에 해당하므로 일시적
-  오류이고, 태스크의 지연(`callbackAfterSeconds`)이 지난 다음 `:wake`에서 다시 시작한다.
+  오류이고, 태스크의 지연(`callbackAfterSeconds`)이 지난 다음 `:wake`에서 다시 시작한다. 워커가 준 `subWorkflowId`가 부모
+  자신의 ID면(결과 절의 신뢰 결정) 자기 프로세스를 호출할 수 없으므로 upstream 소유자 확인과 같은 문구로 `FAILED`다.
+  알려진 한계: `WorkflowServer`는 자식이 시작을 처리하기 전의 저장소·메타데이터 읽기(`env/2`)와 `Step` 실행을 같은 예외
+  격리로 감싸므로, 저장소 구현이 장애를 예외(`raise`)로 알리면 그 예외는 `Step` 버그와 구별되지 않아 `FAILED`로 분류된다.
+  메모리 구현은 GenServer라 장애가 exit(일시적 오류)로 오므로 지금은 생기지 않는다. Phase 4 저장소는 장애를 exit나 오류
+  반환으로 알리거나, `WorkflowServer`가 `env/2` 단계의 실패에 표지를 붙여 일시적 오류로 넘기도록 그때 고친다(3e는
+  `workflow_server.ex`를 고치지 않는다).
 - **(3e 갱신) 부모 알림.** 자식의 부모 알림 Effect는 부모 태스크 ID가 없거나 부모를 활성화하지 못하면(부모 기록 없음 등)
   기록만 남기고 성공으로 끝낸다. 알림이 사라져도 부모의 30초 재평가가 저장소에서 자식을 읽어 메우므로, 자식의 Effect를
   실패로 만들 이유가 없다.

@@ -522,7 +522,7 @@ defmodule Archon.Runtime.SubWorkflowTest do
       sub_task = task(parent_id, "t2")
       assert sub_task.status == :scheduled
       assert sub_task.sub_workflow_id == nil
-      assert sub_task.output_data["subWorkflowLaunchError"] =~ "store down"
+      assert sub_task.output_data["subWorkflowLaunchError"] == "commit: store down"
 
       assert sub_task.reason_for_incompletion =~
                "Transient error starting sub workflow sub_workflow: "
@@ -532,6 +532,11 @@ defmodule Archon.Runtime.SubWorkflowTest do
 
       # the retry waits for the task's delay, as upstream's queue would
       RuntimeHooks.install(hook: fn _point, _id, _data -> :ok end)
+      parent_pid = WorkflowServer.whereis(parent_id)
+      send(parent_pid, :wake)
+      :sys.get_state(parent_pid)
+      assert %Task{status: :scheduled, sub_workflow_id: nil} = task(parent_id, "t2")
+
       RuntimeHooks.advance(30_000)
       send(WorkflowServer.whereis(parent_id), :wake)
 
@@ -549,6 +554,22 @@ defmodule Archon.Runtime.SubWorkflowTest do
   end
 
   describe "the effects on their own" do
+    test "a child ID that names the parent itself fails the ownership check" do
+      {id, _child_id} = start_with_child("sub_workflow")
+      sub_task = task(id, "t2")
+
+      start = %{
+        workflow_id: id,
+        name: "sub_workflow",
+        input: %{},
+        parent_workflow_id: id,
+        parent_workflow_task_id: sub_task.task_id
+      }
+
+      assert {:error, message} = SubWorkflows.start_child(start)
+      assert message =~ "Workflow id #{id} already belongs to parent workflow null task null"
+    end
+
     test "terminating a child that does not exist succeeds" do
       assert SubWorkflows.terminate_child("archon-no-such-child", "parent ended") == :ok
     end
