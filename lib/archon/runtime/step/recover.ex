@@ -44,9 +44,8 @@ defmodule Archon.Runtime.Step.Recover do
         Terminate.by_parent(state, reason)
 
       true ->
-        state = repair_queues(state)
         {state, _decide?} = Async.pass(state, :wake)
-        state |> Decide.settle() |> unstick()
+        state |> Decide.settle() |> unstick() |> repair_queues()
     end
   end
 
@@ -55,7 +54,7 @@ defmodule Archon.Runtime.Step.Recover do
   def after_wake(%State{changed?: true} = state), do: state
 
   def after_wake(%State{wf: wf} = state) do
-    if Workflow.terminal?(wf.status), do: state, else: state |> repair_queues() |> unstick()
+    if Workflow.terminal?(wf.status), do: state, else: state |> unstick() |> repair_queues()
   end
 
   # The parent ended and canceled this workflow's task, or the parent is gone.
@@ -82,10 +81,24 @@ defmodule Archon.Runtime.Step.Recover do
   end
 
   # isTaskRepairable for worker tasks: SCHEDULED ones without a message are pushed again.
+  # It runs after the decide, as upstream's sweeper repairs after deciding, so only tasks still
+  # SCHEDULED are pushed; tasks this step already queued are left alone.
   defp repair_queues(%State{wf: wf, env: env, now: now} = state) do
+    queued =
+      for {kind, _queue, id, _priority, _delay} <- state.post,
+          kind in [:queue_push, :queue_postpone],
+          into: env.queued,
+          do: id
+
+    if Workflow.terminal?(wf.status) or state.halted?,
+      do: state,
+      else: push_missing(state, queued, now)
+  end
+
+  defp push_missing(%State{wf: wf, env: env} = state, queued, now) do
     wf.tasks
     |> Enum.filter(&(&1.status == :scheduled and not Schedule.system_task?(env, &1)))
-    |> Enum.reject(&MapSet.member?(env.queued, &1.task_id))
+    |> Enum.reject(&MapSet.member?(queued, &1.task_id))
     |> Enum.reduce(state, fn task, state ->
       delay = max(Async.due_time(task) - now, 0)
 
@@ -126,7 +139,18 @@ defmodule Archon.Runtime.Step.Recover do
     restart_failure_workflow(state)
   end
 
-  defp restart_failure_workflow(%State{wf: wf, env: env} = state) do
+  # Only a Decider termination (ADR 0018, decision 8 (a)) writes the failure workflow ID over
+  # the output; a completed workflow, a termination request and a parent's cancel keep the
+  # output the tasks gave, which a worker controls. A Decider termination is FAILED or TIMED_OUT,
+  # or TERMINATED with the task that caused it.
+  defp restart_failure_workflow(%State{wf: %Workflow{status: status} = wf} = state)
+       when status in [:failed, :timed_out] or
+              (status == :terminated and wf.failed_task_id != nil),
+       do: restart_failure_workflow(state, wf)
+
+  defp restart_failure_workflow(state), do: state
+
+  defp restart_failure_workflow(%State{env: env} = state, wf) do
     # After a failed start the output holds upstream's error message instead of an ID.
     with id when is_binary(id) <- Map.get(wf.output, "conductor.failure_workflow"),
          false <- String.starts_with?(id, "Error workflow "),

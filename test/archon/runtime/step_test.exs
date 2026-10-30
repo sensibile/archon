@@ -312,6 +312,18 @@ defmodule Archon.Runtime.StepTest do
       assert stored.output["conductor.failure_workflow"] ==
                "Error workflow on_failure failed to start.  reason: no such workflow"
 
+      # A terminal workflow the Decider did not end keeps the output its tasks gave: a worker's
+      # `conductor.failure_workflow` there is not a start to recover.
+      for {status, fields} <- [completed: [], terminated: [failed_task_id: nil]] do
+        forged =
+          struct!(
+            %{stored | status: status, output: %{"conductor.failure_workflow" => "x"}},
+            fields
+          )
+
+        assert {:ok, ^forged, [], []} = run(forged, :recover, env(workflows: %{"x" => nil}))
+      end
+
       # The error message is not an ID to start again.
       message = stored.output["conductor.failure_workflow"]
       assert {:ok, ^stored, [], []} = run(stored, :recover, env(workflows: %{message => nil}))
@@ -571,6 +583,33 @@ defmodule Archon.Runtime.StepTest do
 
       {:ok, _stored, [], post} = run(stored, :recover, env(queued: MapSet.new([a.task_id])))
       assert [{:wake_at, _}] = post
+    end
+
+    # The sweeper repairs after deciding: a task the decide times out is not queued again, and the
+    # retry it schedules is queued once.
+    test "repairs the queues after the decide" do
+      a =
+        simple("a",
+          task_definition: %TaskDef{
+            name: "a",
+            retry_count: 1,
+            retry_delay_seconds: 0,
+            poll_timeout_seconds: 1,
+            timeout_policy: :retry
+          }
+        )
+
+      {stored, _post} = start([a])
+      old = task(stored, "a")
+      later = env(now: @now + 10_000, new_id: fn -> "retried" end)
+      {:ok, stored, [], post} = run(stored, :recover, later)
+
+      assert [%Task{status: :timed_out}, %Task{task_id: "retried", status: :scheduled}] =
+               stored.tasks
+
+      pushed = for {:queue_push, _queue, id, _priority, _delay} <- post, do: id
+      assert pushed == ["retried"]
+      refute old.task_id in pushed
     end
 
     test "a child whose parent ended and canceled its task terminates itself" do
