@@ -99,10 +99,19 @@ defmodule Archon.Runtime.SubWorkflows do
 
   @doc """
   Terminates a child because its parent ended (upstream `SubWorkflow#cancel`). A child that does
-  not exist counts as terminated (ADR 0018, decision 5).
+  not exist, or one that is the calling workflow itself, counts as terminated (ADR 0018,
+  decision 5).
   """
   @spec terminate_child(String.t(), String.t()) :: :ok | {:error, term()}
   def terminate_child(child_id, reason) do
+    # A worker-supplied subWorkflowId (ADR 0018) may name the parent itself, which is ending
+    # already; upstream terminates that workflow again, here it cannot call its own process.
+    if WorkflowServer.whereis(child_id) == self(),
+      do: :ok,
+      else: cancel(child_id, reason)
+  end
+
+  defp cancel(child_id, reason) do
     case WorkflowServer.cancel_by_parent(child_id, reason) do
       :ok -> :ok
       {:error, :not_found} -> :ok

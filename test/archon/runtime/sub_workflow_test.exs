@@ -554,6 +554,25 @@ defmodule Archon.Runtime.SubWorkflowTest do
   end
 
   describe "the effects on their own" do
+    test "a worker-supplied child ID naming the parent does not block the parent's termination" do
+      {id, child_id} = start_with_child("sub_workflow")
+      sub_task = task(id, "t2")
+
+      assert %Task{sub_workflow_id: ^id} =
+               WorkflowServer.update(%TaskResult{
+                 workflow_instance_id: id,
+                 task_id: sub_task.task_id,
+                 status: :in_progress,
+                 sub_workflow_id: id
+               })
+
+      assert Runtime.terminate_workflow(id, "stop") == :ok
+      assert workflow(id).status == :terminated
+      assert task(id, "t2").status == :canceled
+      # the task no longer names the real child, so it is left as upstream leaves it
+      assert workflow(child_id).status == :running
+    end
+
     test "a child ID that names the parent itself fails the ownership check" do
       {id, _child_id} = start_with_child("sub_workflow")
       sub_task = task(id, "t2")

@@ -347,6 +347,9 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   `FAILED`다. 나머지(자식 프로세스 활성화 실패, 호출 타임아웃·종료, 자식 Commit 실패)는 저장소 장애에 해당하므로 일시적
   오류이고, 태스크의 지연(`callbackAfterSeconds`)이 지난 다음 `:wake`에서 다시 시작한다. 워커가 준 `subWorkflowId`가 부모
   자신의 ID면(결과 절의 신뢰 결정) 자기 프로세스를 호출할 수 없으므로 upstream 소유자 확인과 같은 문구로 `FAILED`다.
+  자식이 붙은 뒤 워커가 그 ID를 부모 자신으로 바꾼 경우, 부모 종료의 자식 종료 요청은 자기 자신이 대상이라 호출하지 않고
+  성공으로 본다(upstream은 같은 워크플로우를 다시 종료하므로 결과가 같다). 원래 자식은 태스크가 더 가리키지 않으므로
+  upstream처럼 남는다.
   알려진 한계: `WorkflowServer`는 자식이 시작을 처리하기 전의 저장소·메타데이터 읽기(`env/2`)와 `Step` 실행을 같은 예외
   격리로 감싸므로, 저장소 구현이 장애를 예외(`raise`)로 알리면 그 예외는 `Step` 버그와 구별되지 않아 `FAILED`로 분류된다.
   메모리 구현은 GenServer라 장애가 exit(일시적 오류)로 오므로 지금은 생기지 않는다. Phase 4 저장소는 장애를 exit나 오류
