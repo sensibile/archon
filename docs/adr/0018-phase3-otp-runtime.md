@@ -322,7 +322,7 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   없으면 결정적 ID로 시작을 다시 해서(멱등) 이미 만든 자식에 붙는다. 대체 ID가 시작 전에 저장되므로 대체 자식이 둘
   생기지 않는다.
 - **진행 반영.** 자식이 종료 상태가 되면 자식 프로세스가 부모에게 `{:child_changed, task_id, child}`를 `cast`한다.
-  부모는 그 태스크가 아직 자기 태스크 목록에 있는지 확인하고(upstream의 세대 펜스), `SystemTask.SubWorkflow.execute/2`로
+  부모는 그 태스크가 아직 자기 태스크 목록에 있고 지금 그 자식에 붙어 있는지 확인하고(upstream의 세대 펜스. upstream은 태스크의 `subWorkflowId`로 자식을 읽는다. 3b 갱신), `SystemTask.SubWorkflow.execute/2`로
   상태·출력·실패 이유를 반영한 뒤 진행 중 JOIN을 평가하고 decide한다. 알림이 사라질 경우(부모 재시작 등)에 대비해 부모는
   진행 중 SUB_WORKFLOW가 있으면 `workflowOffsetTimeout`(30초)마다 저장소에서 자식을 읽는다(upstream `computePostpone`의
   활성 하위 워크플로우 규칙과 같은 간격).
