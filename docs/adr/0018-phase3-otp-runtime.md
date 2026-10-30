@@ -1,7 +1,7 @@
 # ADR 0018: Phase 3 OTP 런타임 설계
 
 - 상태: 제안
-- 날짜: 2026-10-30, 갱신 2026-10-30(조각 3b: 결정 2의 이벤트·Env·Effect 목록, 결정 8 (a)의 출력), 갱신 2026-10-30(조각 3c: 결정 2의 Env 채우기와 큐 push 실패, 결정 7의 시작 오류, 결정 12의 3c·3e 경계)
+- 날짜: 2026-10-30, 갱신 2026-10-30(조각 3b: 결정 2의 이벤트·Env·Effect 목록, 결정 8 (a)의 출력), 갱신 2026-10-30(조각 3c: 결정 2의 Env 채우기와 큐 push 실패, 결정 7의 시작 오류, 결정 12의 3c·3e 경계), 갱신 2026-10-30(조각 3d: 결정 7의 워커 API 형태와 poll 실패 처리)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 
 ## 맥락
@@ -390,16 +390,21 @@ upstream의 decider 큐와 스위퍼, 시스템 태스크 큐의 지연 재평�
 | `Archon.Runtime.start_workflow(input)` | `startWorkflow` | 호출자 쪽에서 정의 확인, 태스크 정의 박아 넣기, 입력 `null` 검사(문구 그대로), workflowId 생성. 그 ID로 프로세스를 띄워 `{:start, input}`을 보내면 프로세스가 기록을 만들고 첫 decide까지 하고 답한다. workflowId를 돌려준다. (3c 갱신) 정의가 없으면 `{:error, {:not_found, 문구}}`, 입력이 `nil`이면 `{:error, {:invalid, 문구}}`, 버전 없는 SUB_WORKFLOW의 정의가 없으면 upstream `populateVersionForSubWorkflow`처럼 `{:error, {:terminate, 문구}}`다 |
 | `get_workflow(id, include_tasks?)` | `getExecutionStatus` | 저장소 읽기. `GET /api/workflow/{id}/status` 요약도 이 결과로 만든다 |
 | `terminate_workflow(id, reason)` | `terminateWorkflow(String, String)` | 결정 8 (b) |
-| `Tasks.poll(task_type, worker_id, domain, count, timeout_ms)` | `ExecutionService#poll` | 결정 3의 큐에서 꺼내 태스크마다 소유 프로세스에 `{:poll, ...}`를 보낸다 |
-| `Tasks.update(task_result)` | `WorkflowExecutorOps#updateTask` | `workflowInstanceId`의 프로세스로 보낸다 |
-| `Tasks.update_v2(task_result)` | `TaskResource#updateTaskV2` | 갱신한 태스크가 종료 상태면 같은 타입의 다음 태스크를 poll해 돌려주고, 아니면 없음(REST 204) |
-| `Tasks.get(task_id)` | `getTask` | 저장소 읽기 |
+| `Tasks.poll(task_type, worker_id, domain)` | `getLastPollTask` | (3d 갱신) 한 개, 대기 100ms. `{:ok, task}`, 없으면 `{:ok, nil}`(REST 204) |
+| `Tasks.batch_poll(task_type, worker_id, domain, count, timeout_ms)` | `ExecutionService#poll` | 결정 3의 큐에서 꺼내 태스크마다 소유 프로세스에 `{:poll, ...}`를 보낸다. `{:ok, [task]}`, `timeout_ms`가 5000을 넘으면 `{:error, {:invalid, "Long Poll Timeout value cannot be more than 5 seconds"}}` |
+| `Tasks.update(task_result)` | `WorkflowExecutorOps#updateTask` | `workflowInstanceId`의 프로세스로 보낸다. (3d 갱신) `{:ok, task}`, `extendLease`면 `{:ok, nil}`, 워크플로우·태스크가 없거나 `workflowInstanceId`가 비면 `{:error, :not_found}` |
+| `Tasks.update_v2(task_result)` | `TaskResource#updateTaskV2` | 갱신한 태스크가 종료 상태면 같은 타입의 다음 태스크를 poll해 돌려주고, 아니면 없음(REST 204). (3d 갱신) 그 poll은 갱신한 태스크의 도메인과 결과의 `workerId`로 한다. `@Valid`처럼 `workflowInstanceId`·`taskId`가 비면 `{:error, {:invalid, errors}}` |
+| `Tasks.get(task_id)` | `getTask` | 저장소 읽기. (3d 갱신) `{:ok, task}` 또는 `{:error, :not_found}` |
 
 - `poll`: 큐에서 꺼낸 ID마다 소유 프로세스가 검사한다. 태스크가 없거나 끝났으면 큐에서 지우고 건너뛴다. 동시 실행 한도
   (`concurrentExecLimit`, `Env`의 진행 중 개수)를 넘으면 60초 미룬다. 아니면 `IN_PROGRESS`, `pollCount + 1`, `workerId`,
   `callbackAfterSeconds = 0`, `startTime`(0일 때만), `updateTime`을 저장하고 결정 6대로 타이머를 당긴다. 다 돌면 poll
   데이터를 기록하고(빈 poll도) 내준 메시지를 ack한다. `timeout_ms` 상한 5000은 upstream과 같다. 빈도 한도
   (`rateLimitPerFrequency`)는 upstream 기본 서버처럼 적용하지 않는다.
+  (3d 갱신) 꺼낸 ID의 워크플로우는 `Store.get_task`로 찾는다. 저장소에 없거나 소유 프로세스가 `{:error, :not_found}`로 답하면
+  큐에서 지운다. 소유 프로세스가 그 밖의 오류로 답하거나 호출이 실패하면(예외 격리, 호출 타임아웃) upstream이 DB 예외에서
+  하듯 우선순위 0으로 `task_execution_postpone_ms`(60초) 미뤄 다시 poll되게 한다. poll 데이터 기록 실패는 upstream
+  `updateTaskLastPoll`처럼 기록만 하고 넘어간다. ack는 내준 태스크의 큐 이름(`[domain:]taskType`)으로 한다.
 - `update`: upstream `updateTask`의 순서를 그대로 따른다(위 "맥락"). 응답 전에 decide까지 마친다. `TaskResult`의
   `extendLease`가 참이면 `updateTime`만 바꾼다.
 - **호출 타임아웃.** 런타임 API가 워크플로우 프로세스에 거는 `GenServer.call` 타임아웃은 설정값(기본 30초)이다. 결정 4의
