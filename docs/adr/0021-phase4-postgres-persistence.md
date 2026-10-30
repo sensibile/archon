@@ -57,8 +57,9 @@ upstream Postgres 큐는 보일 시각을 먼저 본다. Archon은 이미 계약
   alias로, 배포는 `Archon.Release.migrate/0`로 한다. 애플리케이션 시작이 마이그레이션을 실행하지는 않는다.
 - **인스턴스.** Postgres 구현의 콜백도 메모리 구현처럼 첫 인자로 인스턴스를 받는 형태가 있다(인자 없는 형태가 behaviour
   콜백). Postgres 인스턴스는 `%Archon.Runtime.Postgres{repo, prefix, clock}`이다. `prefix`는 Postgres 스키마 이름이고
-  (런타임은 `public`), `clock`은 큐의 보일 시각 계산에 쓰는 시계다. 마이그레이션은 런타임 스키마와 계약 시험 스키마
-  (`archon_contract`)에 모두 적용한다.
+  (런타임은 `public`), `clock`은 큐의 보일 시각 계산에 쓰는 시계다. 런타임 인스턴스의 `clock`은 `Archon.Runtime.now/0`
+  (시험에서는 주입한 시계)이라 `Env.now`로 계산한 보일 시각과 pop의 비교가 같은 시계를 쓴다. 개발·시험의 마이그레이션은
+  런타임 스키마와 계약 시험 스키마(`archon_contract`)에 모두 적용하고, `Archon.Release.migrate/0`는 런타임 스키마에만 적용한다.
 - 시험은 `Ecto.Adapters.SQL.Sandbox`를 쓰지 않는다. 런타임 시험은 여러 프로세스(워크플로우 프로세스, 감독되는 Task)가
   같은 데이터를 쓰므로 Sandbox 소유권을 넘기기 번거롭다(결정 9).
 
@@ -69,7 +70,7 @@ behaviour moduledoc: 계약 시험이 시계를 주입하므로 DB `now()`를 �
 
 | 표 | 열 | 색인·제약 |
 |---|---|---|
-| `workflow` | `workflow_id text` PK, `status text`, `parent_workflow_id text`, `wake_at bigint`(결정 6), `json_data text` | `status = 'RUNNING'`인 행의 `(wake_at, workflow_id)` 부분 색인 |
+| `workflow` | `workflow_id text` PK, `status text`, `parent_workflow_id text`, `wake_at bigint`(결정 6), `json_data text` | `status = 'RUNNING'`인 행의 `(COALESCE(wake_at, 0), workflow_id)` 부분 식 색인 |
 | `task` | `task_id text` PK, `workflow_id text`(FK → `workflow`, `ON DELETE CASCADE`), `seq integer`, `status text`, `task_def_name text`, `json_data text` | `(workflow_id, seq)`, `status = 'IN_PROGRESS'`인 행의 `task_def_name` 부분 색인 |
 | `outbox` | `id bigserial` PK, `workflow_id text`(FK → `workflow`, `ON DELETE CASCADE`), `effect text`, `inserted_at bigint` | `(workflow_id, id)` |
 | `queue_message` | `queue_name text`, `message_id text`(둘이 PK), `priority integer`, `deliver_on bigint`, `popped boolean`, `unack_on bigint`, `seq bigserial` | `(queue_name, priority DESC, deliver_on, seq)` |
@@ -93,13 +94,14 @@ behaviour moduledoc: 계약 시험이 시계를 주입하므로 DB `now()`를 �
 
 ### 3. Commit에 큐 연산, outbox, 재평가 시각, 한도 검사를 담는다
 
-ADR 0018 결정 2의 `Commit` 필드 네 개에 다음 넷을 더한다. 저장소는 여덟 필드를 한 트랜잭션으로 적용한다.
+ADR 0018 결정 2의 `Commit` 필드 네 개에 다음 다섯을 더한다. 저장소는 아홉 필드를 한 트랜잭션으로 적용한다.
 `commit/2`의 성공 반환은 지금처럼 `:ok`다.
 
 | 필드 | 형태 | 의미 |
 |---|---|---|
 | `queue` | `[{:push, queue, id, priority, deliver_on} \| {:remove, queue, id} \| {:postpone, queue, id, priority, deliver_on}]` | 워커 큐 연산. 의미는 `Queue`의 같은 이름 콜백이고, 지연 대신 보일 시각(epoch ms)을 담는다 |
 | `outbox` | `[Step.Effect.t()]` | 결정 4의 다른 워크플로우에 하는 일 |
+| `outbox_ack` | `[id]` | 같은 트랜잭션에서 지울 outbox 항목(결정 4의 실패 워크플로우 시작 되먹임). 기본 `[]` |
 | `wake` | `:keep \| {:at, ms} \| {:before, ms} \| :none` | 결정 6. 기본 `:keep` |
 | `limits` | `%{task_def_name => limit}` | 결정 5. 기본 `%{}` |
 
@@ -112,7 +114,8 @@ ADR 0018 결정 2의 `Commit` 필드 네 개에 다음 넷을 더한다. 저장�
   기록으로 찾음)는 지운 워크플로우의 Commit들이 넣은 `Commit.queue`의 push에서 찾는다.
 - **저장소와 큐는 같은 백엔드여야 한다.** `Store.Postgres`는 `Queue.Postgres`의 쓰기 함수를 같은 트랜잭션 연결로
   부르고, `Store.Memory`는 다른 필드를 모두 검사·적용한 뒤 마지막에 `Queue.Memory`에 순서대로 적용한다(메모리 구현은
-  원래 내구성이 없고, 큐 연산은 되돌리지 않으므로 거절될 수 있는 검사를 먼저 한다). 설정이 둘을 섞으면
+  원래 내구성이 없고, 큐 연산은 되돌리지 않으므로 거절될 수 있는 검사를 먼저 한다). `Queue.Memory`의 push·postpone은
+  지연을 받으므로 `Store.Memory`가 보일 시각에서 같은 시계(`Archon.Runtime.now/0`)의 지금을 빼서 넘긴다. 설정이 둘을 섞으면
   `Archon.Runtime.Supervisor`가 시작을 거절한다.
 - **Store behaviour의 새 콜백.**
 
@@ -121,7 +124,7 @@ ADR 0018 결정 2의 `Commit` 필드 네 개에 다음 넷을 더한다. 저장�
   | `pending_outbox(workflow_id)` | 그 워크플로우의 남은 항목 `[{id, effect}]`(`id` 순) |
   | `ack_outbox(workflow_id, [id])` | 실행을 마친 outbox 항목을 지운다 |
   | `outbox_workflow_ids(after, limit)` | 남은 항목이 있는 워크플로우 ID를 `after` 다음부터 ID 순으로(키셋 페이지) |
-  | `due_workflow_ids(before_ms, after, limit)` | `RUNNING`이고 `wake_at`이 `before_ms` 이하이거나 없는 워크플로우 ID를 `(wake_at, workflow_id)` 순으로 `after` 다음부터(키셋 페이지) |
+  | `due_workflow_ids(before_ms, after, limit)` | `RUNNING`이고 `wake_at`이 `before_ms` 이하이거나 없는 워크플로우를 `(COALESCE(wake_at, 0), workflow_id)` 순으로 `after` 다음부터(키셋 페이지). 결과는 `[{wake_key, workflow_id}]`이고 `after`는 마지막 결과의 그 쌍(첫 페이지는 `nil`). `wake_at`이 없는 행은 `wake_key` 0이다 |
 
   `commit/2`의 오류에 `{:error, {:limit, task_def_name}}`(결정 5)을 더한다.
 
@@ -156,18 +159,23 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
   | 결과 | 처리 |
   |---|---|
   | `:ok`, 상대 워크플로우가 없음(`{:error, :not_found}`) | ack |
-  | 상대가 거절한 업무 오류(`{:error, {kind, message}}`. 예: 이미 실행 중인 자식의 재시도, `:invalid_state`) | 기록하고 ack |
-  | 호출 timeout, exit, 예외, 저장소 오류 | 재시도 |
+  | 허용 목록의 업무 오류: `{:error, :conflict}`, `{:error, {kind, message}}`에서 `kind`가 `:conflict`·`:not_found`·`:invalid_state`(ADR 0018 결정 9, upstream Conflict·NotFound·IllegalState). 예: 이미 실행 중인 자식의 재시도 | 기록하고 ack |
+  | 그 밖의 모든 것: 호출 timeout, exit, 예외, 예외 격리의 응답(`{:error, {:commit \| :pre_effect \| :post_effect \| :env, _}}`), 저장소 오류 | 재시도 |
 
-  지금 `notify_parent`·`revive_parent`·`retry_child`가 실패를 기록하고 항상 `:ok`를 돌려주는 것은 이 분류를 따르는 결과로
-  바꾼다.
+  모양이 아니라 허용 목록으로 가른다. 예외 격리의 응답도 `{:error, {kind, _}}` 모양이라, 모양으로 가르면 DB 장애로 실패한
+  부모 재개를 업무 오류로 보고 지우게 된다. `:start_failure_workflow`의 업무 오류는 시작 오류 태그 `:not_found`·`:invalid`·
+  `:terminate`(3c, `SubWorkflows.start_failure_workflow/1`)이며 아래 되먹임으로 처리한다. 지금 `notify_parent`·`revive_parent`·
+  `retry_child`가 실패를 기록하고 항상 `:ok`를 돌려주는 것은 이 분류를 따르는 결과로 바꾼다.
 - **실패 워크플로우 시작의 되먹임.** `:start_failure_workflow`가 업무 오류(정의 없음 등)로 끝나면 지금처럼
-  `{:failure_workflow_started, {:error, reason}}` 이벤트가 필요하다(ADR 0018 결정 8 (a)). 실행기는 이 결과를 프로세스에
-  돌려주고, 프로세스가 그 이벤트로 `Step.run`과 Commit을 한 뒤 항목을 ack한다. 그 사이에 죽으면 항목이 남아 다시
-  실행되고, 같은 오류가 다시 같은 출력을 쓰므로 결과가 같다.
+  `{:failure_workflow_started, {:error, reason}}` 이벤트가 필요하다(ADR 0018 결정 8 (a)). 실행기는 그 항목을 ack하지 않고
+  멈춰 결과를 프로세스에 돌려준다. 프로세스는 그 이벤트로 `Step.run`을 하고, 출력을 고치는 Commit의 `outbox_ack`에 그
+  항목을 넣어 같은 트랜잭션에서 지운 뒤, 남은 항목이 있으면 실행기를 다시 띄운다. 그래서 출력은 "시작 실패"인데 항목이
+  남아 나중에 시작이 성공하는 일이 없다. Commit 전에 죽으면 항목이 남아 다시 실행된다.
 - **조상 취소(L6).** `SubWorkflows.terminate_child`의 `cancel_later`(`Elixir.Task.start`)는 같은 `TaskSupervisor`에서 돈다.
   실행기 안(post 자식 종료)에서는 실행기가 그 결과를 기다려 분류하고, 종료 경로의 `pre`(워크플로우 프로세스 안)에서는
-  감독되는 Task로 띄우기만 한다. `pre`의 조상 취소가 VM과 함께 사라지면 지금처럼 활성화 복구 검사가 다시 종료한다.
+  감독되는 Task로 띄우기만 한다. `pre`의 조상 취소가 VM과 함께 사라지면 그 조상이 다시 활성화될 때의 복구 검사만 메운다.
+  남은 outbox도 요청도 없는 종료 상태 워크플로우는 활성화되지 않으므로 메워지지 않을 수 있다. Phase 3와 같은 성질이고,
+  조상을 자식으로 가리키는 것은 worker가 준 ID뿐이므로(L7·L8) Phase 5 인증·인가 ADR에서 함께 본다.
 - **다시 실행할 곳.** 프로세스가 없을 때 남은 항목은 (1) 그 워크플로우가 활성화될 때, (2) `Recovery`와 결정 6의
   `Archon.Runtime.Waker`가 `outbox_workflow_ids/2`로 찾은 워크플로우를 활성화할 때 실행된다. **프로세스는 outbox가 빌 때까지
   끝나지 않는다**(종료 상태에서 0 timeout으로 끝나는 규칙과 유휴 종료의 조건에 "남은 항목 없음"을 더한다). 그래서
@@ -225,7 +233,9 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
 - Phase 4도 ADR 0018 결정 1처럼 단일 노드다. 같은 DB에 두 번째 노드가 붙으면 쓰기 주체 규칙(워크플로우마다 프로세스
   하나)이 깨지므로 막는다.
 - `Archon.Runtime.Postgres.NodeLock`은 풀 밖의 전용 Postgrex 연결(`backoff_type: :stop`, 링크)로 `pg_try_advisory_lock`
-  (고정 키)을 잡는다. 못 잡으면 시작에 실패한다(`{:stop, :another_node_holds_the_database}`). DBConnection은 기본으로
+  (고정 키)을 잡는다. 못 잡으면 짧은 시간(설정값, 기본 10초) 동안 다시 시도한 뒤 시작에 실패한다
+  (`{:stop, :another_node_holds_the_database}`). 같은 노드의 NodeLock이 다시 뜰 때 이전 연결의 락이 서버에서 아직 풀리지
+  않았을 수 있기 때문이다. 정상 종료(`terminate`)에서는 `pg_advisory_unlock`을 부르고 연결을 닫는다. DBConnection은 기본으로
   조용히 다시 연결하고 그러면 세션 락이 풀린 채 남으므로, 다시 연결하지 않게 하고 주기(기본 5초)마다 자기 연결이 락을
   쥐고 있는지 `pg_locks`로 확인한다. 연결이 끊기거나 락이 없으면 프로세스가 죽고, `rest_for_one`이라 그 뒤의 런타임
   전체가 다시 뜨며 락을 다시 잡는다. 그 사이 다른 노드가 잡았으면 이 노드는 다시 뜨지 못한다.
@@ -296,10 +306,10 @@ Archon.Runtime.Supervisor (rest_for_one)
 | 4b | 결정 3·5·6의 behaviour: `Commit`의 새 필드, `Store`의 새 콜백과 `{:limit, name}` 오류, 메모리 구현(`Store.Memory`가 검사 뒤 `Queue.Memory`에 큐 연산 적용), 계약 시험 사례 | 계약 시험(메모리) | 없음 | `lib/archon/runtime/{commit,store}.ex`, `lib/archon/runtime/store/memory.ex`, `lib/archon/runtime/queue/memory.ex`, `test/support/runtime/store_contract.ex`, `test/archon/runtime/store_test.exs` |
 | 4c | 결정 2·3의 `Queue.Postgres`·`Metadata.Postgres`(Commit 트랜잭션에서 부를 큐 쓰기 함수 포함) | 큐·메타데이터 계약 시험(Postgres), 동시 pop | 4a | `lib/archon/runtime/queue/postgres.ex`, `lib/archon/runtime/metadata/postgres.ex`, `test/archon/runtime/{queue,metadata}_postgres_test.exs` |
 | 4d | 결정 3·5와 L5의 런타임: `WorkflowServer`가 큐 Effect를 `Commit.queue`로 옮김(시작 실패 정리 포함), `Step`이 `Commit.limits`를 채움, 한도 오류 재실행, `env` 실패 분류, 백엔드 혼합 거절(메모리 백엔드로) | 기존 런타임 시험 전부, 동시 poll 한도 시험, 큐 push 실패가 Commit 실패가 되는 시험, L5 재현 시험 | 4b | `lib/archon/runtime/{workflow_server,supervisor}.ex`, `lib/archon/runtime/step/{tasks,async,state}.ex`, `lib/archon/runtime/sub_workflows.ex`(시작 오류 분류만), `test/archon/runtime/{workflow_server,tasks,sub_workflow}_test.exs` |
-| 4e | 결정 4와 L1·L2·L6: outbox로 옮김, 실행기(하나, 순서, 재시도 지연, 결과 분류, 되먹임), outbox가 빌 때까지 끝나지 않기, `TaskSupervisor`와 조상 취소 이전, 소유 ID 명시 인자, `call`로 바꾼 부모 알림, `Env.outbox_pending?`와 복구 검사, `revivedTime` 찍기와 `revived_after?/2` | 기존 런타임 시험 전부, outbox 크래시 시험(Commit 뒤·ack 전), 실행기 순서·재시도 시험, L1·L2·L6 재현 시험 | 4a, 4d | `lib/archon/runtime/{workflow_server,effects,sub_workflows,supervisor}.ex`, `lib/archon/runtime/step/{effect,env,recover,lifecycle,terminate}.ex`, `test/archon/runtime/{lifecycle,sub_workflow,recovery}_test.exs`, `test/archon/runtime/outbox_test.exs` |
-| 4f | 결정 3·5의 `Store.Postgres`: 여덟 필드를 한 트랜잭션으로, 한도 advisory lock, 일관된 읽기, outbox·due 콜백 | 저장소 계약 시험(Postgres), 실패 Commit의 전체 되돌림, 동시 Commit 한도 | 4a, 4b, 4c | `lib/archon/runtime/store/postgres.ex`, `test/archon/runtime/store_postgres_test.exs` |
+| 4e | 결정 4와 L1·L2·L6: outbox로 옮김, 실행기(하나, 순서, 재시도 지연, 결과 분류, 되먹임), outbox가 빌 때까지 끝나지 않기, `TaskSupervisor`와 조상 취소 이전, 소유 ID 명시 인자, `call`로 바꾼 부모 알림, `Env.outbox_pending?`와 복구 검사, `revivedTime` 찍기와 `revived_after?/2` | 기존 런타임 시험 전부, outbox 크래시 시험(Commit 뒤·ack 전), 실행기 순서·재시도 시험, L1·L2·L6 재현 시험 | 4a, 4d | `lib/archon/runtime/{workflow_server,effects,sub_workflows,supervisor}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/step/{effect,env,recover,lifecycle,terminate}.ex`, `test/archon/runtime/{workflow_server,lifecycle,sub_workflow,recovery}_test.exs`, `test/archon/runtime/outbox_test.exs` |
+| 4f | 결정 3·5의 `Store.Postgres`: 아홉 필드를 한 트랜잭션으로, 한도 advisory lock, 일관된 읽기, outbox·due 콜백 | 저장소 계약 시험(Postgres), 실패 Commit의 전체 되돌림, 동시 Commit 한도 | 4a, 4b, 4c | `lib/archon/runtime/store/postgres.ex`, `test/archon/runtime/store_postgres_test.exs` |
 | 4g | 결정 6: `Commit.wake` 기록, `Recovery` 선택 활성화, `Archon.Runtime.Waker`, 유휴 프로세스 종료(메모리 백엔드로, `evict_after`를 켠 시험) | 지연 활성화 시험(시계 주입), 키셋 페이지, 기존 `recovery_test.exs` | 4e | `lib/archon/runtime/{workflow_server,recovery,waker,supervisor}.ex`, `config/config.exs`, `test/archon/runtime/{recovery,waker}_test.exs` |
-| 4h | 결정 7·9의 통합: `NodeLock`, Postgres 백엔드 트리 연결, `ARCHON_BACKEND=postgres` 런타임 시험과 CI 단계, 내구성 시험, L11 | 런타임 시험 전부를 두 백엔드에서, 두 번째 노드 거절, 락 잃음 감지, Supervisor 재시작 내구성 시험 | 4f, 4g | `lib/archon/runtime/postgres/node_lock.ex`, `lib/archon/runtime/supervisor.ex`, `config/test.exs`, `.github/workflows/ci.yml`, `test/archon/runtime/{durability,node_lock}_test.exs`, 고정 ID를 쓰는 런타임 시험 |
+| 4h | 결정 7·9의 통합: `NodeLock`, Postgres 백엔드 트리 연결, `ARCHON_BACKEND=postgres` 런타임 시험과 CI 단계, 내구성 시험, L11 | 런타임 시험 전부를 두 백엔드에서, 두 번째 노드 거절, 락 잃음 감지, Supervisor 재시작 내구성 시험 | 4f, 4g | `lib/archon/runtime/postgres/node_lock.ex`, `lib/archon/runtime/supervisor.ex`, `config/test.exs`, `test/test_helper.exs`(`public` 스키마 비우기), `.github/workflows/ci.yml`, `test/archon/runtime/{durability,node_lock}_test.exs`, 고정 ID를 쓰는 런타임 시험 |
 
 - **병렬로 진행할 수 있는 묶음.**
   - 4a와 4b: 파일이 겹치지 않는다. 동시에 시작한다.
