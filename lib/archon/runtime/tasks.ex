@@ -102,23 +102,40 @@ defmodule Archon.Runtime.Tasks do
         []
 
       {:error, :not_found} ->
-        Runtime.queue().remove(queue, task_id)
-        []
+        remove(queue, task_id)
 
-      # A failure between the pop and the save: polled again later, as upstream re-enqueues.
       {:error, reason} ->
-        Logger.warning(
-          "poll of task #{task_id} failed, postponing it in #{queue}: #{inspect(reason)}"
-        )
-
-        Runtime.queue().postpone(queue, task_id, 0, postpone_ms())
-        []
+        postpone(queue, task_id, reason)
     end
   end
 
+  # A message without a task; a failed removal is postponed, as upstream's catch does.
+  defp remove(queue, task_id) do
+    case guarded(fn -> Runtime.queue().remove(queue, task_id) end) do
+      {:error, reason} -> postpone(queue, task_id, reason)
+      _removed -> []
+    end
+  end
+
+  # A failure between the pop and the save: polled again later, as upstream re-enqueues.
+  defp postpone(queue, task_id, reason) do
+    Logger.warning(
+      "poll of task #{task_id} failed, postponing it in #{queue}: #{inspect(reason)}"
+    )
+
+    Runtime.queue().postpone(queue, task_id, 0, postpone_ms())
+    []
+  end
+
   defp owner_poll(task_id, worker_id) do
-    with {:ok, _task, workflow_id} <- Runtime.store().get_task(task_id),
-         do: WorkflowServer.poll(workflow_id, task_id, worker_id)
+    guarded(fn ->
+      with {:ok, _task, workflow_id} <- Runtime.store().get_task(task_id),
+           do: WorkflowServer.poll(workflow_id, task_id, worker_id)
+    end)
+  end
+
+  defp guarded(fun) do
+    fun.()
   rescue
     exception -> {:error, exception}
   catch

@@ -104,7 +104,7 @@ defmodule Archon.Runtime.TasksTest do
       assert task(id, "task_a_ref").poll_count == 1
     end
 
-    test "a poll that fails in the workflow's process is postponed with priority 0" do
+    test "a poll that fails in the workflow's process is postponed for 60 s" do
       RuntimeHooks.install(clock: 2_000_000)
       id = start_simple(%{"x" => 1})
       task_id = task(id, "task_a_ref").task_id
@@ -258,6 +258,26 @@ defmodule Archon.Runtime.TasksTest do
 
       assert %Task{status: :completed} = task(task.workflow_instance_id, "task_a_ref")
       assert %Task{status: :scheduled} = task(task.workflow_instance_id, "task_b_ref")
+    end
+
+    test "update_v2 polls the next task in the updated task's domain for the result's worker" do
+      domain = unique("dom")
+      mapping = %{"archon_task_a" => domain}
+
+      ids = [
+        start_simple(%{"x" => 1}, task_to_domain: mapping),
+        start_simple(%{"x" => 2}, task_to_domain: mapping)
+      ]
+
+      {:ok, task} = Tasks.poll("archon_task_a", "w1", domain)
+      [other] = ids -- [task.workflow_instance_id]
+
+      result = %{completed(task.workflow_instance_id, task) | worker_id: "w2"}
+
+      assert {:ok, %Task{workflow_instance_id: ^other, domain: ^domain, worker_id: "w2"}} =
+               Tasks.update_v2(result)
+
+      assert {:ok, %{worker_id: "w2"}} = Store.get_poll_data("archon_task_a", domain)
     end
 
     test "update_v2 of an unknown workflow is not found" do
