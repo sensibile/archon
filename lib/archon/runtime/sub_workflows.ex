@@ -30,8 +30,8 @@ defmodule Archon.Runtime.SubWorkflows do
   (parent → child is a `GenServer.call`), never the parent (child → parent is a cast), so there
   is no call cycle (ADR 0018, decision 1). An exception is caught by the workflow process.
 
-  Until 3e, the starts report that sub-workflows are not available and the termination of a
-  child fails, so a parent with a `SUB_WORKFLOW` task keeps its task `SCHEDULED`.
+  Until 3e, the starts report that sub-workflows are not available (a `SUB_WORKFLOW` task stays
+  `SCHEDULED` with the launch error) and terminating a child succeeds, as no child exists.
   """
 
   alias Archon.Domain.Workflow
@@ -46,9 +46,12 @@ defmodule Archon.Runtime.SubWorkflows do
   @spec start_child(Effect.start()) :: Event.sub_workflow_result()
   def start_child(_start), do: {:error, :transient, @unavailable}
 
-  @doc "Terminates a child because its parent ended (placeholder until slice 3e)."
+  @doc """
+  Terminates a child because its parent ended (placeholder until slice 3e). No child can exist
+  before 3e, and a child that does not exist counts as terminated (ADR 0018, decision 5).
+  """
   @spec terminate_child(String.t(), String.t()) :: :ok | {:error, term()}
-  def terminate_child(_child_id, _reason), do: {:error, @unavailable}
+  def terminate_child(_child_id, _reason), do: :ok
 
   @doc "Tells the parent that its child changed (placeholder until slice 3e)."
   @spec notify_parent(String.t(), String.t() | nil, Workflow.t() | nil) :: :ok

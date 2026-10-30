@@ -64,7 +64,9 @@ defmodule Archon.Runtime.WorkflowServer do
   An exception or exit in the step or an effect is caught: the process keeps the last stored
   workflow, logs, answers `{:error, reason}` and runs `:recover` after
   `workflow_offset_timeout_ms` (ADR 0018, decision 1). A `pre` effect that fails leaves nothing
-  committed.
+  committed. A workflow that the failed step already made terminal is not tried again: the
+  process ends, as a terminal workflow's process does, and what its effects left undone is the
+  Phase 4 recovery's (ADR 0018, 결과).
 
   For tests, the `hook` configuration is called with `(point, workflow_id, data)` at `:step`
   (before the step, with the event), `:effect` (before each effect), `:commit` (before the
@@ -85,14 +87,14 @@ defmodule Archon.Runtime.WorkflowServer do
   @registry Archon.Runtime.Registry
   @supervisor Archon.Runtime.WorkflowSupervisor
 
-  defstruct [:id, :workflow, :timer, journal: %{committed?: false, pushed: []}]
+  defstruct [:id, :workflow, :timer, :journal]
 
   @type t :: %__MODULE__{
           id: String.t(),
           workflow: Workflow.t() | nil,
           timer:
             %{token: reference(), ref: term(), at: integer(), message: :wake | :recover} | nil,
-          journal: %{committed?: boolean(), pushed: [{String.t(), String.t()}]}
+          journal: %{committed?: boolean(), pushed: [{String.t(), String.t()}]} | nil
         }
 
   ## Client
@@ -113,6 +115,9 @@ defmodule Archon.Runtime.WorkflowServer do
       [{pid, _value}] -> if Process.alive?(pid), do: pid
       [] -> nil
     end
+  rescue
+    # The registry is restarting with the rest of the runtime tree.
+    ArgumentError -> nil
   end
 
   @doc """
@@ -123,16 +128,23 @@ defmodule Archon.Runtime.WorkflowServer do
   def activate(id, mode \\ :existing) do
     case whereis(id) do
       nil ->
-        case DynamicSupervisor.start_child(@supervisor, {__MODULE__, {id, mode}}) do
-          {:ok, pid} -> {:ok, pid}
-          {:error, {:already_started, pid}} -> {:ok, pid}
-          :ignore -> {:error, :not_found}
-          {:error, reason} -> {:error, reason}
-        end
+        start_child(id, mode)
 
       pid ->
         {:ok, pid}
     end
+  end
+
+  defp start_child(id, mode) do
+    case DynamicSupervisor.start_child(@supervisor, {__MODULE__, {id, mode}}) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, {:already_started, pid}} -> {:ok, pid}
+      :ignore -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  catch
+    # The workflow supervisor is restarting with the rest of the runtime tree.
+    :exit, _reason -> {:error, :unavailable}
   end
 
   @doc "`{:start, workflow}`: `{:ok, workflow_id}` once the first decide is saved."
@@ -186,10 +198,9 @@ defmodule Archon.Runtime.WorkflowServer do
       try do
         GenServer.call(pid, request, Runtime.setting(:call_timeout, 30_000))
       catch
-        :exit, {reason, _call} when retry? and reason in [:noproc, :normal, :shutdown] ->
-          call(id, mode, request, false)
-
-        :exit, {{:shutdown, _reason}, _call} when retry? ->
+        # A process that ends :normal has answered every call it took; one that is shut down
+        # may have stopped after its commit, so that call is not sent again.
+        :exit, {reason, _call} when retry? and reason in [:noproc, :normal] ->
           call(id, mode, request, false)
 
         :exit, {reason, _call} ->
@@ -224,7 +235,7 @@ defmodule Archon.Runtime.WorkflowServer do
   def handle_continue({:effects, effects}, state) do
     state =
       case run_effects(state, effects, budget()) do
-        {:ok, state, _deferred} -> state
+        {:ok, state, _deferred, _budget} -> state
         {:error, reason, state} -> isolate(state, reason)
       end
 
@@ -241,11 +252,11 @@ defmodule Archon.Runtime.WorkflowServer do
     state = %{state | journal: %{committed?: false, pushed: []}}
 
     case cycle(state, event, true, budget()) do
-      {:ok, reply, state, []} ->
-        reply_and_settle(reply, state)
+      {:ok, reply, state, [], _budget} ->
+        reply_and_settle(reply, %{state | journal: nil})
 
-      {:ok, reply, state, deferred} ->
-        {:reply, reply, state, {:continue, {:effects, deferred}}}
+      {:ok, reply, state, deferred, _budget} ->
+        {:reply, reply, %{state | journal: nil}, {:continue, {:effects, deferred}}}
 
       {:error, reason, %__MODULE__{journal: %{committed?: true}} = state} ->
         Logger.error("workflow #{state.id} failed to start: #{inspect(reason)}")
@@ -254,6 +265,8 @@ defmodule Archon.Runtime.WorkflowServer do
 
       {:error, reason, state} ->
         Logger.error("workflow #{state.id} failed to start: #{inspect(reason)}")
+
+        state = %{state | journal: nil}
 
         if state.workflow,
           do: idle(state, {:error, reply_reason(reason)}),
@@ -265,10 +278,10 @@ defmodule Archon.Runtime.WorkflowServer do
     created? = state.workflow == nil
 
     case cycle(state, event, false, budget()) do
-      {:ok, {:ok, _stored} = reply, state, _deferred} when created? ->
+      {:ok, {:ok, _stored} = reply, state, _deferred, _budget} when created? ->
         {:reply, reply, state, {:continue, :wake}}
 
-      {:ok, reply, state, _deferred} ->
+      {:ok, reply, state, _deferred, _budget} ->
         reply_and_settle(reply, state)
 
       {:error, reason, %__MODULE__{workflow: nil} = state} ->
@@ -326,7 +339,7 @@ defmodule Archon.Runtime.WorkflowServer do
   # One event with exception isolation.
   defp handle_event(event, state) do
     case cycle(state, event, false, budget()) do
-      {:ok, reply, state, _deferred} -> {reply, state}
+      {:ok, reply, state, _deferred, _budget} -> {reply, state}
       {:error, reason, state} -> {{:error, reply_reason(reason)}, isolate(state, reason)}
     end
   end
@@ -341,8 +354,9 @@ defmodule Archon.Runtime.WorkflowServer do
   defp reply_reason(reason), do: reason
 
   # Step, pre effects, commit, post effects, then the events the effects fed back.
-  # `defer?` keeps SUB_WORKFLOW starts for after the answer (a top-level start).
-  defp cycle(_state, _event, _defer?, 0), do: {:error, :decide_iteration_limit}
+  # `defer?` keeps SUB_WORKFLOW starts for after the answer (a top-level start). `budget` is
+  # the step runs this message may still make, shared by every fed-back event; the rest is
+  # returned.
 
   defp cycle(%__MODULE__{} = state, event, defer?, budget) do
     with {:ok, env} <- guard(fn -> env(state.workflow, event) end),
@@ -353,8 +367,8 @@ defmodule Archon.Runtime.WorkflowServer do
            end),
          :ok <- run_pre(state, pre),
          {:ok, state} <- commit(state, commit, stored),
-         {:ok, state, deferred} <- run_post(state, post, defer?, budget - 1) do
-      {:ok, reply, state, deferred}
+         {:ok, state, deferred, budget} <- run_post(state, post, defer?, budget - 1) do
+      {:ok, reply, state, deferred, budget}
     else
       {:error, reason} -> {:error, reason, state}
       {:error, reason, state} -> {:error, reason, state}
@@ -383,7 +397,7 @@ defmodule Archon.Runtime.WorkflowServer do
 
       case result do
         {:ok, :ok} ->
-          state = %{state | workflow: stored, journal: %{state.journal | committed?: true}}
+          state = %{state | workflow: stored, journal: journal_commit(state.journal)}
           hook(state, :committed, stored)
           {:ok, state}
 
@@ -407,8 +421,8 @@ defmodule Archon.Runtime.WorkflowServer do
       Enum.reduce_while(effects, {:ok, state, [], []}, &post_step(&1, &2, defer?))
 
     with {:ok, state, events, deferred} <- result,
-         {:ok, state} <- feed_back(state, Enum.reverse(events), budget) do
-      {:ok, state, Enum.reverse(deferred)}
+         {:ok, state, budget} <- feed_back(state, Enum.reverse(events), budget) do
+      {:ok, state, Enum.reverse(deferred), budget}
     end
   end
 
@@ -427,7 +441,7 @@ defmodule Archon.Runtime.WorkflowServer do
 
   defp run_effects(state, effects, budget), do: run_post(state, effects, false, budget)
 
-  defp feed_back(state, [], _budget), do: {:ok, state}
+  defp feed_back(state, [], budget), do: {:ok, state, budget}
 
   defp feed_back(state, events, budget) when budget <= 0 do
     Logger.warning(
@@ -435,12 +449,12 @@ defmodule Archon.Runtime.WorkflowServer do
         "are left to the recovery check"
     )
 
-    {:ok, set_timer(state, :wake, Runtime.now())}
+    {:ok, set_timer(state, :wake, Runtime.now()), budget}
   end
 
   defp feed_back(state, [event | events], budget) do
     case cycle(state, event, false, budget) do
-      {:ok, _reply, state, _deferred} -> feed_back(state, events, budget - 1)
+      {:ok, _reply, state, _deferred, budget} -> feed_back(state, events, budget)
       {:error, reason, state} -> {:error, reason, state}
     end
   end
@@ -497,18 +511,31 @@ defmodule Archon.Runtime.WorkflowServer do
   end
 
   # The queue messages a start pushed, removed again if the start fails.
-  defp journal_push(state, {:queue_push, queue, id, _priority, _delay}),
-    do: %{state | journal: %{state.journal | pushed: [{queue, id} | state.journal.pushed]}}
+  defp journal_push(%__MODULE__{journal: %{} = journal} = state, {:queue_push, queue, id, _, _}),
+    do: %{state | journal: %{journal | pushed: [{queue, id} | journal.pushed]}}
 
   defp journal_push(state, _effect), do: state
+
+  defp journal_commit(nil), do: nil
+  defp journal_commit(journal), do: %{journal | committed?: true}
 
   # startWorkflow's cleanup (ExecutionDAOFacade#removeWorkflow): the workflow and its tasks,
   # then the queue messages this process pushed.
   defp remove_started(state) do
-    guard(fn -> Runtime.store().remove_workflow(state.id) end)
+    removals =
+      [{:workflow, fn -> Runtime.store().remove_workflow(state.id) end}] ++
+        for {queue, id} <- state.journal.pushed,
+            do: {{:queue, queue, id}, fn -> Runtime.queue().remove(queue, id) end}
 
-    for {queue, id} <- state.journal.pushed,
-        do: guard(fn -> Runtime.queue().remove(queue, id) end)
+    for {what, fun} <- removals do
+      case guard(fun) do
+        {:ok, :ok} ->
+          :ok
+
+        failed ->
+          Logger.error("could not remove #{inspect(what)} of #{state.id}: #{inspect(failed)}")
+      end
+    end
 
     :ok
   end
@@ -577,8 +604,11 @@ defmodule Archon.Runtime.WorkflowServer do
 
   defp stop(state, reason), do: {:stop, :normal, {:error, reason}, state}
 
-  defp noreply(%__MODULE__{workflow: nil} = state), do: {:noreply, state, idle_timeout()}
-  defp noreply(state), do: {:noreply, state}
+  defp noreply(state) do
+    if state.workflow == nil or terminal?(state.workflow),
+      do: {:noreply, state, idle_timeout()},
+      else: {:noreply, state}
+  end
 
   defp idle_timeout, do: Runtime.setting(:idle_timeout, 5_000)
   defp budget, do: Keyword.get(settings(), :max_decide_iterations, 100)
@@ -699,21 +729,24 @@ defmodule Archon.Runtime.WorkflowServer do
         do: {{type, domain}, time}
   end
 
-  # The IN_PROGRESS counts of the task definitions that have a concurrentExecLimit.
+  # The IN_PROGRESS counts of the tasks whose definition has a concurrentExecLimit, keyed as
+  # the step and the store count them (`Task.task_def_name/1`).
   defp in_progress(workflow_tasks, task_defs, tasks) do
-    (Enum.map(workflow_tasks, & &1.task_definition) ++
-       Map.values(task_defs) ++ Enum.map(tasks, &Task.task_definition/1))
-    |> Enum.flat_map(fn
-      %TaskDef{name: name, concurrent_exec_limit: limit}
-      when is_binary(name) and is_integer(limit) and limit > 0 ->
-        [name]
+    names =
+      Enum.flat_map(workflow_tasks, &if(limited?(&1.task_definition), do: [&1.name], else: [])) ++
+        Enum.flat_map(task_defs, fn {name, task_def} ->
+          if limited?(task_def), do: [name], else: []
+        end) ++
+        for(task <- tasks, limited?(Task.task_definition(task)), do: Task.task_def_name(task))
 
-      _none ->
-        []
-    end)
+    names
+    |> Enum.filter(&is_binary/1)
     |> Enum.uniq()
     |> Map.new(&{&1, Runtime.store().in_progress_count(&1)})
   end
+
+  defp limited?(%TaskDef{concurrent_exec_limit: limit}), do: is_integer(limit) and limit > 0
+  defp limited?(_none), do: false
 
   defp queued(env, %Workflow{tasks: tasks}) do
     for task <- tasks,

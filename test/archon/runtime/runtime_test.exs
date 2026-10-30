@@ -105,6 +105,34 @@ defmodule Archon.Runtime.RuntimeTest do
                  "The Task archon_missing defined as a sub-workflow has no workflow definition available "}}
     end
 
+    test "a SUB_WORKFLOW start runs after the answer and its result is saved" do
+      definition = %WorkflowDef{
+        name: "archon_parent",
+        tasks: [
+          %WorkflowTask{
+            name: "sub",
+            task_reference_name: "sub_ref",
+            type: "SUB_WORKFLOW",
+            sub_workflow_param: %Archon.Domain.SubWorkflowParams{name: "archon_simple"}
+          }
+        ]
+      }
+
+      assert {:ok, id} = Runtime.start_workflow(%{definition: definition, input: %{}})
+
+      # the 3c placeholder answers a transient error: the task stays SCHEDULED with it
+      task =
+        eventually(fn ->
+          t = task(id, "sub_ref")
+          Map.has_key?(t.output_data, "subWorkflowLaunchError") and t
+        end)
+
+      assert task.status == :scheduled
+      assert task.input_data["subWorkflowVersion"] == 1
+      assert Runtime.terminate_workflow(id, "stop") == :ok
+      assert task(id, "sub_ref").status == :canceled
+    end
+
     test "an ID that exists is a conflict" do
       id = start_simple(%{"x" => 1})
 
