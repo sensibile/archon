@@ -667,8 +667,12 @@ defmodule Archon.Runtime.StepTest do
                {:terminated, "Parent workflow has been terminated with reason: manual"}
 
       {stored, _post} = start([simple("a")], parent_workflow_id: "gone")
-      {:ok, stored, [], _post} = run(stored, :recover, env(workflows: %{"gone" => nil}))
-      assert stored.status == :terminated
+      {:ok, terminated, [], _post} = run(stored, :recover, env(workflows: %{"gone" => nil}))
+      assert terminated.status == :terminated
+
+      # A :wake that changes nothing runs the same check.
+      {:ok, woken, [], _post} = run(stored, :wake, env(workflows: %{"gone" => nil}))
+      assert woken.status == :terminated
     end
 
     test "a terminal workflow terminates children left running and restarts a lost failure workflow" do

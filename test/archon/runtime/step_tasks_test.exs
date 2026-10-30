@@ -76,7 +76,13 @@ defmodule Archon.Runtime.StepTasksTest do
 
   describe "poll" do
     test "the scheduled task goes to the worker IN_PROGRESS" do
-      task = simple(status: :scheduled, callback_after_seconds: 7, start_time: 0)
+      task =
+        simple(
+          status: :scheduled,
+          callback_after_seconds: 7,
+          callback_after_ms: 7_250,
+          start_time: 0
+        )
 
       {polled, stored, [], commit, post} =
         Step.run(workflow([task]), {:poll, task.task_id, "w1"}, env())
@@ -86,6 +92,7 @@ defmodule Archon.Runtime.StepTasksTest do
                worker_id: "w1",
                poll_count: 1,
                callback_after_seconds: 0,
+               callback_after_ms: 0,
                start_time: @now,
                update_time: @now
              } = polled
@@ -151,8 +158,12 @@ defmodule Archon.Runtime.StepTasksTest do
       {task, stored, [], commit, post} =
         Step.run(workflow([simple([])]), {:update, result}, env())
 
-      assert %Task{status: :scheduled, callback_after_seconds: 300, worker_id: "test-worker-id"} =
-               task
+      assert %Task{
+               status: :scheduled,
+               callback_after_seconds: 300,
+               callback_after_ms: 0,
+               worker_id: "test-worker-id"
+             } = task
 
       assert [%Task{status: :scheduled}] = commit.upsert_tasks
       assert stored.status == :running

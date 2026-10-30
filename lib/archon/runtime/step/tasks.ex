@@ -55,6 +55,8 @@ defmodule Archon.Runtime.Step.Tasks do
               | status: :in_progress,
                 start_time: if(task.start_time == 0, do: now, else: task.start_time),
                 callback_after_seconds: 0,
+                # The retry delay was spent getting the task to the worker.
+                callback_after_ms: 0,
                 worker_id: worker_id,
                 poll_count: task.poll_count + 1
             }
@@ -142,6 +144,7 @@ defmodule Archon.Runtime.Step.Tasks do
         reason_for_incompletion: result.reason_for_incompletion,
         worker_id: result.worker_id,
         callback_after_seconds: result.callback_after_seconds,
+        callback_after_ms: 0,
         output_data: output,
         sub_workflow_id: result.sub_workflow_id
     }

@@ -54,7 +54,11 @@ defmodule Archon.Runtime.Step.Recover do
   def after_wake(%State{changed?: true} = state), do: state
 
   def after_wake(%State{wf: wf} = state) do
-    if Workflow.terminal?(wf.status), do: state, else: state |> unstick() |> repair_queues()
+    cond do
+      Workflow.terminal?(wf.status) -> state
+      reason = orphaned(state) -> Terminate.by_parent(state, reason)
+      true -> state |> unstick() |> repair_queues()
+    end
   end
 
   # The parent ended and canceled this workflow's task, or the parent is gone.
