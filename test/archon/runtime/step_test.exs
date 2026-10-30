@@ -314,7 +314,11 @@ defmodule Archon.Runtime.StepTest do
 
       # A terminal workflow the Decider did not end keeps the output its tasks gave: a worker's
       # `conductor.failure_workflow` there is not a start to recover.
-      for {status, fields} <- [completed: [], terminated: [failed_task_id: nil]] do
+      for {status, fields} <- [
+            completed: [],
+            terminated: [failed_task_id: nil],
+            terminated: [previous_status: :failed]
+          ] do
         forged =
           struct!(
             %{stored | status: status, output: %{"conductor.failure_workflow" => "x"}},

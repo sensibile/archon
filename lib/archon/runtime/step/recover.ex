@@ -142,10 +142,12 @@ defmodule Archon.Runtime.Step.Recover do
   # Only a Decider termination (ADR 0018, decision 8 (a)) writes the failure workflow ID over
   # the output; a completed workflow, a termination request and a parent's cancel keep the
   # output the tasks gave, which a worker controls. A Decider termination is FAILED or TIMED_OUT,
-  # or TERMINATED with the task that caused it.
+  # or TERMINATED with the task that caused it, and comes from a running workflow (a FAILED one
+  # terminated again by request keeps its failed_task_id).
   defp restart_failure_workflow(%State{wf: %Workflow{status: status} = wf} = state)
-       when status in [:failed, :timed_out] or
-              (status == :terminated and wf.failed_task_id != nil),
+       when (status in [:failed, :timed_out] or
+               (status == :terminated and wf.failed_task_id != nil)) and
+              wf.previous_status in [nil, :running, :paused],
        do: restart_failure_workflow(state, wf)
 
   defp restart_failure_workflow(state), do: state

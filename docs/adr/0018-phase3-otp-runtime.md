@@ -437,7 +437,7 @@ upstream의 두 종료 경로를 그대로 나눈다. 둘 다 순서는 "남은 
   만들어 `conductor.failure_workflow` 출력과 함께 같은 Commit에 넣고, Commit 뒤 그 ID로 시작한다. 입력은 upstream과 같다
   (`workflowId`, `reason`, `failureStatus`, `failureTaskId`, `failedWorkflow`). 시작이 실패하면 출력을 upstream 문구
   `Error workflow <이름> failed to start.  reason: <사유>`로 바꿔 다시 Commit한다. 시작 Effect를 실행하기 전에 프로세스가
-  죽으면, 활성화 복구는 출력에 ID가 있는데 그 워크플로우가 저장소에 없으면 다시 시작한다(같은 ID라 멱등이다). (3b 갱신) 다시 시작할 때 입력은 저장된 워크플로우에서 출력의 그 키를 빼고 만든다. `failedWorkflow`의 태스크는 저장된 상태라, 첫 시작이 담은 메모리 상태(저장하지 않은 `executed` 등)와 다를 수 있다. 출력이 실패 문구면 다시 시작하지 않는다. 출력은 태스크(워커)가 채울 수 있으므로, 다시 시작은 Decider 종료로 끝난 워크플로우(`FAILED`·`TIMED_OUT`, 또는 원인 태스크가 있는 `TERMINATED`)에만 한다. 원인 태스크 없이 `TERMINATED`로 끝난 Decider 종료는 다시 시작하지 못하며, 이 빈틈은 결과 절의 Phase 4 복구에 남긴다.
+  죽으면, 활성화 복구는 출력에 ID가 있는데 그 워크플로우가 저장소에 없으면 다시 시작한다(같은 ID라 멱등이다). (3b 갱신) 다시 시작할 때 입력은 저장된 워크플로우에서 출력의 그 키를 빼고 만든다. `failedWorkflow`의 태스크는 저장된 상태라, 첫 시작이 담은 메모리 상태(저장하지 않은 `executed` 등)와 다를 수 있다. 출력이 실패 문구면 다시 시작하지 않는다. 출력은 태스크(워커)가 채울 수 있으므로, 다시 시작은 Decider 종료로 끝난 워크플로우(`FAILED`·`TIMED_OUT`, 또는 원인 태스크가 있는 `TERMINATED`이고 실행 상태에서 바로 끝난 것)에만 한다. `FAILED` 뒤에 종료 요청으로 `TERMINATED`가 된 워크플로우는 `failed_task_id`가 남지만 다시 시작하지 않는다. 원인 태스크 없이 `TERMINATED`로 끝난 Decider 종료는 다시 시작하지 못하며, 이 빈틈은 결과 절의 Phase 4 복구에 남긴다.
 
 **(b) 종료 요청**(`terminate_workflow`, REST `DELETE /api/workflow/{id}`). upstream `terminateWorkflow(String, String)`.
 
