@@ -24,6 +24,8 @@ defmodule Archon.Runtime do
     * `get_workflow/2` - reads the store; no process is involved.
     * `terminate_workflow/2` - upstream `terminateWorkflow(String, String)`.
 
+  Pause, resume, retry and restart are `Archon.Runtime.Lifecycle`.
+
   Every message to a workflow goes through `Archon.Runtime.WorkflowServer`, which starts the
   workflow's process when it is not running (activation).
 

@@ -33,13 +33,16 @@ defmodule Archon.Runtime.Step do
       `{:error, :not_found}`.
     * `{:update, ...}` - the saved task (`nil` for `extendLease`), or `{:error, :not_found}`.
     * `{:terminate, reason}` - `:ok` or `{:error, :conflict}` for a `COMPLETED` workflow.
+    * `:pause`, `:resume`, `{:retry, push_parents?}`, `{:restart, definition}` - `:ok` or
+      `{:error, {kind, message}}` (`Archon.Runtime.Step.Lifecycle`).
     * any other event - `:ok`.
 
   Decide loop, scheduling and termination follow upstream `WorkflowExecutorOps`
   (`Archon.Runtime.Step.Decide`, `Archon.Runtime.Step.Schedule`,
   `Archon.Runtime.Step.Terminate`); asynchronous system tasks are evaluated by the process itself
   (`Archon.Runtime.Step.Async`, `Archon.Runtime.Step.SubWorkflow`); the next `:wake` is
-  `Archon.Runtime.Step.Postpone`; `:recover` is `Archon.Runtime.Step.Recover`.
+  `Archon.Runtime.Step.Postpone`; `:recover` is `Archon.Runtime.Step.Recover`; the lifecycle
+  operations are `Archon.Runtime.Step.Lifecycle`.
   """
 
   alias Archon.Domain.{TaskResult, Workflow}
@@ -51,6 +54,7 @@ defmodule Archon.Runtime.Step do
     Effect,
     Env,
     Event,
+    Lifecycle,
     Postpone,
     Recover,
     State,
@@ -142,6 +146,14 @@ defmodule Archon.Runtime.Step do
   defp handle({:terminate, reason}, state), do: Terminate.by_request(state, reason)
 
   defp handle({:cancel_by_parent, reason}, state), do: {:ok, Terminate.by_parent(state, reason)}
+
+  defp handle(:pause, state), do: Lifecycle.pause(state)
+  defp handle(:resume, state), do: Lifecycle.resume(state)
+  defp handle({:retry, push_parents?}, state), do: Lifecycle.retry(state, push_parents?)
+  defp handle({:restart, definition}, state), do: Lifecycle.restart(state, definition)
+
+  defp handle({:child_revived, task_id}, state),
+    do: {:ok, Lifecycle.child_revived(state, task_id)}
 
   # What AsyncSystemTaskExecutor does after SubWorkflow#start returned.
   defp sub_workflow_started(state, task, result) do
