@@ -13,7 +13,7 @@ archon 세션에서 예약 시각과 머지 방식을 포함한 계획에 "진�
 |---|---|
 | 예약 | 이 Mac의 로컬 Claude 예약 작업. `archon-daily-cleanup` 매일 09:01, `archon-test-gap` 매일 10:01 |
 | 머지 권한 | Codex가 필요하다고 동의한 항목만 [AGENTS.md "PR과 머지"](../AGENTS.md#pr과-머지) 절차로 head 고정 auto-merge |
-| Codex 실행 | 실행 가능 여부는 이 Mac의 Codex CLI 로그인·설정이 정한다. CLI가 없거나 실행을 거부하면 그 리뷰는 NOT_RUN이고 auto-merge하지 않는다([ADR 0020](adr/0020-taeguk-codex-transmission-list-removal.md)). 2026-10-29의 archon diff 전송 상시 허용 기록은 ADR 0011·0013에 남아 있다 |
+| Codex 실행 | 실행 가능 여부는 이 Mac의 Codex CLI 로그인·설정이 정한다. CLI가 없거나 로그인이 풀렸거나 실행을 거부하면 그 리뷰는 NOT_RUN이고 auto-merge하지 않는다([ADR 0020](adr/0020-taeguk-codex-transmission-list-removal.md)). 2026-10-29의 archon diff 전송 상시 허용 기록은 ADR 0011·0013에 남아 있다 |
 | 범위 | archon 저장소만. 다른 저장소와 시험 프로젝트는 건드리지 않는다 |
 
 ## 데일리 정리

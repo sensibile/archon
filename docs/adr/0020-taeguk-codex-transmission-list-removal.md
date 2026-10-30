@@ -3,7 +3,7 @@
 - 상태: 제안
 - 날짜: 2026-10-30
 - 태극 원본: sensibile/taeguk `81817cf899e22bc193205f6a3de3863ea52f3b70`(sensibile/taeguk#39 머지 커밋)
-- 대체: [ADR 0011](0011-local-review-auto-merge.md) 결정 3의 "전송 권한 근거는 태극 저장소의 승인 기록과 태극
+- 대체: [ADR 0011](0011-local-review-auto-merge.md) 결정 3의 "전송 권한 근거는 태극 저장소의 승인 기록(Approval-2026-10-29)과 태극
   `docs/architecture.md`의 로컬 Codex 검토 절이다", [ADR 0013](0013-taeguk-daily-workers.md) 결정 2의 "Codex 전송"
   항목과 결과의 "그 프로젝트들에 적용하려면 Codex 전송 허용을 넓힌다는 BOSS 확인이 먼저 필요하다".
   두 ADR의 나머지 결정은 그대로 유효하다.
@@ -36,7 +36,7 @@ archon에 설치된 번들은 `b7b4b58`(ADR 0019)다.
    - `--apply` 뒤 `--check`: rules·codex·claude 모두 `verified`(14·63·47), 설치 버전은 세 구성요소 모두 `81817cf`.
    - 내용이 바뀐 파일: `taeguk-codex-local-review`·`taeguk-daily-cleanup`·`taeguk-test-gap` 스킬(`.claude/skills/`,
      `.agents/skills/`), 교차·보안 리뷰 역할(`.claude/agents/`, `.codex/agents/`). `.taeguk/rules/`의 4개 파일은
-     태극 원본 링크의 고정 SHA만 바뀌었다.
+     태극 원본 링크의 고정 SHA만 바뀌었고, `.taeguk/receipts/`의 3개 영수증은 설치 버전과 해시가 갱신됐다.
    - 설치본은 직접 고치지 않는다(ADR 0007 결정 3).
 2. **archon에서 Codex 실행 가능 여부는 이 Mac의 Codex CLI 로그인·설정이 정한다.** archon 문서는 더 이상 Codex 전송
    허용을 리뷰나 워커의 적용 조건으로 쓰지 않는다. CLI가 없거나 로그인이 풀렸거나 실행을 거부하면 그 리뷰는 NOT_RUN이고,
