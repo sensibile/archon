@@ -1,6 +1,6 @@
 # ADR 0019: 태극 번들 갱신과 Codex 리뷰 목적 맥락 적용
 
-- 상태: 제안
+- 상태: 승인
 - 날짜: 2026-10-30
 - 태극 원본: sensibile/taeguk `b7b4b581c27a70be13f521cb6f30fb2fc29e64bf`(sensibile/taeguk#38 머지 커밋)
 - 보완: [ADR 0011](0011-local-review-auto-merge.md) 결정 4의 auto-merge 금지 조건에 "BOSS가 답하지 않은 목적 이의"를

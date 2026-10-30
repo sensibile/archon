@@ -5,6 +5,9 @@
 - 태극 원본: sensibile/taeguk `c6b42fb1ced01249d24a8134c5fc0510dd5c3489`
 - 대체: [ADR 0012](0012-taeguk-pilot-and-bundle-update.md) 결정 3("데일리 정리는 archon에 적용하지 않는다").
   ADR 0012의 나머지 결정은 그대로 유효하다.
+- 비고(2026-10-30): 결정 2의 "Codex 전송" 항목과 결과의 "Codex 전송 허용을 넓힌다는 BOSS 확인" 조건은
+  [ADR 0020](0020-taeguk-codex-transmission-list-removal.md)이 대체한다. 태극 #39 뒤 워커의 적용 조건은 예약 시각과
+  머지 권한이고, Codex 실행 가능 여부는 Codex CLI 설정이 정한다. 맥락의 상시 허용 기록은 사실 기록으로 남긴다.
 
 ## 맥락
 
