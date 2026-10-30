@@ -184,7 +184,7 @@ defmodule Archon.Runtime.StepScheduleTest do
       assert Enum.all?(tl(state.stored.tasks), &(&1.first_scheduled_time == @now))
       assert [{:queue_push, "SIMPLE", "http", 0, 5_000}] = state.post
 
-      assert %Task{start_time: @now, update_time: @now} =
+      assert %Task{start_time: @now, update_time: @now, scheduled_time: @now} =
                Enum.find(state.stored.tasks, &(&1.task_id == "switch"))
 
       assert %Task{start_time: @now, update_time: 0} =

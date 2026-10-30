@@ -198,12 +198,14 @@ defmodule Archon.Runtime.Step.SubWorkflow do
 
   @doc """
   Upstream `updateParentWorkflowTask` and `SubWorkflow#execute` for a child that changed: the
-  task, if it is still one of the workflow's tasks (the generation fence), takes the child's
-  status, output and reason once the child is terminal. `nil` when nothing changes.
+  task, if it is still one of the workflow's tasks (the generation fence) and the child is the
+  one it is attached to now (upstream reads the child by the task's `subWorkflowId`), takes
+  the child's status, output and reason once the child is terminal. `nil` when nothing changes.
   """
   @spec child_changed(State.t(), String.t(), Workflow.t()) :: Task.t() | nil
-  def child_changed(state, task_id, %Workflow{} = child) do
+  def child_changed(state, task_id, %Workflow{workflow_id: child_id} = child) do
     with %Task{task_type: "SUB_WORKFLOW"} = task <- State.task(state, task_id),
+         ^child_id <- Task.sub_workflow_id(task),
          {true, task} <- SubWorkflowTask.execute(task, child) do
       task
     else

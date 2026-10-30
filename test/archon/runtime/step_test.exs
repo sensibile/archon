@@ -484,6 +484,10 @@ defmodule Archon.Runtime.StepTest do
 
       assert output["subWorkflowId"] == child_id
 
+      # A child the task is no longer attached to (a replaced one) changes nothing.
+      stale = %Workflow{workflow_id: "stale", status: :failed}
+      {:ok, ^stored, [], _post} = run(stored, {:child_changed, task_id, stale})
+
       done = %{child | status: :completed, output: %{"r" => 1}}
       {:ok, stored, [], []} = run(stored, {:child_changed, task_id, done})
       assert %Task{status: :completed, output_data: %{"r" => 1}} = task(stored, "sub")

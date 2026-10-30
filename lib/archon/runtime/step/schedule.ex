@@ -164,7 +164,7 @@ defmodule Archon.Runtime.Step.Schedule do
       cond do
         sync_system_task?(env, task) ->
           # The synchronous system tasks have no `start` of their own.
-          {State.save_task(state, task), true}
+          {State.save_current(state, task.task_id), true}
 
         system_task?(env, task) ->
           {if(delay_ms(task) == 0, do: State.due(state, [task.task_id]), else: state), started?}
