@@ -43,6 +43,11 @@ defmodule Archon.Runtime.Effects do
   def run({:notify_parent, parent_id, parent_task_id, child}),
     do: SubWorkflows.notify_parent(parent_id, parent_task_id, child)
 
+  def run({:revive_parent, parent_id, parent_task_id}),
+    do: SubWorkflows.revive_parent(parent_id, parent_task_id)
+
+  def run({:retry_sub_workflow, child_id}), do: SubWorkflows.retry_child(child_id)
+
   def run({:start_failure_workflow, start}),
     do: start |> SubWorkflows.start_failure_workflow() |> failure_workflow_started()
 

@@ -28,10 +28,13 @@ defmodule Archon.Runtime.Step.Recover do
   For a terminal workflow nothing is decided: a failure workflow that the output names but the
   store does not have is started again, and the children of `CANCELED` `SUB_WORKFLOW` tasks that
   are still running are terminated.
+
+  A child retried or restarted after its parent ended is neither terminated by the parent nor
+  terminates itself: the parent revives when it hears of it (ADR 0018, decision 9).
   """
 
   alias Archon.Domain.{Task, Workflow}
-  alias Archon.Runtime.Step.{Async, Decide, Schedule, State, Terminate}
+  alias Archon.Runtime.Step.{Async, Decide, Lifecycle, Schedule, State, Terminate}
 
   @doc "The recovery check of a `:recover` event."
   @spec recover(State.t()) :: State.t()
@@ -74,6 +77,7 @@ defmodule Archon.Runtime.Step.Recover do
 
       {:ok, %Workflow{} = parent} ->
         with true <- Workflow.terminal?(parent.status),
+             false <- Lifecycle.revived_after?(wf, parent),
              %Task{status: :canceled} = task <-
                Enum.find(parent.tasks, &(&1.task_id == wf.parent_workflow_task_id)) do
           {:terminate_sub_workflow, _id, reason} = Terminate.cancel_child(parent, task)
@@ -136,6 +140,7 @@ defmodule Archon.Runtime.Step.Recover do
           {:terminate_sub_workflow, id, _reason} = effect = Terminate.cancel_child(wf, task),
           match?({:ok, %Workflow{}}, Map.fetch(env.workflows, id)),
           not Workflow.terminal?(env.workflows[id].status),
+          not Lifecycle.revived_after?(env.workflows[id], wf),
           reduce: state do
         state -> State.post(state, effect)
       end

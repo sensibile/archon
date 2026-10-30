@@ -23,9 +23,16 @@ defmodule Archon.Runtime.Step.Event do
     * `{:failure_workflow_started, {:error, message}}` - the failure workflow did not start.
     * `{:terminate, reason}` - a termination request (`DELETE /api/workflow/{id}`).
     * `{:cancel_by_parent, reason}` - the parent workflow ended.
+    * `:pause`, `:resume` - upstream `pauseWorkflow`, `resumeWorkflow`.
+    * `{:retry, push_parents?}` - upstream `retry`; without `push_parents?` the parent is not
+      asked to revive (a parent retrying its failed child, `updateAndPushParents`).
+    * `{:restart, definition}` - upstream `restart`, with the stored definition (`nil`) or the
+      latest one.
+    * `{:child_revived, task_id}` - the child of the `SUB_WORKFLOW` task runs again (one level of
+      upstream `updateAndPushParents`).
   """
 
-  alias Archon.Domain.{TaskResult, Workflow}
+  alias Archon.Domain.{TaskResult, Workflow, WorkflowDef}
 
   @type sub_workflow_result ::
           {:ok, Workflow.t()} | {:error, :transient, String.t()} | {:error, String.t()}
@@ -42,4 +49,9 @@ defmodule Archon.Runtime.Step.Event do
           | {:failure_workflow_started, {:error, String.t()}}
           | {:terminate, String.t() | nil}
           | {:cancel_by_parent, String.t()}
+          | :pause
+          | :resume
+          | {:retry, boolean()}
+          | {:restart, WorkflowDef.t() | nil}
+          | {:child_revived, String.t()}
 end

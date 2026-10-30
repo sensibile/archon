@@ -31,12 +31,15 @@ defmodule Archon.Runtime.WorkflowServer do
   worker task types and the domains of `taskToDomain`, `in_progress` for every task definition
   with a `concurrentExecLimit`, and for `:wake` and `:recover` also `queued` (the `SCHEDULED`
   worker tasks that have a queue message) and `workflows` (the parent, the children of
-  `IN_PROGRESS` and `CANCELED` `SUB_WORKFLOW` tasks and the failure workflow).
+  `IN_PROGRESS` and `CANCELED` `SUB_WORKFLOW` tasks and the failure workflow). For
+  `{:child_revived, task_id}`, `workflows` holds the children of the `SUB_WORKFLOW` tasks that
+  ended unsuccessfully and of the task that revives.
 
   ## Client functions
 
-  `start/1`, `start_idempotent/1`, `poll/3`, `update/1`, `terminate_workflow/2` and `cancel_by_parent/2`
-  call the workflow's process and `child_changed/3` casts to it, starting the process first when
+  `start/1`, `start_idempotent/1`, `poll/3`, `update/1`, `terminate_workflow/2`,
+  `cancel_by_parent/2` and the lifecycle operations (`pause/1`, `resume/1`, `retry/2`,
+  `restart/2`) call the workflow's process and `child_changed/3`, `child_revived/2` cast to it, starting the process first when
   it is not running (activation, `activate/2`). A call that meets a process just ending is tried
   once more. The call timeout is `config :archon, Archon.Runtime, call_timeout:` (30 s).
 
@@ -50,13 +53,14 @@ defmodule Archon.Runtime.WorkflowServer do
       process ends. `{:start_idempotent, workflow}` answers once the workflow is created and
       decides after the answer (a `:wake`).
     * After a request, a timer or a `:recover`, the process ends normally when the workflow is
-      terminal. Activated with a terminal workflow, it waits `idle_timeout` for the request
+      terminal and no other message is waiting. Activated with a terminal workflow, it waits `idle_timeout` for the request
       that activated it. A running workflow's process hibernates after `hibernate_after`.
 
   ## Timer
 
   One `:wake` timer, set by `{:wake_at, ms}` and pulled earlier by `{:wake_before, ms}`
-  (ADR 0018, decision 6), through the configured `timer` function. Sending `:wake` or
+  (ADR 0018, decision 6), through the configured `timer` function, and cancelled by
+  `:cancel_wake` when the workflow is paused (decision 9). Sending `:wake` or
   `:recover` to the process runs that event at once.
 
   ## Exception isolation
@@ -82,7 +86,7 @@ defmodule Archon.Runtime.WorkflowServer do
   alias Archon.Runtime
   alias Archon.Runtime.{Commit, Effects}
   alias Archon.Runtime.Step
-  alias Archon.Runtime.Step.{Env, Schedule, Terminate}
+  alias Archon.Runtime.Step.{Env, Lifecycle, Schedule, Terminate}
 
   @registry Archon.Runtime.Registry
   @supervisor Archon.Runtime.WorkflowSupervisor
@@ -184,6 +188,33 @@ defmodule Archon.Runtime.WorkflowServer do
   """
   @spec cancel_by_parent(String.t(), String.t()) :: :ok | {:error, term()}
   def cancel_by_parent(id, reason), do: call(id, :existing, {:cancel_by_parent, reason})
+
+  @doc "`:pause`: `:ok` or `{:error, {:conflict, message}}` (`Archon.Runtime.Step.Lifecycle`)."
+  @spec pause(String.t()) :: :ok | {:error, term()}
+  def pause(id), do: call(id, :existing, :pause)
+
+  @doc "`:resume`: `:ok` or `{:error, {:invalid_state, message}}`."
+  @spec resume(String.t()) :: :ok | {:error, term()}
+  def resume(id), do: call(id, :existing, :resume)
+
+  @doc """
+  `{:retry, push_parents?}`: `:ok` or `{:error, {kind, message}}`. Without `push_parents?` the
+  parent is not asked to revive.
+  """
+  @spec retry(String.t(), boolean()) :: :ok | {:error, term()}
+  def retry(id, push_parents?), do: call(id, :existing, {:retry, push_parents?})
+
+  @doc "`{:restart, definition}`: `:ok` or `{:error, {kind, message}}`."
+  @spec restart(String.t(), WorkflowDef.t() | nil) :: :ok | {:error, term()}
+  def restart(id, definition), do: call(id, :existing, {:restart, definition})
+
+  @doc "Casts `{:child_revived, task_id}` to the parent."
+  @spec child_revived(String.t(), String.t()) :: :ok | {:error, term()}
+  def child_revived(parent_id, task_id) do
+    with {:ok, pid} <- activate(parent_id) do
+      GenServer.cast(pid, {:child_revived, task_id})
+    end
+  end
 
   @doc "Casts `{:child_changed, task_id, child}` to the parent."
   @spec child_changed(String.t(), String.t(), Workflow.t()) :: :ok | {:error, term()}
@@ -305,6 +336,11 @@ defmodule Archon.Runtime.WorkflowServer do
     do: {:noreply, state, idle_timeout()}
 
   def handle_cast({:child_changed, _task_id, %Workflow{}} = event, state) do
+    {_reply, state} = handle_event(event, state)
+    settle(state)
+  end
+
+  def handle_cast({:child_revived, _task_id} = event, state) do
     {_reply, state} = handle_event(event, state)
     settle(state)
   end
@@ -469,6 +505,19 @@ defmodule Archon.Runtime.WorkflowServer do
     end)
   end
 
+  # A paused workflow is not woken (ADR 0018, decision 9); a :recover after an isolated
+  # exception still runs.
+  defp post_effect(state, :cancel_wake = effect) do
+    timer_effect(state, effect, fn
+      %__MODULE__{timer: %{message: :wake} = timer} = state ->
+        cancel_timer(timer)
+        %{state | timer: nil}
+
+      state ->
+        state
+    end)
+  end
+
   defp post_effect(state, effect) do
     case run_effect(state, effect) do
       :ok ->
@@ -587,15 +636,17 @@ defmodule Archon.Runtime.WorkflowServer do
   defp terminal?(nil), do: false
   defp terminal?(%Workflow{status: status}), do: Workflow.terminal?(status)
 
+  # A process whose workflow ended stops once its mailbox is empty (a zero timeout fires only
+  # then), so a message already waiting, such as a child asking it to revive, is still handled.
   defp reply_and_settle(reply, state) do
     if state.workflow == nil or terminal?(state.workflow),
-      do: {:stop, :normal, reply, state},
+      do: {:reply, reply, state, 0},
       else: {:reply, reply, state}
   end
 
   defp settle(state) do
     if state.workflow == nil or terminal?(state.workflow),
-      do: {:stop, :normal, state},
+      do: {:noreply, state, 0},
       else: noreply(state)
   end
 
@@ -659,9 +710,16 @@ defmodule Archon.Runtime.WorkflowServer do
         in_progress: in_progress(workflow_tasks, task_defs, wf.tasks)
     }
 
-    if event in [:wake, :recover],
-      do: %{env | queued: queued(env, wf), workflows: workflows(wf)},
-      else: env
+    case event do
+      event when event in [:wake, :recover] ->
+        %{env | queued: queued(env, wf), workflows: workflows(wf)}
+
+      {:child_revived, task_id} ->
+        %{env | workflows: failed_children(wf, task_id)}
+
+      _other ->
+        env
+    end
   end
 
   defp workflow_tasks(%WorkflowDef{} = definition), do: WorkflowDef.collect_tasks(definition)
@@ -778,7 +836,23 @@ defmodule Archon.Runtime.WorkflowServer do
         _none -> []
       end
 
-    ([wf.parent_workflow_id | children] ++ failure)
+    read_workflows([wf.parent_workflow_id | children] ++ failure)
+  end
+
+  # The children of the SUB_WORKFLOW tasks that ended unsuccessfully, which a reviving workflow
+  # follows or retries (updateAndPushParents), and the child of the task that revives.
+  defp failed_children(%Workflow{tasks: tasks}, task_id) do
+    tasks
+    |> Enum.filter(
+      &(&1.task_type == "SUB_WORKFLOW" and
+          (&1.task_id == task_id or Lifecycle.unsuccessful_terminal_task?(&1)))
+    )
+    |> Enum.map(&Task.sub_workflow_id/1)
+    |> read_workflows()
+  end
+
+  defp read_workflows(ids) do
+    ids
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.uniq()
     |> Map.new(fn id ->

@@ -15,7 +15,8 @@ defmodule Archon.Runtime.Step.Decide do
   Upstream `WorkflowExecutorOps#decide(WorkflowModel)`: runs `Archon.Decider.decide/2` and
   applies its outcome until nothing changes (ADR 0018, decision 4).
 
-  Each iteration adds the new tasks (domains, deduplication, `scheduleTask`), executes the
+  A decide first runs `Archon.Runtime.Step.Lifecycle.adjust/1`
+  (`adjustStateIfSubWorkflowChanged`). Each iteration adds the new tasks (domains, deduplication, `scheduleTask`), executes the
   synchronous system tasks among the tasks to schedule (a `DO_WHILE` also schedules its next
   iteration and deletes the iterations `keepLastN` drops), and saves the tasks to update. It
   iterates again while a synchronous system task started or changed. A complete outcome ends
@@ -30,7 +31,7 @@ defmodule Archon.Runtime.Step.Decide do
   alias Archon.Decider.{Outcome, Parameters, SystemTask, Termination}
   alias Archon.Decider.SystemTask.DoWhile
   alias Archon.Domain.{Task, Workflow}
-  alias Archon.Runtime.Step.{Async, Env, Schedule, State, Terminate}
+  alias Archon.Runtime.Step.{Async, Env, Lifecycle, Schedule, State, Terminate}
 
   @doc """
   Decides the workflow, then evaluates the asynchronous system tasks that calls for, and decides
@@ -58,7 +59,7 @@ defmodule Archon.Runtime.Step.Decide do
     cond do
       Workflow.successful?(status) and Workflow.terminal?(status) -> state
       Workflow.terminal?(status) -> Terminate.cancel_non_terminal(state, :post)
-      true -> loop(%{state | decided?: true})
+      true -> loop(%{Lifecycle.adjust(state) | decided?: true})
     end
   end
 

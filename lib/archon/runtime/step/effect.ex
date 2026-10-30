@@ -20,6 +20,12 @@ defmodule Archon.Runtime.Step.Effect do
       `{:child_changed, parent_task_id, workflow}` to the parent. `workflow` is the stored child.
     * `{:start_failure_workflow, start}` - starts the failure workflow. A failure goes back as
       `{:failure_workflow_started, {:error, reason}}`.
+    * `{:revive_parent, parent_workflow_id, parent_task_id}` - casts
+      `{:child_revived, parent_task_id}` to the parent (upstream `updateAndPushParents`).
+    * `{:retry_sub_workflow, workflow_id}` - sends `{:retry, false}` to a child that failed, from
+      a parent that revives. A failure is only logged: the parent's re-evaluation reads the
+      child.
+    * `:cancel_wake` - cancels the `:wake` timer (a paused workflow).
     * `{:wake_at, ms}` - sets the `:wake` timer to the epoch time `ms`, replacing the current
       one. `ms` equal to `now` asks for the next `:wake` at once.
     * `{:wake_before, ms}` - moves the `:wake` timer to `ms` only when it is set later than that
@@ -56,6 +62,9 @@ defmodule Archon.Runtime.Step.Effect do
           | {:terminate_sub_workflow, String.t(), String.t()}
           | {:notify_parent, String.t(), String.t() | nil, Workflow.t() | nil}
           | {:start_failure_workflow, start()}
+          | {:revive_parent, String.t(), String.t() | nil}
+          | {:retry_sub_workflow, String.t()}
+          | :cancel_wake
           | {:wake_at, integer()}
           | {:wake_before, integer()}
 end
