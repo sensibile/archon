@@ -36,4 +36,4 @@ Archon의 합의된 기술·운영 결정을 누적합니다. 파일 이름은 `
 | [0017](0017-taeguk-dev003-worktree.md) | 태극 번들 갱신과 작업 전용 워크트리 규칙(DEV-003) 적용 | 승인 |
 | [0018](0018-phase3-otp-runtime.md) | Phase 3 OTP 런타임 설계 | 제안 |
 | [0019](0019-taeguk-codex-purpose-context.md) | 태극 번들 갱신과 Codex 리뷰 목적 맥락 적용 | 승인 |
-| [0020](0020-taeguk-codex-transmission-list-removal.md) | 태극 번들 갱신과 Codex 전송 저장소 허용 목록 제거 | 제안 |
+| [0020](0020-taeguk-codex-transmission-list-removal.md) | 태극 번들 갱신과 Codex 전송 저장소 허용 목록 제거 | 승인 |

@@ -1,6 +1,6 @@
 # ADR 0020: 태극 번들 갱신과 Codex 전송 저장소 허용 목록 제거
 
-- 상태: 제안
+- 상태: 승인
 - 날짜: 2026-10-30
 - 태극 원본: sensibile/taeguk `81817cf899e22bc193205f6a3de3863ea52f3b70`(sensibile/taeguk#39 머지 커밋)
 - 대체: [ADR 0011](0011-local-review-auto-merge.md) 결정 3의 "전송 권한 근거는 태극 저장소의 승인 기록(Approval-2026-10-29)과 태극
