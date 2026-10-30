@@ -146,10 +146,13 @@ defmodule Archon.Runtime.Step.Terminate do
   @doc """
   The start of the failure workflow the definition names, with the given ID, or `:none`. Its
   input is the workflow's with `workflowId`, `reason`, `failureStatus`, `failureTaskId` and
-  `failedWorkflow` (the workflow as JSON).
+  `failedWorkflow` (the workflow as JSON). For a stored workflow that already names the failure
+  workflow in its output (the recovery of a start that did not run), the input is built as the
+  first start built it: before that output key was added.
   """
   @spec failure_start(Workflow.t(), String.t()) :: {:ok, Effect.start()} | :none
   def failure_start(%Workflow{workflow_definition: definition} = wf, id) do
+    wf = %{wf | output: Map.delete(wf.output, "conductor.failure_workflow")}
     name = failure_workflow(definition.failure_workflow, wf)
     failure_start(wf, id, name, definition.failure_workflow_version, wf.update_time)
   end

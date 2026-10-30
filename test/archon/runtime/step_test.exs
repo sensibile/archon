@@ -302,6 +302,10 @@ defmodule Archon.Runtime.StepTest do
                "failedWorkflow" => %{"workflowId" => "wf"}
              } = start.input
 
+      # A start lost before it ran is started again by the recovery with the same input.
+      {:ok, ^stored, [], [{:start_failure_workflow, ^start}]} =
+        run(stored, :recover, env(workflows: %{"id-1" => nil}))
+
       {:ok, stored, [], []} =
         run(stored, {:failure_workflow_started, {:error, "no such workflow"}})
 
