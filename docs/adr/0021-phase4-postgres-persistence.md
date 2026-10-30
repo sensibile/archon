@@ -256,13 +256,18 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
   쥐고 있는지 `pg_locks`로 확인한다. 연결이 끊기거나 락이 없으면 프로세스가 죽고, `rest_for_one`이라 그 뒤의 런타임
   전체가 다시 뜨며 락을 다시 잡는다. 그 사이 다른 노드가 잡았으면 이 노드는 다시 뜨지 못한다.
 - **쓰기 펜싱.** 락 확인 주기 사이에 이 노드가 락을 잃고 다른 노드가 잡으면 두 노드가 쓸 수 있으므로, 락과 함께 fencing
-  token을 둔다. 표 `node_lease`(행 하나, `epoch bigint`)를 두고, NodeLock은 락을 잡은 직후 `UPDATE node_lease SET epoch = epoch + 1
-  RETURNING epoch`로 자기 epoch를 받는다. Postgres 구현의 모든 쓰기 트랜잭션(`Store.commit/2`, `remove_workflow/1`,
+  token을 둔다. 표 `node_lease`(행 하나, 마이그레이션이 두 스키마에 `(1, 0)`으로 넣는다)를 두고, NodeLock은 락을 잡은 직후
+  한 트랜잭션에서 `pg_advisory_xact_lock(펜스 키)`(배타)를 잡고 `UPDATE node_lease SET epoch = epoch + 1 RETURNING epoch`로
+  자기 epoch를 받는다. Postgres 구현의 모든 쓰기 트랜잭션(`Store.commit/2`, `remove_workflow/1`,
   `ack_outbox/2`, 큐의 push·pop·ack·remove·postpone, poll 데이터·메타데이터 쓰기)은 첫 문장에서
-  `SELECT epoch FROM node_lease WHERE id = 1 FOR SHARE`를 읽어 자기 epoch와 다르면 `{:error, :fenced}`로 되돌린다. `FOR SHARE`
-  행 잠금은 새 노드의 `UPDATE`와 충돌하므로, 새 노드가 epoch를 올린 뒤에는 이전 노드의 어떤 쓰기도 커밋되지 않는다.
-  `:fenced`는 예외 격리로 가고, NodeLock의 다음 확인이 런타임을 내린다. epoch는 NodeLock이 `:persistent_term`에 두고, 그것이
-  없는 인스턴스(계약 시험)는 검사를 건너뛴다.
+  `pg_advisory_xact_lock_shared(펜스 키)`(공유)를 잡고 `SELECT epoch FROM node_lease WHERE id = 1`을 읽어 자기 epoch와 다르면
+  `{:error, :fenced}`로 되돌린다. 배타 잠금은 진행 중인 공유 잠금이 끝나기를 기다리고, 그 뒤 시작한 이전 노드의 트랜잭션은
+  공유 잠금을 얻은 다음 올라간 epoch를 읽으므로, 새 노드가 epoch를 올린 뒤에는 이전 노드의 어떤 쓰기도 커밋되지 않는다.
+  행 잠금(`FOR SHARE`) 대신 advisory 잠금을 쓰는 이유는 쓰기마다 한 행에 잠금 기록(MultiXact)을 남기지 않기 위해서다.
+  긴 poll은 100ms마다의 pop 시도를 각각 펜싱된 트랜잭션 하나로 하고, 5초 동안 트랜잭션을 잡고 있지 않는다.
+  `:fenced`는 예외 격리로 가고, NodeLock의 다음 확인이 런타임을 내린다. 펜싱은 인스턴스 필드(`%Archon.Runtime.Postgres{fence:
+  :runtime | nil}`)로 켠다. 런타임 인스턴스(`fence: :runtime`)만 NodeLock이 `:persistent_term`에 둔 epoch로 검사하고, 계약 시험
+  인스턴스(`fence: nil`)는 런타임이 함께 돌아도 검사하지 않는다.
 - 여러 노드의 소유권(워크플로우별 advisory lock·lease, 분산 레지스트리, 노드 간 라우팅)은 Phase 5 뒤 별도 ADR에서 정한다.
 
 ### 8. 프로세스 트리
@@ -309,7 +314,7 @@ Archon.Runtime.Supervisor (rest_for_one)
 | 번호 | 처리 | 근거 |
 |---|---|---|
 | L1 | 해결: 결정 4(`:revive_parent`를 outbox + `call`, 살아 있는 프로세스의 재시도) | 부모가 처리한 뒤에만 항목을 지운다 |
-| L2 | 해결: `Workflow`에 내부 필드 `revivedParentEndTime`(`wire: false`)을 더한다. 종료 상태의 자식이 재시도·재시작으로 다시 실행될 때, 그 처리에서 저장소로 읽은 부모의 `endTime`(부모가 끝나지 않았거나 없으면 0)을 저장한다. 일시정지·재개는 바꾸지 않는다. `Step.Lifecycle.revived_after?/2`는 `previous_status`와 시각 비교 대신 "이 값이 0이 아니고 지금 부모의 `endTime`과 같다"로 판정한다. 자식이 부모의 종료를 읽은 뒤에 다시 실행되었다는 인과 관계를 저장하므로 같은 밀리초에도 순서가 갈린다. 부모가 그 뒤 재개되어 다시 끝나면 `endTime`이 달라져 일반 규칙으로 돌아간다 | 시각이 아니라 관찰한 상태로 순서를 정한다 |
+| L2 | 해결: `Workflow`에 내부 필드 `revivedParentEndTime`(`wire: false`)을 더한다. 종료 상태의 자식이 재시도·재시작으로 다시 실행될 때, 그 처리에서 저장소로 읽은 부모의 `endTime`(부모가 끝나지 않았거나 없으면 0)을 저장한다. 일시정지·재개는 바꾸지 않는다. 이를 위해 `WorkflowServer.env/2`는 `{:retry, _}`·`{:restart, _}`에서도 부모를 `Env.workflows`에 읽는다(조각 4e). `Step.Lifecycle.revived_after?/2`는 `previous_status`와 시각 비교 대신 "이 값이 0이 아니고 지금 부모의 `endTime`과 같다"로 판정한다. 자식이 부모의 종료를 읽은 뒤에 다시 실행되었다는 인과 관계를 저장하므로 같은 밀리초에도 순서가 갈린다. 부모가 그 뒤 재개되어 다시 끝나면 `endTime`이 달라져 일반 규칙으로 돌아간다. 부모가 같은 밀리초 안에 끝나고 재개되어 다시 끝나는 경우만 구별하지 못하며, 이는 수용한다 | 시각이 아니라 관찰한 상태로 순서를 정한다 |
 | L3 | 수용 | 결과 상태에 차이가 없는 오류 경로다. Phase 5 REST가 오류 코드를 맞출 때 upstream 문구와 함께 다시 본다 |
 | L4 | 수용 | 결과 상태가 같고 반영이 더 이르다(ADR 0018 "하위 워크플로우 완료 알림" 차이와 같은 성질) |
 | L5 | 해결: `WorkflowServer`가 `env/2` 실패를 `{:env, reason}`으로 감싸 예외 격리로 보내고, 하위 워크플로우 시작은 이 오류를 일시적 오류로 분류해 태스크를 `SCHEDULED`로 둔다. 저장소 구현은 DB 장애에서 raise해도 된다 | DB 장애는 일시적이다 |
@@ -324,7 +329,7 @@ Archon.Runtime.Supervisor (rest_for_one)
 
 | 조각 | 범위 | 시험·정답 기준 | 선행 | 건드리는 파일·모듈 |
 |---|---|---|---|---|
-| 4a | 결정 1·2: 의존성, `Archon.Repo`, `Archon.Runtime.Postgres` 인스턴스 구조체와 쓰기 펜싱 도우미(결정 7, epoch가 없으면 건너뜀), 마이그레이션(결정 2의 표 전부, 두 스키마), 저장 인코딩(`to_storage/1`·`from_storage/1`, `Codec`의 옵션 인자), `Workflow`의 `revivedParentEndTime` 내부 필드 정의(L2, 값은 아직 쓰지 않음), `Archon.Release.migrate/0`, CI Postgres 서비스와 `:postgres` 태그·`ARCHON_REQUIRE_POSTGRES` 처리 | 골든 픽스처와 내부 필드가 찬 struct의 저장 인코딩 왕복, `\u0000` 왕복, 마이그레이션 적용·되돌리기 | 없음 | `mix.exs`, `mix.lock`, `lib/archon/repo.ex`, `lib/archon/release.ex`, `lib/archon/runtime/postgres.ex`, `priv/repo/migrations/*`, `lib/archon/domain/{codec,workflow,task,workflow_def,task_def}.ex`, `config/{config,test,runtime}.exs`, `.github/workflows/ci.yml`, `test/test_helper.exs`, `test/archon/domain/storage_codec_test.exs` |
+| 4a | 결정 1·2: 의존성, `Archon.Repo`, `Archon.Runtime.Postgres` 인스턴스 구조체와 쓰기 펜싱 도우미(결정 7, `fence: nil`이면 건너뜀), 마이그레이션(결정 2의 표 전부, 두 스키마), 저장 인코딩(`to_storage/1`·`from_storage/1`, `Codec`의 옵션 인자), `Workflow`의 `revivedParentEndTime` 내부 필드 정의(L2, 값은 아직 쓰지 않음), `Archon.Release.migrate/0`, CI Postgres 서비스와 `:postgres` 태그·`ARCHON_REQUIRE_POSTGRES` 처리 | 골든 픽스처와 내부 필드가 찬 struct의 저장 인코딩 왕복, `\u0000` 왕복, 마이그레이션 적용·되돌리기 | 없음 | `mix.exs`, `mix.lock`, `lib/archon/repo.ex`, `lib/archon/release.ex`, `lib/archon/runtime/postgres.ex`, `priv/repo/migrations/*`, `lib/archon/domain/{codec,workflow,task,workflow_def,task_def}.ex`, `config/{config,test,runtime}.exs`, `.github/workflows/ci.yml`, `test/test_helper.exs`, `test/archon/domain/storage_codec_test.exs` |
 | 4b | 결정 3·5·6의 behaviour: `Commit`의 새 필드, `Store`의 새 콜백과 `{:limit, name}` 오류, 메모리 구현(`Store.Memory`가 검사 뒤 `Queue.Memory`에 큐 연산 적용), 계약 시험 사례 | 계약 시험(메모리) | 없음 | `lib/archon/runtime/{commit,store}.ex`, `lib/archon/runtime/store/memory.ex`, `lib/archon/runtime/queue/memory.ex`, `test/support/runtime/store_contract.ex`, `test/archon/runtime/store_test.exs`(큐 연산 사례의 `Queue.Memory`는 `Archon.Runtime.now/0`과 같은 시계) |
 | 4c | 결정 2·3의 `Queue.Postgres`·`Metadata.Postgres`(Commit 트랜잭션에서 부를 큐 쓰기 함수 포함) | 큐·메타데이터 계약 시험(Postgres), 동시 pop, 쓰기마다 펜싱 도우미 호출 | 4a | `lib/archon/runtime/queue/postgres.ex`, `lib/archon/runtime/metadata/postgres.ex`, `test/archon/runtime/{queue,metadata}_postgres_test.exs` |
 | 4d | 결정 3·5와 L5의 런타임: `WorkflowServer`가 큐 Effect를 `Commit.queue`로 옮김(시작 실패 정리 포함), `Step`이 `Commit.limits`를 채움, 한도 오류 재실행, `env` 실패 분류, 백엔드 혼합 거절(메모리 백엔드로) | 기존 런타임 시험 전부, 동시 poll 한도 시험, 큐 push 실패가 Commit 실패가 되는 시험, L5 재현 시험 | 4b | `lib/archon/runtime/{workflow_server,supervisor}.ex`, `lib/archon/runtime/step/{tasks,async,state}.ex`, `lib/archon/runtime/sub_workflows.ex`(시작 오류 분류만), `test/archon/runtime/{workflow_server,tasks,sub_workflow}_test.exs` |
