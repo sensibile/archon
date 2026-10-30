@@ -108,7 +108,7 @@ defmodule Archon.StepReplay do
   end
 
   @doc "Applies a commit as the store does."
-  @spec apply_commit(Workflow.t() | nil, Commit.t()) :: Workflow.t() | nil
+  @spec apply_commit(Workflow.t() | nil, Commit.t()) :: Workflow.t()
   def apply_commit(_workflow, %Commit{create: %Workflow{} = created}), do: created
 
   def apply_commit(workflow, %Commit{} = commit) do
