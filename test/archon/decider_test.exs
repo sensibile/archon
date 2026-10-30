@@ -1013,6 +1013,78 @@ defmodule Archon.DeciderTest do
       assert reason == "Task p1 failed with status: FAILED and reason: 'bad'"
     end
 
+    # DeciderService#decide calls checkWorkflowTimeout before it looks at PAUSED.
+    test "a timed-out TIME_OUT_WF workflow terminates as TIMED_OUT, even when paused" do
+      definition = %{linear_definition() | timeout_policy: :time_out_wf, timeout_seconds: 2}
+      task = %Task{reference_task_name: "s1", task_type: "junit_task_l1", status: :in_progress}
+
+      workflow = %Workflow{
+        workflow_definition: definition,
+        create_time: @now - 10_000,
+        tasks: [task]
+      }
+
+      for status <- [:running, :paused] do
+        assert {:terminate, %Termination{status: :timed_out, reason: reason}, _outcome} =
+                 Decider.decide(%{workflow | status: status}, context())
+
+        assert reason ==
+                 "Workflow timed out after 10 seconds. Timeout configured as 2 seconds. " <>
+                   "Timeout policy configured to TIME_OUT_WF"
+      end
+    end
+
+    # DeciderService#decide judges each permissive task by its attempt with the highest retry
+    # count, whatever the order of the workflow's tasks.
+    test "a permissive task that failed, then succeeded on retry, lets the workflow complete" do
+      definition =
+        update_in(linear_definition().tasks, fn [wt | rest] ->
+          [%{wt | permissive: true} | rest]
+        end)
+
+      [wt1, wt2] = definition.tasks
+
+      failed_attempt = %Task{
+        task_id: "p1",
+        reference_task_name: "s1",
+        task_type: "junit_task_l1",
+        status: :failed,
+        reason_for_incompletion: "bad",
+        retry_count: 0,
+        retried: true,
+        executed: true,
+        workflow_task: wt1
+      }
+
+      retried_attempt = %Task{
+        task_id: "p2",
+        reference_task_name: "s1",
+        task_type: "junit_task_l1",
+        status: :completed,
+        retry_count: 1,
+        executed: true,
+        workflow_task: wt1
+      }
+
+      s2 = %Task{
+        task_id: "t2",
+        reference_task_name: "s2",
+        task_type: "junit_task_l2",
+        status: :completed,
+        workflow_task: wt2
+      }
+
+      for attempts <- [[failed_attempt, retried_attempt], [retried_attempt, failed_attempt]] do
+        workflow = %Workflow{
+          workflow_definition: definition,
+          status: :running,
+          tasks: attempts ++ [s2]
+        }
+
+        assert {:ok, %Outcome{complete?: true}} = Decider.decide(workflow, context())
+      end
+    end
+
     test "an exhausted failure terminates with the failed task" do
       task = %Task{
         task_id: "t1",
