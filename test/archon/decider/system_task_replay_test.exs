@@ -4,19 +4,20 @@
 
 defmodule Archon.Decider.SystemTaskReplayTest do
   @moduledoc """
-  Replays the captured SWITCH and FORK_JOIN scenarios through `Archon.Decider.decide/2` and
-  `Archon.Decider.SystemTask.execute/3` and compares the workflow with what the upstream server
-  returned (ADR 0014, decision 8, slice 2c). The runtime is played by `Archon.DeciderReplay`.
+  Replays the captured SWITCH and FORK_JOIN scenarios through `Archon.Runtime.Step.run/3` and
+  compares the stored workflow with what the upstream server returned (ADR 0014, decision 8,
+  slice 2c; ADR 0018, decision 10).
 
   In the FORK_JOIN scenario the branch updates skip the decide (`isLazyEvaluateWorkflow`) and the
-  `JOIN` is evaluated three times, once after it is scheduled and once after each branch, as its
-  `pollCount` on the server shows. The decide after the `JOIN` completes ends the workflow
-  without persisting tasks, which is why the branches and the `JOIN` keep `executed: false`.
+  step evaluates the `JOIN` three times, once after it is scheduled and once after each branch,
+  as its `pollCount` on the server shows (ADR 0018, decision 6). The decide after the `JOIN`
+  completes ends the workflow without saving tasks, which is why the branches and the `JOIN`
+  keep `executed: false`.
   """
 
   use ExUnit.Case, async: true
 
-  import Archon.DeciderReplay
+  import Archon.StepReplay
 
   alias Archon.Contract
   alias Archon.Decider.Parameters
@@ -64,24 +65,24 @@ defmodule Archon.Decider.SystemTaskReplayTest do
         ],
         clock
       )
-      |> run_async(clock)
 
     assert ["FORK", "archon_task_a", "archon_task_b", "JOIN"] =
              Enum.map(workflow.tasks, & &1.task_type)
+
+    assert %{poll_count: 1, status: :in_progress} = List.last(workflow.tasks)
 
     workflow =
       workflow
       |> poll("branch_a_ref", clock)
       |> update("branch_a_ref", Contract.fixture("task_update_fork_a"), clock)
-      |> run_async(clock)
 
     assert %{status: :running} = workflow
+    assert %{poll_count: 2, status: :in_progress} = List.last(workflow.tasks)
 
     workflow =
       workflow
       |> poll("branch_b_ref", clock)
       |> update("branch_b_ref", Contract.fixture("task_update_fork_b"), clock)
-      |> run_async(clock)
 
     assert workflow.status == :completed
     assert_matches(workflow, "workflow_get_completed_fork")

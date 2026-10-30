@@ -4,17 +4,15 @@
 
 defmodule Archon.Decider.DoWhileReplayTest do
   @moduledoc """
-  Runs `DO_WHILE` workflows through `Archon.Decider.decide/2` and
-  `Archon.Decider.SystemTask.DoWhile.execute/3` with the runtime played by
-  `Archon.DeciderReplay` (ADR 0014, slice 2e). No upstream server capture exists for `DO_WHILE`,
-  so these check that decide and execute hand over to each other: the loop task is executed in
-  the decide loop each time a body task finishes, schedules the next iteration and lets the task
-  after it run once it completes.
+  Runs `DO_WHILE` workflows through `Archon.Runtime.Step.run/3` (ADR 0014, slice 2e; ADR 0018,
+  decision 10). No upstream server capture exists for `DO_WHILE`, so these check that decide and
+  execute hand over to each other: the loop task is executed in the decide loop each time a body
+  task finishes, schedules the next iteration and lets the task after it run once it completes.
   """
 
   use ExUnit.Case, async: true
 
-  import Archon.DeciderReplay
+  import Archon.StepReplay
 
   alias Archon.Domain.{Task, TaskDef, WorkflowDef, WorkflowTask}
 

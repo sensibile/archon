@@ -5,14 +5,14 @@
 defmodule Archon.Decider.SimpleReplayTest do
   @moduledoc """
   Replays the captured SIMPLE scenario (`workflow_start_simple`, `task_poll_simple_*`,
-  `task_update_simple_a`, `task_update_v2_simple_b`) through `Archon.Decider.decide/2` and compares
-  the workflow with what the upstream server returned (ADR 0014, decision 8). The runtime around
-  the Decider is played by `Archon.DeciderReplay`.
+  `task_update_simple_a`, `task_update_v2_simple_b`) through `Archon.Runtime.Step.run/3` and
+  compares the stored workflow with what the upstream server returned (ADR 0014, decision 8;
+  ADR 0018, decision 10).
   """
 
   use ExUnit.Case, async: true
 
-  import Archon.DeciderReplay
+  import Archon.StepReplay
 
   alias Archon.Contract
   alias Archon.Decider.Parameters

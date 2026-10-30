@@ -1,7 +1,7 @@
 # ADR 0018: Phase 3 OTP 런타임 설계
 
 - 상태: 제안
-- 날짜: 2026-10-30
+- 날짜: 2026-10-30, 갱신 2026-10-30(조각 3b: 결정 2의 이벤트·Env·Effect 목록, 결정 8 (a)의 출력)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 
 ## 맥락
@@ -169,9 +169,16 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
 - `Event`는 프로세스가 받은 일이다: `{:start, input}`, `{:poll, task_id, worker_id}`, `{:update, TaskResult}`,
   `:wake`(타이머), `{:child_changed, task_id, child}`, `{:terminate, reason}`, `{:cancel_by_parent, reason}`·`{:sub_workflow_started, task_id, result}`(결정 5), 복구 검사 `:recover`(활성화 직후와 예외 격리 뒤.
   상태를 바꾸지 않은 `:wake`도 같은 검사를 한다), 그리고 결정 9의 생명주기 요청.
+  (3b 갱신) 하위 워크플로우의 멱등 시작은 `{:start_idempotent, workflow}`로 따로 둔다. 기록을 만들기만 하고 decide하지 않으며,
+  기록이 있으면 결정 5의 소유자 확인 결과로 답한다. 첫 decide는 이어서 보내는 `:wake`가 한다. 실패 워크플로우 시작이
+  실패한 결과는 `{:failure_workflow_started, {:error, reason}}`로 되먹인다(결정 8 (a)). `{:start, workflow}`·`{:start_idempotent, workflow}`의
+  `workflow`는 호출자가 만든 새 인스턴스(upstream `createWorkflowModel`)다.
 - `Env`는 바깥 값이다: `now`, `new_id`, `jitter`, `evaluate_script`, 태스크 정의, 최신 워크플로우 버전, 도메인별
   마지막 poll 시각(`getActiveDomain`용), 태스크 정의별 진행 중 개수(동시 실행 한도용), 큐에 메시지가 있는지(복구용),
   설정값. Decider `Context`는 `Env`에서 만든다. `WorkflowServer`가 이벤트마다 저장소·큐·메타데이터를 읽어 채운다.
+  (3b 갱신) `Env.workflows`는 `Step`이 읽는 다른 워크플로우(진행 중 SUB_WORKFLOW의 자식, 부모, 실패 워크플로우)를 ID로
+  담는다. 값이 `nil`이면 저장소에 없다는 뜻이고, 키가 없으면 읽지 않았다는 뜻이라 그 값이 필요한 검사를 건너뛴다. 3e가
+  자식을 읽어 채우면 `:wake`·`:recover`의 자식 반영(결정 5의 30초 재평가)이 동작한다.
 - `reply`는 호출자에게 돌려줄 값이다: 시작한 workflowId, poll로 내줄 태스크(건너뛰면 `nil`), 갱신한 태스크,
   `{:error, :conflict | :not_found | ...}`.
 - 반환하는 `Workflow`는 **저장한 뒤의 상태**다. upstream이 메모리에서만 바꾸고 저장하지 않은 값은 넣지 않는다
@@ -181,10 +188,14 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
   `delete_task_ids :: [String.t()]`(DO_WHILE `keepLastN`) 네 개다. 저장소 경계의 타입이므로 `Archon.Runtime.Commit`으로 두고 3a에서 정의한다.
   upstream `ExecutionDAOFacade`가 저장할 때 찍는 시각(워크플로우 `updatedTime`과 종료 상태의 `endTime`, 태스크
   `updateTime`과 종료 시 비어 있는 `endTime`)은 `Step`이 `Commit`을 만들 때 `Env.now`로 찍는다. 저장소 구현은 시각을
-  다시 찍지 않는다.
+  다시 찍지 않는다. (3b 갱신) 새 태스크의 `scheduledTime`도 upstream DAO의 `createTasks`(`SqliteExecutionDAO`)처럼
+  `Step`이 지금 시각으로 찍는다. Decider가 재시도 태스크에 0을 넣으므로, 찍지 않으면 poll 타임아웃이 바로 발화한다.
 - `Effect`는 바깥에 하는 일이다: 태스크 큐 push(지연 포함)·remove·postpone·ack, 하위 워크플로우 시작·종료 요청,
   부모 알림, 실패 워크플로우 시작, 다음 재평가 타이머(`{:wake_at, ms}`). 대부분은 저장 뒤에 실행하는 `post`이고,
   `pre`는 Commit 전에 끝나야 하는 일이다. 지금 `pre`에 들어가는 것은 종료 처리의 자식 종료 요청뿐이다(결정 8).
+  (3b 갱신) decide하지 않은 이벤트가 타이머를 당기기만 하는 일(결정 6)은 `{:wake_before, ms}`다. ack는 poll한 묶음 전체를
+  아는 `Archon.Runtime.Tasks`(3d)가 하므로 `Step`의 Effect가 아니다. poll한 태스크가 워크플로우에 없으면 `Step`은
+  `{:error, :not_found}`로 답하고, 그 큐 메시지는 호출자가 지운다.
 
 `WorkflowServer`는 `Step.run`을 부르고, `pre`를 순서대로 실행하고, `Commit`을 저장소에 쓰고(write-through), 그다음
 `post`를 순서대로 실행한 뒤 `reply`로 응답한다. `pre`가 하나라도 실패하면 아무것도 Commit하지 않고 결정 1의 예외 격리
@@ -265,7 +276,7 @@ behaviour마다 공통 계약 시험(결정 10)을 두어 Phase 4 구현이 같�
 3. `Decider.decide/2`를 부른다.
    - `complete?`면 `endExecution`: `terminate_task`가 있으면 그 입력의 `terminationStatus`로 `FAILED`·`TERMINATED`면
      결정 8 (a)로 종료, 아니면 완료. TERMINATE 태스크로 완료하면 `reasonForIncompletion`에 그 입력의 `terminationReason`을,
-     비어 있으면 upstream 문구 `Workflow is <terminationStatus> by TERMINATE task: <taskId>`를 넣는다(결정 8 (a)의 사유도 같다). 완료는 `outcome.workflow.output`, `COMPLETED`, `endTime`, 실패 태스크 이름 집합을
+     비어 있으면 upstream 문구 `Workflow is <terminationStatus> by TERMINATE task: <taskId>`를 넣는다(결정 8 (a)의 사유도 같다). 완료는 upstream `completeWorkflow`처럼 `Archon.Decider.Retry.update_output/2`로 다시 계산한 출력(3b 갱신), `COMPLETED`, `endTime`, 실패 태스크 이름 집합을
      저장한다. 끝난 태스크(Decider가 `executed` 등을 바꾼 것)는 저장하지 않고, 끝나지 않은 태스크만 `CANCELED`로 바꿔
      같은 Commit에 넣는다(upstream `cancelNonTerminalTasks`). 자식 종료 요청은 `post`다.
    - `{:terminate, termination, outcome}`이면 결정 8 (a).
@@ -311,7 +322,7 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   없으면 결정적 ID로 시작을 다시 해서(멱등) 이미 만든 자식에 붙는다. 대체 ID가 시작 전에 저장되므로 대체 자식이 둘
   생기지 않는다.
 - **진행 반영.** 자식이 종료 상태가 되면 자식 프로세스가 부모에게 `{:child_changed, task_id, child}`를 `cast`한다.
-  부모는 그 태스크가 아직 자기 태스크 목록에 있는지 확인하고(upstream의 세대 펜스), `SystemTask.SubWorkflow.execute/2`로
+  부모는 그 태스크가 아직 자기 태스크 목록에 있고 지금 그 자식에 붙어 있는지 확인하고(upstream의 세대 펜스. upstream은 태스크의 `subWorkflowId`로 자식을 읽는다. 3b 갱신), `SystemTask.SubWorkflow.execute/2`로
   상태·출력·실패 이유를 반영한 뒤 진행 중 JOIN을 평가하고 decide한다. 알림이 사라질 경우(부모 재시작 등)에 대비해 부모는
   진행 중 SUB_WORKFLOW가 있으면 `workflowOffsetTimeout`(30초)마다 저장소에서 자식을 읽는다(upstream `computePostpone`의
   활성 하위 워크플로우 규칙과 같은 간격).
@@ -320,7 +331,7 @@ upstream의 스키마 검증(`enforceSchema`, `rejectTasksFailingInputSchema`, `
   바꾸고, 사유는 upstream 문구 그대로이며, 실패 워크플로우를 띄우지 않는다. 이미 `TERMINATED`면 아무것도 하지 않는다.
   자식이 아직 없으면(시작 지연 중이거나 시작이 일시적 오류로 실패한 경우) 활성화가 `:not_found`를 돌려주는데, 이것은 취소
   성공으로 본다(upstream `SubWorkflow.cancel`도 자식이 없으면 그냥 돌아간다). 부모 태스크는 `CANCELED`가 되고 부모 종료는
-  막히지 않는다. 자식은 부모를 동기 호출하지 않으므로 교착이 없다. 이 `call`의 타임아웃은 `:infinity`가 아니라
+  막히지 않는다. (3b 갱신) 같은 이벤트 안에서 자식 시작을 요청한 뒤 부모가 종료되면(시작 지연이 끝나는 `:wake`에 워크플로우 타임아웃이 함께 오는 경우) `Step`은 그 시작 Effect를 버린다. 자식 종료 요청은 Commit 전에 이미 실행되므로, 시작이 뒤에 오면 자식이 남는다. 자식은 부모를 동기 호출하지 않으므로 교착이 없다. 이 `call`의 타임아웃은 `:infinity`가 아니라
   설정값(기본 30초)이고, 시간이 넘으면 결정 1의 예외 격리 규칙으로 부모 종료를 실패로 처리한다. Decider 종료(결정 8 (a))는 다음 decide에서
   같은 종료가 다시 나오므로 다시 시도되고, 종료 요청(결정 8 (b))은 호출자가 오류를 받고 끝난다(upstream도 같다).
 - **실패 워크플로우.** 결정 8 (a).
@@ -392,7 +403,7 @@ upstream의 decider 큐와 스위퍼, 시스템 태스크 큐의 지연 재평�
   - `WorkflowServer`는 `restart: :transient`다. 결정 1의 예외 격리로 잡지 못한 exit만 재시작으로 이어지고, 다시 뜬
     프로세스는 저장소 상태에서 시작한다. 처리 중이던 메시지는 잃는다. 그 메시지가 저장 전이었으면 호출자는 오류를 받고
     다시 보낼 수 있고, 저장 뒤였으면 결과는 남는다.
-  - 활성화 직후 복구(`:recover` 이벤트, upstream 스위퍼의 repair): 큐에 메시지가 없는 `SCHEDULED` 워커 태스크를 다시
+  - 활성화 직후 복구(`:recover` 이벤트, upstream 스위퍼의 repair): decide한 뒤에도(3b 갱신. 스위퍼처럼 decide 뒤에 메운다) 큐에 메시지가 없는 `SCHEDULED` 워커 태스크를 다시
     넣고(지연은 저장된 `updateTime`(0이면 `scheduledTime`)에 `callbackAfterMs`, 없으면 `callbackAfterSeconds`를 더한
     시각까지 남은 시간. 워커가 `IN_PROGRESS`와 `callbackAfterSeconds`로 미룬 태스크가 일찍 다시 나가지 않게 한다. upstream
     스위퍼는 `callbackAfterSeconds` 전체를 다시 걸지만 Archon은 남은 시간만 건다), 진행 중 SUB_WORKFLOW의 자식이 이미 끝났으면 반영하고, 부모가 종료 상태이고 자기 부모 태스크가 `CANCELED`이면
@@ -416,7 +427,9 @@ upstream의 두 종료 경로를 그대로 나눈다. 둘 다 순서는 "남은 
 
 - 워크플로우가 아직 종료 상태가 아니면 `termination.status`로 바꾼다. `termination.task`가 있고 `failed_task_id`가
   비어 있으면 그 ID를 넣고 그 태스크를 저장한다.
-- 출력은 `outcome.workflow.output`(Decider가 채운 값)을 쓴다. 실패 태스크(`FAILED`, `FAILED_WITH_TERMINAL_ERROR`)의
+- 출력은 (b)와 같이 `Archon.Decider.Retry.update_output/2`로 다시 계산한다. upstream `terminateWorkflow`가 Decider가 채운
+  값 위에 `updateWorkflowOutput(workflow, null)`을 다시 부르기 때문이다(3b 갱신. 처음에는 `outcome.workflow.output`을
+  쓴다고 적었다). 실패 태스크(`FAILED`, `FAILED_WITH_TERMINAL_ERROR`)의
   참조명·정의명을 `failedReferenceTaskNames`·`failedTaskNames`에 더하고, `reasonForIncompletion`에 사유를 넣는다.
 - 남은 태스크를 `CANCELED`로 바꾸고 시스템 태스크는 `cancel`한다(SUB_WORKFLOW는 결정 5). 모든 태스크를 큐에서 지운다.
   부모가 있으면 결정 5로 알린다.
@@ -424,7 +437,7 @@ upstream의 두 종료 경로를 그대로 나눈다. 둘 다 순서는 "남은 
   만들어 `conductor.failure_workflow` 출력과 함께 같은 Commit에 넣고, Commit 뒤 그 ID로 시작한다. 입력은 upstream과 같다
   (`workflowId`, `reason`, `failureStatus`, `failureTaskId`, `failedWorkflow`). 시작이 실패하면 출력을 upstream 문구
   `Error workflow <이름> failed to start.  reason: <사유>`로 바꿔 다시 Commit한다. 시작 Effect를 실행하기 전에 프로세스가
-  죽으면, 활성화 복구는 출력에 ID가 있는데 그 워크플로우가 저장소에 없으면 다시 시작한다(같은 ID라 멱등이다).
+  죽으면, 활성화 복구는 출력에 ID가 있는데 그 워크플로우가 저장소에 없으면 다시 시작한다(같은 ID라 멱등이다). (3b 갱신) 다시 시작할 때 입력은 저장된 워크플로우에서 출력의 그 키를 빼고 만든다. `failedWorkflow`의 태스크는 저장된 상태라, 첫 시작이 담은 메모리 상태(저장하지 않은 `executed` 등)와 다를 수 있다. 출력이 실패 문구면 다시 시작하지 않는다. 출력은 태스크(워커)가 채울 수 있으므로, 다시 시작은 Decider 종료로 끝난 워크플로우(`FAILED`·`TIMED_OUT`, 또는 원인 태스크가 있는 `TERMINATED`이고 실행 상태에서 바로 끝난 것)에만 한다. `FAILED` 뒤에 종료 요청으로 `TERMINATED`가 된 워크플로우는 `failed_task_id`가 남지만 다시 시작하지 않는다. 원인 태스크 없이 `TERMINATED`로 끝난 Decider 종료는 다시 시작하지 못하며, 이 빈틈은 결과 절의 Phase 4 복구에 남긴다.
 
 **(b) 종료 요청**(`terminate_workflow`, REST `DELETE /api/workflow/{id}`). upstream `terminateWorkflow(String, String)`.
 
@@ -491,7 +504,7 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
 | `previous_status`, `failed_task_id` | 결과 | 결정 8 | 3b |
 | `Termination`의 `status`·`task`로 종료 | 결정 1 | 결정 8 (a) | 3b |
 | `terminate_task`(TERMINATE 태스크)로 끝내기 | 결정 1 | 결정 4의 3 | 3b |
-| 완료 시 출력은 `outcome.workflow.output`, 상태·`endTime`은 런타임 | 결정 1 | 결정 4의 3 | 3b |
+| 완료 시 출력은 `outcome.workflow.output`, 상태·`endTime`은 런타임 | 결정 1 | 결정 4의 3(출력은 upstream `completeWorkflow`처럼 다시 계산한다. 3b 갱신) | 3b |
 | 재시도 지연(`callbackAfterMs`)을 큐 지연으로 | 결정 2(2b) | 결정 4의 6 | 3b, 3c |
 | 타임아웃 판정이 발화할 재평가 | 결정 2 | 결정 6 | 3b, 3c |
 | `decider_replay.ex`가 흉내 내는 poll·update 규칙 | 결과 | 결정 7(upstream 그대로. 재현 하네스가 단순화한 `startTime` 덮어쓰기, `IN_PROGRESS` → `SCHEDULED` 변환 생략, 끝난 태스크 무시 분기 생략은 upstream대로 고친다) | 3b(상태 전이), 3d(API) |
@@ -533,7 +546,8 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
   대신 사건으로 평가하므로 `pollCount`는 평가 횟수(예약 직후 + 관련 사건 수 + `:wake` 수)다. WAIT의 `pollCount`도 깨어난
   횟수다. upstream의 `pollCount`는 poller 간격에 따라 달라지는 값이다. 골든 픽스처 `workflow_get_completed_fork`와는 같다.
 - **큐 이름에 실행 네임스페이스와 격리 그룹이 없다.** 도메인만 지원한다.
-- **동시 실행 한도는 개수만 본다.** upstream `SqliteExecutionDAO#exceedsLimit`의 도착 순서 공정성 검사
+- **동시 실행 한도는 개수만 본다.** 비동기 시스템 태스크도 `SCHEDULED`에서 같은 한도를 보지만, 넘으면 60초 미루는 대신
+  다음 `:wake`에 다시 본다(3b 갱신). upstream `SqliteExecutionDAO#exceedsLimit`의 도착 순서 공정성 검사
   (`findAllTasksInProgressInOrderOfArrival`)는 옮기지 않는다. 한도 안에서 어느 태스크가 먼저 나가는지는 큐 순서를 따른다.
   개수 확인과 `IN_PROGRESS` 저장은 서로 다른 워크플로우 프로세스에서 일어나므로, 같은 정의의 태스크를 동시에 poll하면
   한도를 잠깐 넘을 수 있다. upstream도 `exceedsLimit`의 개수 질의와 poll 저장이 원자적이지 않아 같은 성질이다. 원자적
@@ -570,5 +584,9 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
 - Phase 5 REST는 결정 7의 API만 부르고, 응답 형태와 오류 코드를 ADR 0001의 MVP 계약에 맞춘다. upstream은
   `enforceSchema`가 켜져 있고 스키마가 있는 정의에서 입력·출력을 검증하므로, Phase 5가 정의 등록 REST를 열기 전에 스키마
   검증(검증기 채택)을 별도 ADR로 정해 붙인다. 그 전까지 스키마가 있는 정의는 검증 없이 실행된다.
+- 워커 `TaskResult`의 `subWorkflowId`는 upstream `updateTask`처럼 그대로 저장하고, 부모가 끝날 때 그 ID의 자식에 취소를
+  보낸다. 워커가 다른 워크플로우의 ID를 넣으면 그 워크플로우가 종료될 수 있다(3b Codex 보안 리뷰). upstream OSS는 워커와
+  API 호출자를 신뢰하고 권한 모델이 없으며, 그 호출자는 `DELETE /api/workflow/{id}`로 어떤 워크플로우든 직접 종료할 수 있으므로
+  새 권한을 주지 않는다. BOSS가 2026-10-30 upstream 동작을 유지하기로 정했다. 인증·인가를 들이는 ADR에서 이 경로를 다시 본다.
 - 아직 범위 밖: rerun, skip, 콜백 초기화, 스키마 검증, 실행 로그, 리스너, 외부 payload 저장소, 격리 그룹·실행
   네임스페이스, 여러 노드.
