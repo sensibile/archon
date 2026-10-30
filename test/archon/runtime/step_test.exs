@@ -568,6 +568,9 @@ defmodule Archon.Runtime.StepTest do
       {:ok, stored, [], post} = run(stored, {:sub_workflow_started, task_id, {:ok, dead}})
       assert %Task{status: :scheduled, sub_workflow_id: "id-1"} = task(stored, "sub")
       assert [{:start_sub_workflow, ^task_id, %{workflow_id: "id-1"}} | _] = post
+
+      # A late result for the first child does not take the task back from the new one.
+      {:ok, ^stored, [], _post} = run(stored, {:sub_workflow_started, task_id, {:ok, dead}})
     end
 
     test "a transient error keeps the task SCHEDULED to try again after 30 s" do

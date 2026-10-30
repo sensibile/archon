@@ -136,19 +136,26 @@ defmodule Archon.Runtime.Step.SubWorkflow do
   The result of starting the child. `{:ok, child}` attaches the task to it, unless the child
   with the task's ID already ended unsuccessfully: then the task takes a new ID from
   `new_id` and that one is started. A transient error leaves the task `SCHEDULED` to try again;
-  any other error fails it. Returns the task to save and whether the decide should follow.
+  any other error fails it. A child other than the one the task asks for now (the result of an
+  earlier attempt) is ignored.
   """
   @spec started(State.t(), Task.t(), Event.sub_workflow_result()) ::
-          {:retry, State.t()} | {:done, Task.t()}
+          {:retry, State.t()} | {:done, Task.t()} | :ignore
   def started(%State{env: env} = state, %Task{} = task, {:ok, %Workflow{} = child}) do
-    if Workflow.terminal?(child.status) and not Workflow.successful?(child.status) and
-         child.workflow_id == start_id(task) and task.sub_workflow_id == nil do
-      task = %{task | sub_workflow_id: env.new_id.()}
-      state = State.save_task(state, task)
-      start = start_input(state.wf, task, start_definition(task), start_name(task))
-      {:retry, State.post(state, {:start_sub_workflow, task.task_id, start})}
-    else
-      {:done, attach(task, child)}
+    cond do
+      # The result of an earlier attempt, for a child the task no longer asks for.
+      child.workflow_id != start_id(task) ->
+        :ignore
+
+      Workflow.terminal?(child.status) and not Workflow.successful?(child.status) and
+          task.sub_workflow_id == nil ->
+        task = %{task | sub_workflow_id: env.new_id.()}
+        state = State.save_task(state, task)
+        start = start_input(state.wf, task, start_definition(task), start_name(task))
+        {:retry, State.post(state, {:start_sub_workflow, task.task_id, start})}
+
+      true ->
+        {:done, attach(task, child)}
     end
   end
 

@@ -146,6 +146,7 @@ defmodule Archon.Runtime.Step do
   # What AsyncSystemTaskExecutor does after SubWorkflow#start returned.
   defp sub_workflow_started(state, task, result) do
     case SubWorkflow.started(state, task, result) do
+      :ignore -> state
       {:retry, state} -> state
       {:done, task} -> settle_if(Async.dispose(state, task, true))
     end
