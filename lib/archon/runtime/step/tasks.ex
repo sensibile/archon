@@ -65,10 +65,14 @@ defmodule Archon.Runtime.Step.Tasks do
     end
   end
 
-  # The concurrent execution limit, counting the IN_PROGRESS tasks of the definition (ADR 0018:
-  # without upstream's arrival-order check).
-  defp exceeds_in_progress_limit?(task, env) do
-    case Task.task_definition(task) || Map.get(env.task_defs, Task.task_def_name(task)) do
+  @doc """
+  Upstream `ExecutionDAOFacade#exceedsInProgressLimit`: the task's own definition has a
+  `concurrentExecLimit` its `IN_PROGRESS` tasks already reach (ADR 0018: without upstream's
+  arrival-order check). A task without an embedded definition has no limit.
+  """
+  @spec exceeds_in_progress_limit?(Task.t(), Archon.Runtime.Step.Env.t()) :: boolean()
+  def exceeds_in_progress_limit?(task, env) do
+    case Task.task_definition(task) do
       %TaskDef{concurrent_exec_limit: limit} when is_integer(limit) and limit > 0 ->
         Map.get(env.in_progress, Task.task_def_name(task), 0) >= limit
 

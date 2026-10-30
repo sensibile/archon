@@ -26,7 +26,7 @@ defmodule Archon.Runtime.Step.Async do
   alias Archon.Decider.SystemTask.Join
   alias Archon.Decider.SystemTask.SubWorkflow, as: SubWorkflowTask
   alias Archon.Domain.{Task, Workflow, WorkflowTask}
-  alias Archon.Runtime.Step.{Schedule, State, SubWorkflow}
+  alias Archon.Runtime.Step.{Schedule, State, SubWorkflow, Tasks}
 
   # TaskDef.ONE_HOUR
   @one_hour 3600
@@ -66,18 +66,27 @@ defmodule Archon.Runtime.Step.Async do
 
   # Due on a :wake: a SCHEDULED task once its delay is over, a running JOIN or WAIT, and a running
   # SUB_WORKFLOW whose child was read.
-  defp due?(%State{now: now}, %Task{status: :scheduled} = task), do: due_time(task) <= now
-
-  defp due?(%State{env: env}, %Task{task_type: "SUB_WORKFLOW"} = task),
+  # Due on a :wake: a task whose delay is over (a running SUB_WORKFLOW also needs its child to
+  # have been read).
+  defp due?(%State{env: env}, %Task{task_type: "SUB_WORKFLOW", status: :in_progress} = task),
     do: Map.has_key?(env.workflows, Task.sub_workflow_id(task) || "")
 
-  defp due?(_state, _task), do: true
+  defp due?(%State{now: now}, task), do: due_time(task) <= now
 
   @doc """
-  When a `SCHEDULED` task's delay is over: its last save (or its scheduling) plus
-  `callbackAfterMs`, else `callbackAfterSeconds`.
+  When a task's queue delay is over, as upstream's queue would show it again: its last save (or
+  its scheduling) plus `callbackAfterMs`, else `callbackAfterSeconds`. A `SUB_WORKFLOW` whose
+  start was saved (its `pollCount` counted it) but whose result never came back (no
+  `subWorkflowLaunchError`) is due at once.
   """
   @spec due_time(Task.t()) :: integer()
+  def due_time(%Task{task_type: "SUB_WORKFLOW", status: :scheduled, poll_count: count} = task)
+      when count > 0 do
+    if Map.has_key?(task.output_data || %{}, "subWorkflowLaunchError"),
+      do: task.update_time + Schedule.delay_ms(task),
+      else: task.update_time
+  end
+
   def due_time(%Task{} = task) do
     base = if task.update_time > 0, do: task.update_time, else: task.scheduled_time
     base + Schedule.delay_ms(task)
@@ -113,19 +122,26 @@ defmodule Archon.Runtime.Step.Async do
     end
   end
 
-  defp run(%State{now: now} = state, %Task{status: :scheduled} = task, async_complete?) do
-    if exceeded_response_timeout?(task, now) and task.task_type != "SUB_WORKFLOW" do
-      reason =
-        "Task did not complete within its responseTimeout of #{response_timeout(task)}s"
+  defp run(%State{now: now, env: env} = state, %Task{status: :scheduled} = task, async_complete?) do
+    cond do
+      # The concurrent execution limit puts the task back; the process looks again on a later
+      # :wake instead of after taskExecutionPostponeDuration.
+      Tasks.exceeds_in_progress_limit?(task, env) ->
+        {state, false}
 
-      dispose(
-        state,
-        %{task | status: :timed_out, reason_for_incompletion: reason},
-        async_complete?
-      )
-    else
-      task = %{task | start_time: now}
-      start(State.save_task(state, task), task, async_complete?)
+      exceeded_response_timeout?(task, now) and task.task_type != "SUB_WORKFLOW" ->
+        reason =
+          "Task did not complete within its responseTimeout of #{response_timeout(task)}s"
+
+        dispose(
+          state,
+          %{task | status: :timed_out, reason_for_incompletion: reason},
+          async_complete?
+        )
+
+      true ->
+        task = %{task | start_time: now}
+        start(State.save_task(state, task), task, async_complete?)
     end
   end
 
@@ -140,6 +156,10 @@ defmodule Archon.Runtime.Step.Async do
       {:failed, task} -> dispose(state, task, true)
     end
   end
+
+  # Wait#start
+  defp start(state, %Task{task_type: "WAIT"} = task, async_complete?),
+    do: dispose(state, %{task | status: :in_progress}, async_complete?)
 
   defp start(state, task, async_complete?), do: dispose(state, task, async_complete?)
 

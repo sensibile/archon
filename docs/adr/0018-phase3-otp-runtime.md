@@ -188,7 +188,8 @@ Decider를 순수 함수로 둔 이유(ADR 0014 결정 1)를 런타임에도 적
   `delete_task_ids :: [String.t()]`(DO_WHILE `keepLastN`) 네 개다. 저장소 경계의 타입이므로 `Archon.Runtime.Commit`으로 두고 3a에서 정의한다.
   upstream `ExecutionDAOFacade`가 저장할 때 찍는 시각(워크플로우 `updatedTime`과 종료 상태의 `endTime`, 태스크
   `updateTime`과 종료 시 비어 있는 `endTime`)은 `Step`이 `Commit`을 만들 때 `Env.now`로 찍는다. 저장소 구현은 시각을
-  다시 찍지 않는다.
+  다시 찍지 않는다. (3b 갱신) 새 태스크의 `scheduledTime`도 upstream DAO의 `createTasks`(`SqliteExecutionDAO`)처럼
+  `Step`이 지금 시각으로 찍는다. Decider가 재시도 태스크에 0을 넣으므로, 찍지 않으면 poll 타임아웃이 바로 발화한다.
 - `Effect`는 바깥에 하는 일이다: 태스크 큐 push(지연 포함)·remove·postpone·ack, 하위 워크플로우 시작·종료 요청,
   부모 알림, 실패 워크플로우 시작, 다음 재평가 타이머(`{:wake_at, ms}`). 대부분은 저장 뒤에 실행하는 `post`이고,
   `pre`는 Commit 전에 끝나야 하는 일이다. 지금 `pre`에 들어가는 것은 종료 처리의 자식 종료 요청뿐이다(결정 8).
@@ -275,7 +276,7 @@ behaviour마다 공통 계약 시험(결정 10)을 두어 Phase 4 구현이 같�
 3. `Decider.decide/2`를 부른다.
    - `complete?`면 `endExecution`: `terminate_task`가 있으면 그 입력의 `terminationStatus`로 `FAILED`·`TERMINATED`면
      결정 8 (a)로 종료, 아니면 완료. TERMINATE 태스크로 완료하면 `reasonForIncompletion`에 그 입력의 `terminationReason`을,
-     비어 있으면 upstream 문구 `Workflow is <terminationStatus> by TERMINATE task: <taskId>`를 넣는다(결정 8 (a)의 사유도 같다). 완료는 `outcome.workflow.output`, `COMPLETED`, `endTime`, 실패 태스크 이름 집합을
+     비어 있으면 upstream 문구 `Workflow is <terminationStatus> by TERMINATE task: <taskId>`를 넣는다(결정 8 (a)의 사유도 같다). 완료는 upstream `completeWorkflow`처럼 `Archon.Decider.Retry.update_output/2`로 다시 계산한 출력(3b 갱신), `COMPLETED`, `endTime`, 실패 태스크 이름 집합을
      저장한다. 끝난 태스크(Decider가 `executed` 등을 바꾼 것)는 저장하지 않고, 끝나지 않은 태스크만 `CANCELED`로 바꿔
      같은 Commit에 넣는다(upstream `cancelNonTerminalTasks`). 자식 종료 요청은 `post`다.
    - `{:terminate, termination, outcome}`이면 결정 8 (a).
@@ -503,7 +504,7 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
 | `previous_status`, `failed_task_id` | 결과 | 결정 8 | 3b |
 | `Termination`의 `status`·`task`로 종료 | 결정 1 | 결정 8 (a) | 3b |
 | `terminate_task`(TERMINATE 태스크)로 끝내기 | 결정 1 | 결정 4의 3 | 3b |
-| 완료 시 출력은 `outcome.workflow.output`, 상태·`endTime`은 런타임 | 결정 1 | 결정 4의 3 | 3b |
+| 완료 시 출력은 `outcome.workflow.output`, 상태·`endTime`은 런타임 | 결정 1 | 결정 4의 3(출력은 upstream `completeWorkflow`처럼 다시 계산한다. 3b 갱신) | 3b |
 | 재시도 지연(`callbackAfterMs`)을 큐 지연으로 | 결정 2(2b) | 결정 4의 6 | 3b, 3c |
 | 타임아웃 판정이 발화할 재평가 | 결정 2 | 결정 6 | 3b, 3c |
 | `decider_replay.ex`가 흉내 내는 poll·update 규칙 | 결과 | 결정 7(upstream 그대로. 재현 하네스가 단순화한 `startTime` 덮어쓰기, `IN_PROGRESS` → `SCHEDULED` 변환 생략, 끝난 태스크 무시 분기 생략은 upstream대로 고친다) | 3b(상태 전이), 3d(API) |
@@ -545,7 +546,8 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
   대신 사건으로 평가하므로 `pollCount`는 평가 횟수(예약 직후 + 관련 사건 수 + `:wake` 수)다. WAIT의 `pollCount`도 깨어난
   횟수다. upstream의 `pollCount`는 poller 간격에 따라 달라지는 값이다. 골든 픽스처 `workflow_get_completed_fork`와는 같다.
 - **큐 이름에 실행 네임스페이스와 격리 그룹이 없다.** 도메인만 지원한다.
-- **동시 실행 한도는 개수만 본다.** upstream `SqliteExecutionDAO#exceedsLimit`의 도착 순서 공정성 검사
+- **동시 실행 한도는 개수만 본다.** 비동기 시스템 태스크도 `SCHEDULED`에서 같은 한도를 보지만, 넘으면 60초 미루는 대신
+  다음 `:wake`에 다시 본다(3b 갱신). upstream `SqliteExecutionDAO#exceedsLimit`의 도착 순서 공정성 검사
   (`findAllTasksInProgressInOrderOfArrival`)는 옮기지 않는다. 한도 안에서 어느 태스크가 먼저 나가는지는 큐 순서를 따른다.
   개수 확인과 `IN_PROGRESS` 저장은 서로 다른 워크플로우 프로세스에서 일어나므로, 같은 정의의 태스크를 동시에 poll하면
   한도를 잠깐 넘을 수 있다. upstream도 `exceedsLimit`의 개수 질의와 poll 저장이 원자적이지 않아 같은 성질이다. 원자적

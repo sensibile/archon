@@ -96,9 +96,14 @@ defmodule Archon.Runtime.Step.State do
   @spec put_workflow(t(), Workflow.t()) :: t()
   def put_workflow(state, %Workflow{} = workflow), do: %{state | wf: workflow}
 
-  @doc "`ExecutionDAOFacade#createTasks`: saves new tasks as they are."
+  @doc """
+  `ExecutionDAOFacade#createTasks`: saves new tasks with `scheduledTime` set to now, as the
+  upstream DAOs do (`SqliteExecutionDAO#createTasks`). A retried task comes with 0 from the
+  Decider.
+  """
   @spec create_tasks(t(), [Task.t()]) :: t()
-  def create_tasks(state, tasks), do: Enum.reduce(tasks, state, &write(&2, &1))
+  def create_tasks(%__MODULE__{now: now} = state, tasks),
+    do: Enum.reduce(tasks, state, &write(&2, %{&1 | scheduled_time: now}))
 
   @doc """
   `ExecutionDAOFacade#updateTask`: `updateTime` becomes now unless the task is terminal and

@@ -350,6 +350,53 @@ defmodule Archon.Runtime.StepTest do
     assert {:ok, ^stored, [], []} = run(stored, {:cancel_by_parent, "again"})
   end
 
+  describe "retry" do
+    # DeciderService#retry gives the new attempt scheduledTime 0 and the retry delay as
+    # callbackAfterMs; createTasks stamps scheduledTime and addTaskToQueue queues with the delay.
+    test "a retried worker task is queued with its delay and keeps its poll window" do
+      a =
+        simple("a",
+          task_definition: %TaskDef{
+            name: "a",
+            retry_count: 1,
+            retry_delay_seconds: 5,
+            poll_timeout_seconds: 60
+          }
+        )
+
+      {stored, _post} = start([a])
+      failed = %{task(stored, "a") | status: :failed}
+      later = env(now: @now + 1_000, jitter: fn _max -> 0 end, new_id: fn -> "retried" end)
+      {:ok, stored, [], post} = run(%{stored | tasks: [failed]}, :wake, later)
+
+      assert [_failed, %Task{status: :scheduled, retry_count: 1} = retried] = stored.tasks
+      assert retried.scheduled_time == @now + 1_000
+      assert {:queue_push, "a", retried.task_id, 0, 5_000} in post
+      assert List.last(post) == {:wake_at, @now + 1_000 + 61_000}
+
+      {:ok, stored, [], _post} = run(stored, :wake, env(now: @now + 2_000))
+      assert %Workflow{status: :running} = stored
+    end
+
+    # Wait#start: a retried WAIT is SCHEDULED and starts IN_PROGRESS.
+    test "a retried WAIT starts again" do
+      wait =
+        system("WAIT", "wait",
+          input_parameters: %{"duration" => "10 seconds"},
+          task_definition: %TaskDef{name: "wait", retry_count: 1, retry_delay_seconds: 0}
+        )
+
+      {stored, _post} = start([wait])
+      failed = %{hd(stored.tasks) | status: :failed}
+
+      {:ok, stored, [], _post} =
+        run(%{stored | tasks: [failed]}, :wake, env(new_id: fn -> "retried" end))
+
+      assert [_failed, %Task{status: :in_progress, poll_count: 1, retry_count: 1}] =
+               stored.tasks
+    end
+  end
+
   describe "JOIN and WAIT" do
     test "a WAIT is evaluated on :wake and its timeout sets the next one" do
       wait = system("WAIT", "wait", input_parameters: %{"duration" => "10 seconds"})
@@ -360,16 +407,21 @@ defmodule Archon.Runtime.StepTest do
 
       assert List.last(post) == {:wake_at, deadline}
 
-      {:ok, stored, [], post} = run(stored, :wake, env(now: deadline - 4_500))
+      # Upstream queues the WAIT with its duration as the delay, so an earlier :wake leaves it.
+      {:ok, ^stored, [], [{:wake_at, ^deadline}]} =
+        run(stored, :wake, env(now: deadline - 4_500))
 
-      assert [%Task{status: :in_progress, poll_count: 1, callback_after_seconds: 4}] =
+      # Wait#getEvaluationOffset: no time left rounds up to 1 s.
+      {:ok, stored, [], post} = run(stored, :wake, env(now: deadline))
+
+      assert [%Task{status: :in_progress, poll_count: 1, callback_after_seconds: 1}] =
                stored.tasks
 
-      assert List.last(post) == {:wake_at, deadline}
+      assert List.last(post) == {:wake_at, deadline + 1_000}
 
-      {:ok, stored, [], []} = run(stored, :wake, env(now: deadline + 1))
+      {:ok, stored, [], []} = run(stored, :wake, env(now: deadline + 1_000))
       assert [%Task{status: :completed, poll_count: 2, end_time: end_time}] = stored.tasks
-      assert end_time == deadline + 1
+      assert end_time == deadline + 1_000
       assert stored.status == :completed
     end
 
