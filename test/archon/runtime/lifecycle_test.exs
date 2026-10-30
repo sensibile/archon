@@ -1274,6 +1274,15 @@ defmodule Archon.Runtime.LifecycleTest do
       assert [{"SUB_WORKFLOW", status}] = statuses(parent)
       assert status in [:failed, :completed_with_errors]
 
+      me = self()
+
+      RuntimeHooks.install(
+        hook: fn
+          :step, id, {:child_revived, _task_id} -> send(me, {:revive_handled, id})
+          _point, _id, _data -> :ok
+        end
+      )
+
       assert :ok = Lifecycle.restart(child)
       assert workflow(child).status == :running
       assert workflow(child).previous_status == :failed
@@ -1285,13 +1294,51 @@ defmodule Archon.Runtime.LifecycleTest do
       assert :ok = Lifecycle.retry(child, true)
       assert workflow(child).status == :running
 
-      # the walk stops at the optional task: the parent is not revived
-      Process.sleep(50)
+      # the walk stops at the optional task: the parent handled both requests and is not revived
+      assert_receive {:revive_handled, ^root}, 1000
+      assert_receive {:revive_handled, ^root}, 1000
+      await_down(root)
       after_retry = workflow(root)
       assert after_retry.status == :completed
       assert after_retry.last_retried_time == parent.last_retried_time
       assert [{"SUB_WORKFLOW", ^status}] = statuses(after_retry)
       refute last(root, "st").subworkflow_changed
+    end
+  end
+
+  describe "a child that ends in its first decide after a restart" do
+    test "the parent revives before the child's notice and completes with it" do
+      define(~S"""
+      {"name": "lifecycle_instant_child", "version": 1, "tasks": [
+        {"name": "integration_task_1", "taskReferenceName": "t1", "type": "SIMPLE"}]}
+      """)
+
+      define(~S"""
+      {"name": "lifecycle_parent_of_instant", "version": 1, "tasks": [
+        {"name": "sub_workflow_task", "taskReferenceName": "st", "type": "SUB_WORKFLOW",
+         "inputParameters": {},
+         "subWorkflowParam": {"name": "lifecycle_instant_child", "version": 1}}]}
+      """)
+
+      root = start("lifecycle_parent_of_instant", %{})
+      child = child_of(root, "st")
+      fail(child, "t1")
+      await_status(child, :failed)
+      await_status(root, :failed)
+
+      # the latest version ends in its first decide
+      define(~S"""
+      {"name": "lifecycle_instant_child", "version": 2, "tasks": [
+        {"name": "switch", "taskReferenceName": "sw", "type": "SWITCH",
+         "evaluatorType": "value-param", "expression": "x", "inputParameters": {"x": "a"},
+         "decisionCases": {}, "defaultCase": []}]}
+      """)
+
+      assert :ok = Lifecycle.restart(child, true)
+      assert workflow(child).status == :completed
+
+      parent = await_status(root, :completed)
+      assert [{"SUB_WORKFLOW", :completed}] = statuses(parent)
     end
   end
 

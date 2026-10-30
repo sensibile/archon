@@ -256,8 +256,15 @@ defmodule Archon.Runtime.Step.Lifecycle do
           {:conflict, "Workflow: #{long_string(wf)} is not in terminal state, unable to restart."}},
          state}
 
+      definition == nil ->
+        {{:error, {:not_found, "Unable to find definition for #{wf.workflow_id}"}}, state}
+
       wf.status == :completed and not definition.restartable ->
-        {{:error, {:not_found, "Workflow: #{long_string(wf)} is non-restartable"}}, state}
+        # upstream sets the latest definition before the check
+        {{:error,
+          {:not_found,
+           "Workflow: #{long_string(%{wf | workflow_definition: definition})} is non-restartable"}},
+         state}
 
       true ->
         state = State.delete_tasks(state, Enum.map(wf.tasks, & &1.task_id))
@@ -278,8 +285,8 @@ defmodule Archon.Runtime.Step.Lifecycle do
           state
           |> State.put_workflow(wf)
           |> State.save_workflow()
-          |> Decide.settle()
           |> push_parents(true)
+          |> Decide.settle()
 
         {:ok, state}
     end
@@ -321,6 +328,17 @@ defmodule Archon.Runtime.Step.Lifecycle do
     task = %{task | subworkflow_changed: true, status: :in_progress, reason_for_incompletion: nil}
     state = State.save_task(state, task)
 
+    # A child that already ended again (a restart that finished in its first decide) is read
+    # now instead of on the next :wake: its notice reached this workflow before the revival.
+    state =
+      case Map.get(state.env.workflows, Task.sub_workflow_id(task) || "") do
+        %Workflow{status: status} = _child ->
+          if Workflow.terminal?(status), do: State.due(state, [task.task_id]), else: state
+
+        nil ->
+          state
+      end
+
     wf = %{
       State.set_status(state.wf, :running)
       | reason_for_incompletion: nil,
@@ -335,8 +353,8 @@ defmodule Archon.Runtime.Step.Lifecycle do
     state.wf.tasks
     |> Enum.reduce(state, &repair(&2, &1))
     |> State.save_workflow()
-    |> Decide.settle()
     |> push_parents(true)
+    |> Decide.settle()
   end
 
   # The sibling tasks of updateAndPushParents.

@@ -511,7 +511,9 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
   upstream처럼 막지 않는다. Decider는 `PAUSED`면 아무것도 예약하지 않는다. 재개하면 decide하고 타이머를 다시 건다.
 - **재시도의 `resumeSubworkflowTasks`.** 호출자(`Lifecycle`)가 저장소를 읽어 `findLastFailedSubWorkflowIfAny`대로 가장 깊은
   실패 워크플로우를 찾고, 그 프로세스에 재시도를 보낸다. 자식을 읽을 수 없거나 위조 ID로 이미 지난 워크플로우가 나오면 그
-  위 워크플로우를 재시도한다(upstream은 `NotFoundException`).
+  위 워크플로우를 재시도한다(upstream은 `NotFoundException`). 내려간 끝의 자식이 아직 실행 중이면(자식이 도는 중에
+  SUB_WORKFLOW 태스크가 `TIMED_OUT`된 경우) 그 자식의 `Workflow is still running` 오류를 돌려준다. upstream은 그 자식을
+  검사 없이 재시도한다.
 - **재시작.** `useLatestDefinitions`면 호출자가 최신 정의를 찾고 태스크 정의를 박아(`Runtime.populate/1`) 이벤트로 넘긴다.
   실행 중이면 정의를 찾기 전에 프로세스가 conflict로 답한다(upstream의 검사 순서). 태스크는 `Commit.delete_task_ids`로 모두
   지우고, 워크플로우는 같은 Commit에 다시 저장한다(upstream `resetWorkflow` + `createWorkflow`).
@@ -520,6 +522,10 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
   처리한 뒤 자기 부모에게 같은 cast를 보낸다. 한 단계는 태스크를 `IN_PROGRESS`·`subworkflowChanged`로 바꾸고, 워크플로우를
   `RUNNING`으로 되돌려 실패 기록을 지우고, 형제를 처리하고, decide하는 일이다. 그래서 조상은 API 응답 뒤에 차례로 살아난다
   (upstream은 응답 전). 멈추는 조건(태스크 없음, optional, 이미 재시도된 SUB_WORKFLOW 태스크)은 upstream과 같다.
+  - 재개 cast는 decide의 Effect(부모 알림 등)보다 먼저 보낸다. 재시작한 자식이 첫 decide에서 바로 끝나도 부모는 재개를 먼저
+    받는다. 그 알림이 이미 지나갔으면 부모는 되살린 태스크의 자식을 그 자리에서 읽어 반영한다.
+  - 결정 1의 수명 규칙을 고친다. 워크플로우가 종료 상태가 된 프로세스는 바로 끝나지 않고, 우편함이 빈 뒤(0 timeout)
+    끝난다. 그 전에 와 있던 재개 cast를 버리지 않기 위해서다(자체 리뷰에서 찾은 경합).
   - 형제 처리 중 실패한 자식의 재시도(upstream이 `retry(child)`를 부르는 것)는 부모 Commit 뒤 `{:retry_sub_workflow, child_id}`
     post Effect가 자식에 `{:retry, false}`를 call해서 한다(부모 → 자식 방향). 자식은 부모에게 되묻지 않는다. 실패하면 기록만
     남기고, 부모의 30초 재평가가 자식을 읽어 메운다. 자식은 재시도 뒤 바로 decide한다(upstream은 decider 큐에 30초 지연으로
@@ -533,7 +539,9 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
   뒤인 자식이다. 부모가 `{:child_revived}`를 받으려고 활성화되면 그 메시지보다 복구 검사가 먼저 돌기 때문이다. 이 경합은
   시험에서 재현했다. 놓치는 경우는 하나다. 같은 밀리초 안에 자식 재시도가 부모 종료보다 먼저 일어나고, 부모가 자식 종료를
   보내기 전에 죽으면 그 자식은 복구 검사로 정리되지 않는다.
-- **남은 한계.** 부모가 `{:child_revived}`를 처리하기 전에 죽어 cast가 사라지면 부모는 종료 상태로 남는다. upstream도
+- **남은 한계.** 부모가 끝난 뒤 재시도된 자식이 일시정지·재개되면 `previous_status`가 종료 상태가 아니게 되어, 그 뒤
+  복구 검사에서 위 예외를 받지 못한다. 부모가 그 자식의 재개로 살아났으면 부모 태스크가 `CANCELED`가 아니라 영향이 없다.
+  optional 태스크처럼 부모가 살아나지 않은 경우에만 자식이 스스로 종료될 수 있다(upstream은 그대로 둔다). 부모가 `{:child_revived}`를 처리하기 전에 죽어 cast가 사라지면 부모는 종료 상태로 남는다. upstream도
   `updateAndPushParents` 중 서버가 죽으면 같다. Phase 4 복구에서 다시 본다. 재시도가 `failedTaskId`·실패 태스크 이름
   집합·`endTime`을 지우지 않는 점과 재시작이 실패 태스크 이름 집합을 지우지 않는 점은 upstream과 같다.
 

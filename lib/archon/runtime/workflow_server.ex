@@ -53,7 +53,7 @@ defmodule Archon.Runtime.WorkflowServer do
       process ends. `{:start_idempotent, workflow}` answers once the workflow is created and
       decides after the answer (a `:wake`).
     * After a request, a timer or a `:recover`, the process ends normally when the workflow is
-      terminal. Activated with a terminal workflow, it waits `idle_timeout` for the request
+      terminal and no other message is waiting. Activated with a terminal workflow, it waits `idle_timeout` for the request
       that activated it. A running workflow's process hibernates after `hibernate_after`.
 
   ## Timer
@@ -636,15 +636,17 @@ defmodule Archon.Runtime.WorkflowServer do
   defp terminal?(nil), do: false
   defp terminal?(%Workflow{status: status}), do: Workflow.terminal?(status)
 
+  # A process whose workflow ended stops once its mailbox is empty (a zero timeout fires only
+  # then), so a message already waiting, such as a child asking it to revive, is still handled.
   defp reply_and_settle(reply, state) do
     if state.workflow == nil or terminal?(state.workflow),
-      do: {:stop, :normal, reply, state},
+      do: {:reply, reply, state, 0},
       else: {:reply, reply, state}
   end
 
   defp settle(state) do
     if state.workflow == nil or terminal?(state.workflow),
-      do: {:stop, :normal, state},
+      do: {:noreply, state, 0},
       else: noreply(state)
   end
 
