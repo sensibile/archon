@@ -33,7 +33,7 @@ defmodule Archon.Runtime.WorkflowServer do
   worker tasks that have a queue message) and `workflows` (the parent, the children of
   `IN_PROGRESS` and `CANCELED` `SUB_WORKFLOW` tasks and the failure workflow). For
   `{:child_revived, task_id}`, `workflows` holds the children of the `SUB_WORKFLOW` tasks that
-  ended unsuccessfully.
+  ended unsuccessfully and of the task that revives.
 
   ## Client functions
 
@@ -714,8 +714,8 @@ defmodule Archon.Runtime.WorkflowServer do
       event when event in [:wake, :recover] ->
         %{env | queued: queued(env, wf), workflows: workflows(wf)}
 
-      {:child_revived, _task_id} ->
-        %{env | workflows: failed_children(wf)}
+      {:child_revived, task_id} ->
+        %{env | workflows: failed_children(wf, task_id)}
 
       _other ->
         env
@@ -840,11 +840,12 @@ defmodule Archon.Runtime.WorkflowServer do
   end
 
   # The children of the SUB_WORKFLOW tasks that ended unsuccessfully, which a reviving workflow
-  # follows or retries (updateAndPushParents).
-  defp failed_children(%Workflow{tasks: tasks}) do
+  # follows or retries (updateAndPushParents), and the child of the task that revives.
+  defp failed_children(%Workflow{tasks: tasks}, task_id) do
     tasks
     |> Enum.filter(
-      &(&1.task_type == "SUB_WORKFLOW" and Lifecycle.unsuccessful_terminal_task?(&1))
+      &(&1.task_type == "SUB_WORKFLOW" and
+          (&1.task_id == task_id or Lifecycle.unsuccessful_terminal_task?(&1)))
     )
     |> Enum.map(&Task.sub_workflow_id/1)
     |> read_workflows()

@@ -1372,6 +1372,36 @@ defmodule Archon.Runtime.LifecycleTest do
       end
     end
 
+    test "a child that already ended again is reflected at once" do
+      sub = %Task{
+        task_id: "sub",
+        task_type: "SUB_WORKFLOW",
+        status: :failed,
+        reference_task_name: "st",
+        sub_workflow_id: "child",
+        workflow_task: %Archon.Domain.WorkflowTask{name: "st", task_reference_name: "st"}
+      }
+
+      wf = %Workflow{
+        workflow_id: "parent",
+        status: :failed,
+        end_time: 100,
+        tasks: [sub],
+        workflow_definition: %WorkflowDef{name: "p", version: 1, tasks: []}
+      }
+
+      child = %Workflow{workflow_id: "child", status: :completed, output: %{"o" => 1}}
+
+      {:ok, stored, [], _commit, _post} =
+        Step.run(
+          wf,
+          {:child_revived, "sub"},
+          Env.new(now: 1000, workflows: %{"child" => child})
+        )
+
+      assert [%Task{status: :completed, output_data: %{"o" => 1}}] = stored.tasks
+    end
+
     test "a revived workflow asks its own parent after its commit" do
       sub = %Task{
         task_id: "sub",

@@ -542,7 +542,8 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
 - **남은 한계.** 부모가 끝난 뒤 재시도된 자식이 일시정지·재개되면 `previous_status`가 종료 상태가 아니게 되어, 그 뒤
   복구 검사에서 위 예외를 받지 못한다. 부모가 그 자식의 재개로 살아났으면 부모 태스크가 `CANCELED`가 아니라 영향이 없다.
   optional 태스크처럼 부모가 살아나지 않은 경우에만 자식이 스스로 종료될 수 있다(upstream은 그대로 둔다). 부모가 `{:child_revived}`를 처리하기 전에 죽어 cast가 사라지면 부모는 종료 상태로 남는다. upstream도
-  `updateAndPushParents` 중 서버가 죽으면 같다. Phase 4 복구에서 다시 본다. 재시도가 `failedTaskId`·실패 태스크 이름
+  `updateAndPushParents` 중 서버가 죽으면 같다. 종료 상태 부모의 프로세스가 0 timeout으로 끝나는 순간과 cast가 겹쳐도(레지스트리가
+  죽은 pid를 비동기로 지우는 마이크로초 단위의 틈) 같은 일이 생긴다. Phase 4 복구에서 다시 본다. 재시도가 `failedTaskId`·실패 태스크 이름
   집합·`endTime`을 지우지 않는 점과 재시작이 실패 태스크 이름 집합을 지우지 않는 점은 upstream과 같다.
 
 ### 10. 시험 전략
