@@ -584,5 +584,9 @@ Phase 3 마지막 조각에서 옮긴다. upstream 규칙(`pauseWorkflow`: 종�
 - Phase 5 REST는 결정 7의 API만 부르고, 응답 형태와 오류 코드를 ADR 0001의 MVP 계약에 맞춘다. upstream은
   `enforceSchema`가 켜져 있고 스키마가 있는 정의에서 입력·출력을 검증하므로, Phase 5가 정의 등록 REST를 열기 전에 스키마
   검증(검증기 채택)을 별도 ADR로 정해 붙인다. 그 전까지 스키마가 있는 정의는 검증 없이 실행된다.
+- 워커 `TaskResult`의 `subWorkflowId`는 upstream `updateTask`처럼 그대로 저장하고, 부모가 끝날 때 그 ID의 자식에 취소를
+  보낸다. 워커가 다른 워크플로우의 ID를 넣으면 그 워크플로우가 종료될 수 있다(3b Codex 보안 리뷰). upstream OSS는 워커와
+  API 호출자를 신뢰하고 권한 모델이 없으며, 그 호출자는 `DELETE /api/workflow/{id}`로 어떤 워크플로우든 직접 종료할 수 있으므로
+  새 권한을 주지 않는다. BOSS가 2026-10-30 upstream 동작을 유지하기로 정했다. 인증·인가를 들이는 ADR에서 이 경로를 다시 본다.
 - 아직 범위 밖: rerun, skip, 콜백 초기화, 스키마 검증, 실행 로그, 리스너, 외부 payload 저장소, 격리 그룹·실행
   네임스페이스, 여러 노드.
