@@ -1295,6 +1295,71 @@ defmodule Archon.Runtime.LifecycleTest do
     end
   end
 
+  describe "child_revived (the step alone)" do
+    test "a task that is gone or a SUB_WORKFLOW task already retried stops the walk" do
+      sub = %Task{
+        task_id: "sub",
+        task_type: "SUB_WORKFLOW",
+        status: :failed,
+        reference_task_name: "st",
+        retried: true,
+        sub_workflow_id: "child",
+        workflow_task: %Archon.Domain.WorkflowTask{name: "st", task_reference_name: "st"}
+      }
+
+      wf = %Workflow{
+        workflow_id: "parent",
+        parent_workflow_id: "grandparent",
+        parent_workflow_task_id: "gp-task",
+        status: :failed,
+        end_time: 100,
+        tasks: [sub],
+        workflow_definition: %WorkflowDef{name: "p", version: 1}
+      }
+
+      for task_id <- ["gone", "sub"] do
+        assert {:ok, ^wf, [], %Archon.Runtime.Commit{} = commit, []} =
+                 Step.run(wf, {:child_revived, task_id}, Env.new(now: 1000))
+
+        assert commit == %Archon.Runtime.Commit{}
+      end
+    end
+
+    test "a revived workflow asks its own parent after its commit" do
+      sub = %Task{
+        task_id: "sub",
+        task_type: "SUB_WORKFLOW",
+        status: :failed,
+        reference_task_name: "st",
+        sub_workflow_id: "child",
+        workflow_task: %Archon.Domain.WorkflowTask{name: "st", task_reference_name: "st"}
+      }
+
+      wf = %Workflow{
+        workflow_id: "parent",
+        parent_workflow_id: "grandparent",
+        parent_workflow_task_id: "gp-task",
+        status: :failed,
+        failed_task_id: "sub",
+        failed_reference_task_names: ["st"],
+        end_time: 100,
+        tasks: [sub],
+        workflow_definition: %WorkflowDef{name: "p", version: 1, tasks: []}
+      }
+
+      {:ok, stored, [], commit, post} =
+        Step.run(wf, {:child_revived, "sub"}, Env.new(now: 1000, workflows: %{}))
+
+      assert stored.status == :running
+      assert stored.previous_status == :failed
+      assert stored.failed_task_id == nil
+      assert stored.failed_reference_task_names == []
+      assert stored.last_retried_time == 1000
+      assert [%Task{status: :in_progress, reason_for_incompletion: nil}] = commit.upsert_tasks
+      assert {:revive_parent, "grandparent", "gp-task"} in post
+    end
+  end
+
   ## RetryPolicySpec
 
   defp retry_policy(fields) do
