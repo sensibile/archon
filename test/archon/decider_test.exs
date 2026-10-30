@@ -1013,6 +1013,27 @@ defmodule Archon.DeciderTest do
       assert reason == "Task p1 failed with status: FAILED and reason: 'bad'"
     end
 
+    # DeciderService#decide calls checkWorkflowTimeout before it looks at PAUSED.
+    test "a timed-out TIME_OUT_WF workflow terminates as TIMED_OUT, even when paused" do
+      definition = %{linear_definition() | timeout_policy: :time_out_wf, timeout_seconds: 2}
+      task = %Task{reference_task_name: "s1", task_type: "junit_task_l1", status: :in_progress}
+
+      workflow = %Workflow{
+        workflow_definition: definition,
+        create_time: @now - 10_000,
+        tasks: [task]
+      }
+
+      for status <- [:running, :paused] do
+        assert {:terminate, %Termination{status: :timed_out, reason: reason}, _outcome} =
+                 Decider.decide(%{workflow | status: status}, context())
+
+        assert reason ==
+                 "Workflow timed out after 10 seconds. Timeout configured as 2 seconds. " <>
+                   "Timeout policy configured to TIME_OUT_WF"
+      end
+    end
+
     test "an exhausted failure terminates with the failed task" do
       task = %Task{
         task_id: "t1",
