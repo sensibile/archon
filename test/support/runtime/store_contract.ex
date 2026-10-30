@@ -176,6 +176,11 @@ defmodule Archon.Runtime.StoreContract do
         test "a commit with tasks of another or no workflow is refused before writing", ctx do
           create(ctx, workflow("wf1"))
 
+          # SqliteExecutionDAO#validate
+          assert_raise ArgumentError, "Task id cannot be null", fn ->
+            s(ctx, :commit, ["wf1", %Commit{upsert_tasks: [task("wf1", 1, task_id: nil)]}])
+          end
+
           assert_raise ArgumentError, "Workflow instance id cannot be null", fn ->
             s(ctx, :commit, [
               "wf1",
