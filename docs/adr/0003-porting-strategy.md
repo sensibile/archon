@@ -46,5 +46,5 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
 - 각 단계는 앞 단계의 계약 테스트를 통과해야 한다. 골든 픽스처가 단계 사이의 회귀 기준이다.
 - Phase 2부터는 단계를 시작할 때 설계 결정을 별도 ADR로 남긴다.
 - Phase 2~5는 아직 구현되지 않았다.
-  (비고: Phase 2는 [ADR 0014](0014-phase2-decider.md)의 조각 2a~2e로, Phase 3는 [ADR 0018](0018-phase3-otp-runtime.md)의
+  (비고: Phase 2는 [ADR 0014](0014-phase2-decider.md)의 조각 2a~2e로, Phase 3은 [ADR 0018](0018-phase3-otp-runtime.md)의
   조각 3a~3f로 구현했다. Phase 4~5는 아직 구현되지 않았다.)
