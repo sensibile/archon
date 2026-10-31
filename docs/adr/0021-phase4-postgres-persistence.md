@@ -392,7 +392,12 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
   - 멈출 때(`terminate`) 자기가 게시한 epoch가 아직 게시돼 있으면 먼저 거둔다(`clear_epoch/0`). 그래서 락을 다시 잡기 전까지
     런타임 쓰기는 펜싱된다. 정상 종료(`:normal`·`:shutdown`)에서만 `pg_advisory_unlock`을 부르고, 어느 경우든 연결을 닫는다.
   - 설정은 `node_lock_retry_timeout`(10초), `node_lock_check_interval`(5초)이고, 다시 시도 간격은 500ms다. 연결은
-    `Archon.Repo` 설정의 연결 항목만 가져와 `backoff_type: :stop`, `pool_size: 1`로 연다.
+    `Archon.Repo` 설정의 연결 항목만 가져와 `backoff_type: :stop`, `max_restarts: 0`, `pool_size: 1`로 연다. `backoff_type: :stop`만으로는
+    Postgrex 풀이 끊긴 연결을 새 연결(락 없음)로 다시 띄우므로 `max_restarts: 0`으로 풀 자체가 끝나게 해 `{:EXIT, conn, _}`가 온다.
+    주기 확인의 서버 프로세스 비교는 그래도 다시 연결된 경우를 잡는 둘째 장치다.
+  - DB에 닿지 못하는 동안(재시작, failover)도 락이 잡혀 있을 때처럼 `node_lock_retry_timeout` 동안 새 연결로 다시 시도한 뒤
+    `{:stop, {:node_lock_connection, reason}}`로 실패한다. 그래서 짧은 DB 장애가 NodeLock의 연속 재시작으로 감독자 한도를 바로
+    넘기지 않는다. 그보다 긴 장애는 애플리케이션 정지까지 이어질 수 있고, 그때는 배포 환경(오케스트레이터)이 다시 띄운다.
   - 시험용 옵션: `:name`, `:instance`(epoch 표의 스키마), `:lock_key`, `:publish`(epoch 게시 여부). 한 VM에서 다른 노드를
     흉내 낼 때 다른 락 키와 `publish: false`를 쓴다.
   - 락을 못 잡아 시작에 실패하면 `Archon.Runtime.Supervisor`도 시작에 실패하고, 애플리케이션 감독자의 재시작 한도를 넘으면

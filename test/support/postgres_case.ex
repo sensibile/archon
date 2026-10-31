@@ -18,6 +18,7 @@ defmodule Archon.PostgresCase do
 
   alias Archon.Repo
   alias Archon.Runtime.Postgres
+  alias Archon.Runtime.Postgres.NodeLock
 
   # Every table of the migrations except the single node_lease row, which is reset.
   @tables ~w(workflow task outbox queue_message poll_data meta_task_def meta_workflow_def)
@@ -107,19 +108,29 @@ defmodule Archon.PostgresCase do
   end
 
   @doc """
-  Restores the published node epoch after the test. A test that publishes or withdraws an epoch
-  calls it first: on the Postgres backend the running runtime writes with the epoch its
-  `Archon.Runtime.Postgres.NodeLock` published.
+  Restores the published node epoch after the test: the epoch of the runtime's running
+  `Archon.Runtime.Postgres.NodeLock` (Postgres backend), else the one published when it was
+  called. A test that publishes or withdraws an epoch calls it first.
   """
   @spec keep_epoch() :: :ok
   def keep_epoch do
     saved = Postgres.epoch()
 
     ExUnit.Callbacks.on_exit(fn ->
-      if saved, do: Postgres.put_epoch(saved), else: Postgres.clear_epoch()
+      # The runtime's node lock may have restarted meanwhile with a new epoch.
+      case runtime_epoch() || saved do
+        nil -> Postgres.clear_epoch()
+        epoch -> Postgres.put_epoch(epoch)
+      end
     end)
 
     :ok
+  end
+
+  defp runtime_epoch do
+    if Process.whereis(NodeLock), do: NodeLock.epoch()
+  catch
+    :exit, _reason -> nil
   end
 
   @doc "Empties every table of `instance`'s schema and resets the node epoch to 0."

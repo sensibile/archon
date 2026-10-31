@@ -157,5 +157,23 @@ defmodule Archon.Runtime.DurabilityTest do
     assert Runtime.queue().remove("durability", "m") == :ok
   end
 
+  test "a node lock that stops restarts the runtime after it, which takes the lock again" do
+    id = start_simple(%{"x" => 1})
+    a = task(id, "task_a_ref")
+    previous = NodeLock.epoch()
+    registry = Process.whereis(Archon.Runtime.Registry)
+
+    Process.exit(Process.whereis(NodeLock), :kill)
+
+    assert eventually(fn ->
+             Process.whereis(Archon.Runtime.Registry) not in [nil, registry] and
+               Process.whereis(Archon.Runtime.Waker) != nil
+           end)
+
+    assert NodeLock.epoch() > previous
+    assert Postgres.epoch() == NodeLock.epoch()
+    assert %Task{status: :in_progress} = WorkflowServer.poll(id, a.task_id, "w")
+  end
+
   defp pending(id), do: Runtime.store().pending_outbox(id)
 end

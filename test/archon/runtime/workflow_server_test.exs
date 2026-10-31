@@ -149,6 +149,8 @@ defmodule Archon.Runtime.WorkflowServerTest do
     end
   end
 
+  defp await_down_pid(pid), do: eventually(fn -> not Process.alive?(pid) end)
+
   describe "crashes" do
     test "a killed process restarts from the store and repairs what it lost" do
       id = start_simple(%{"x" => 1})
@@ -157,7 +159,17 @@ defmodule Archon.Runtime.WorkflowServerTest do
       Runtime.queue().remove("archon_task_a", task_id)
 
       Process.exit(pid, :kill)
-      restarted = eventually(fn -> (p = WorkflowServer.whereis(id)) != pid and p end)
+      await_down_pid(pid)
+
+      # Restarted by its supervisor, or activated here when other tests used up its restarts.
+      restarted =
+        eventually(fn ->
+          case WorkflowServer.activate(id) do
+            {:ok, p} when p != pid -> p
+            _other -> nil
+          end
+        end)
+
       assert is_pid(restarted)
 
       eventually(fn -> Runtime.queue().contains?("archon_task_a", task_id) end)

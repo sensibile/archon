@@ -79,8 +79,9 @@ defmodule Archon.Runtime.OutboxTest do
   defp await_status(id, status),
     do: eventually(fn -> match?(%Workflow{status: ^status}, workflow(id)) and workflow(id) end)
 
+  # A child workflow decides after its start answered, so its task may not be stored yet.
   defp child_of(id),
-    do: eventually(fn -> Task.sub_workflow_id(task(id, "st")) end)
+    do: eventually(fn -> (st = task(id, "st")) && Task.sub_workflow_id(st) end)
 
   # The last instance of t1, once it is scheduled.
   defp finish(id, status) do
@@ -545,7 +546,7 @@ defmodule Archon.Runtime.OutboxTest do
     test "is cancelled from a task under the task supervisor" do
       grandparent = start("outbox_grandparent")
       parent = child_of(grandparent)
-      sub_task = eventually(fn -> task(parent, "st").sub_workflow_id && task(parent, "st") end)
+      sub_task = eventually(fn -> (st = task(parent, "st")) && st.sub_workflow_id && st end)
       test = self()
 
       assert %Task{} =

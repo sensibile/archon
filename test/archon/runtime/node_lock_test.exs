@@ -44,6 +44,16 @@ defmodule Archon.Runtime.Postgres.NodeLockTest do
     Elixir.Task.async(fn -> GenServer.start(NodeLock, options(instance, opts)) end)
   end
 
+  # Awaits start_unlinked/2; the lock is stopped even when the test fails before it does.
+  defp await_unlinked(task) do
+    result = Elixir.Task.await(task)
+
+    with {:ok, pid} <- result,
+         do: on_exit(fn -> Process.exit(pid, :shutdown) end)
+
+    result
+  end
+
   defp options(instance, opts),
     do: Keyword.merge([name: nil, instance: instance, lock_key: @key, check_interval: 50], opts)
 
@@ -128,13 +138,23 @@ defmodule Archon.Runtime.Postgres.NodeLockTest do
     :ok = GenServer.stop(lock)
   end
 
+  test "a database it cannot reach is tried again, then fails the start", %{instance: instance} do
+    started = System.monotonic_time(:millisecond)
+
+    assert {:error, {:node_lock_connection, _reason}} =
+             start(instance, connection: [port: 1], retry_timeout: 300, retry_interval: 50)
+
+    assert System.monotonic_time(:millisecond) - started >= 250
+    assert Postgres.epoch() == nil
+  end
+
   test "takes the lock its previous holder released while retrying", %{instance: instance} do
     {:ok, first} = start(instance)
     second = start_unlinked(instance, retry_timeout: 5_000, retry_interval: 20)
     Process.sleep(100)
 
     :ok = GenServer.stop(first)
-    assert {:ok, lock} = Elixir.Task.await(second)
+    assert {:ok, lock} = await_unlinked(second)
     assert NodeLock.epoch(lock) == 2
     assert Postgres.epoch() == 2
     :ok = GenServer.stop(lock)
@@ -201,7 +221,7 @@ defmodule Archon.Runtime.Postgres.NodeLockTest do
 
     send(in_flight.pid, :commit)
     assert Elixir.Task.await(in_flight) == {:ok, :inserted}
-    assert {:ok, new_lock} = Elixir.Task.await(new)
+    assert {:ok, new_lock} = await_unlinked(new)
     assert NodeLock.epoch(new_lock) == old_epoch + 1
 
     assert Elixir.Task.await(waiting) == {:error, :fenced}
