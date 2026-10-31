@@ -143,7 +143,9 @@ defmodule Archon.Runtime.OutboxTest do
 
       assert {:error, _reason} = finish(child, :completed)
 
-      # the restarted process finds the entry and its runner tells the parent
+      # the next process of the child (restarted, or activated here when other tests used up
+      # the supervisor's restarts) finds the entry and its runner tells the parent
+      eventually(fn -> match?({:ok, _pid}, WorkflowServer.activate(child)) end)
       assert await_status(parent, :completed)
       assert eventually(fn -> pending(child) == [] end)
     end
@@ -237,9 +239,11 @@ defmodule Archon.Runtime.OutboxTest do
 
       Process.exit(first, :kill)
 
+      # restarted by the supervisor or activated here, whichever comes first
       second =
         eventually(fn ->
-          WorkflowServer.whereis(id) not in [nil, first] and WorkflowServer.whereis(id)
+          match?({:ok, pid} when pid != first, WorkflowServer.activate(id)) and
+            WorkflowServer.whereis(id)
         end)
 
       assert is_pid(second)
