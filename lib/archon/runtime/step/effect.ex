@@ -16,22 +16,29 @@ defmodule Archon.Runtime.Step.Effect do
     * `{:start_sub_workflow, task_id, start}` - starts the child of a `SUB_WORKFLOW` task with
       `Archon.Runtime.start_workflow_idempotent/1`. The result goes back to the step as
       `{:sub_workflow_started, task_id, result}`.
-    * `{:terminate_sub_workflow, workflow_id, reason}` - sends `{:cancel_by_parent, reason}` to
-      a child. A child that does not exist counts as done (ADR 0018, decision 5).
-    * `{:notify_parent, parent_workflow_id, parent_task_id, workflow}` - casts
-      `{:child_changed, parent_task_id, workflow}` to the parent. `workflow` is the stored child.
-    * `{:start_failure_workflow, start}` - starts the failure workflow. A failure goes back as
+    * `{:terminate_sub_workflow, workflow_id, reason}` - sends `{:cancel_by_parent, reason, nil}`
+      to a child. A child that does not exist counts as done (ADR 0018, decision 5). In `post`
+      it is `{:terminate_sub_workflow, workflow_id, reason, parent_end_count}`, with the parent's
+      `endCount` once the commit is applied (ADR 0021, decision 4).
+    * `{:notify_parent, parent_workflow_id, parent_task_id, workflow}` - calls the parent with
+      `{:child_changed, parent_task_id, workflow}`. `workflow` is the stored child; the outbox
+      entry holds `nil` and the runner reads the child when it runs.
+    * `{:start_failure_workflow, start}` - starts the failure workflow. A refusal goes back as
       `{:failure_workflow_started, {:error, reason}}`.
-    * `{:revive_parent, parent_workflow_id, parent_task_id}` - casts
-      `{:child_revived, parent_task_id}` to the parent (upstream `updateAndPushParents`).
+    * `{:revive_parent, parent_workflow_id, parent_task_id}` - calls the parent with
+      `{:child_revived, parent_task_id}` (upstream `updateAndPushParents`).
     * `{:retry_sub_workflow, workflow_id}` - sends `{:retry, false}` to a child that failed, from
-      a parent that revives. A failure is only logged: the parent's re-evaluation reads the
-      child.
+      a parent that revives.
     * `:cancel_wake` - cancels the `:wake` timer (a paused workflow).
     * `{:wake_at, ms}` - sets the `:wake` timer to the epoch time `ms`, replacing the current
       one. `ms` equal to `now` asks for the next `:wake` at once.
     * `{:wake_before, ms}` - moves the `:wake` timer to `ms` only when it is set later than that
       (an event that did not decide).
+
+  `Archon.Runtime.WorkflowServer` saves the `post` effects on other workflows
+  (`:terminate_sub_workflow`, `:notify_parent`, `:start_failure_workflow`, `:revive_parent`,
+  `:retry_sub_workflow`) in the commit's outbox, which `Archon.Runtime.Outbox` runs (ADR 0021,
+  decision 4).
   """
 
   alias Archon.Domain.{Workflow, WorkflowDef}
@@ -62,6 +69,7 @@ defmodule Archon.Runtime.Step.Effect do
           | {:queue_postpone, String.t(), String.t(), integer(), non_neg_integer()}
           | {:start_sub_workflow, String.t(), start()}
           | {:terminate_sub_workflow, String.t(), String.t()}
+          | {:terminate_sub_workflow, String.t(), String.t(), non_neg_integer()}
           | {:notify_parent, String.t(), String.t() | nil, Workflow.t() | nil}
           | {:start_failure_workflow, start()}
           | {:revive_parent, String.t(), String.t() | nil}

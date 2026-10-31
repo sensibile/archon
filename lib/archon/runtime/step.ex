@@ -140,12 +140,25 @@ defmodule Archon.Runtime.Step do
     end
   end
 
-  defp handle({:failure_workflow_started, {:error, reason}}, state),
-    do: {:ok, Terminate.failure_workflow_failed(state, reason)}
+  # A workflow retried or restarted since the start was refused keeps its new run's output
+  # (the outbox may report it later, ADR 0021, decision 4).
+  defp handle({:failure_workflow_started, {:error, reason}}, %State{wf: wf} = state) do
+    if Workflow.terminal?(wf.status),
+      do: {:ok, Terminate.failure_workflow_failed(state, reason)},
+      else: {:ok, state}
+  end
 
   defp handle({:terminate, reason}, state), do: Terminate.by_request(state, reason)
 
-  defp handle({:cancel_by_parent, reason}, state), do: {:ok, Terminate.by_parent(state, reason)}
+  # ADR 0021, decision 4: an outbox termination run again must not end a child that ran again
+  # after reading this end of its parent.
+  defp handle({:cancel_by_parent, _reason, parent_end_count}, %State{wf: wf} = state)
+       when is_integer(parent_end_count) and wf.revived_parent_end_count != 0 and
+              wf.revived_parent_end_count >= parent_end_count,
+       do: {:ok, state}
+
+  defp handle({:cancel_by_parent, reason, _parent_end_count}, state),
+    do: {:ok, Terminate.by_parent(state, reason)}
 
   defp handle(:pause, state), do: Lifecycle.pause(state)
   defp handle(:resume, state), do: Lifecycle.resume(state)
@@ -191,11 +204,14 @@ defmodule Archon.Runtime.Step do
   end
 
   defp finish(reply, %State{} = state) do
+    end_count = if state.stored, do: state.stored.end_count, else: 0
+
     post =
       state.post
       |> Enum.reverse()
       |> Enum.map(fn
         {:notify_parent, parent, task, _child} -> {:notify_parent, parent, task, state.stored}
+        {:terminate_sub_workflow, id, reason} -> {:terminate_sub_workflow, id, reason, end_count}
         effect -> effect
       end)
       |> Enum.filter(&still_wanted?(state, &1))

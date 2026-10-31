@@ -8,6 +8,7 @@
 - 갱신: 2026-10-31 조각 4c가 결정 2에 색인 열 NUL·잘못된 UTF-8의 처리(추가는 `ArgumentError`, 조회·삭제는 없는 것으로 봄)를, 결정 7에 오류 반환이 없는 콜백의 펜싱 실패(`FencedError`)를 적었다.
 - 갱신: 2026-10-31 조각 4d가 결정 4의 빈 Commit 판정을 새 필드 다섯 모두로 넓히고(`wake` 포함), 결정 5에 같은 단계 안의 개수 반영과 검사 밖 경로를, 결정 3에 큐 Effect를 더는 `Effects`가 실행하지 않음과 혼합 거절의 형태를 적었다.
 - 갱신: 2026-10-31 조각 4f가 결정 2에 `Store.Postgres`의 쓰기 전 검사(태스크 `seq`·상태, JSON으로 바꿀 수 없는 값, 페이지 커서)와 poll 데이터를, 결정 3에 `commit/2`의 `{:error, :fenced}`와 공용 검사 `Commit.check!/2`를, 결정 4에 outbox 항목의 저장 모양을, 결정 5에 한도 잠금 키와 잠금 순서(이름 순이 아니라 키 순)를 적었다.
+- 갱신: 2026-10-31 조각 4e가 결정 4에 실행기의 구현 세부(모듈, 결과 값, 재시도 지연 설정, 시험 훅, `notify_parent` 항목의 자식, 조상 처리)를, 결정 10의 L2에 부모의 되살림 요청(`child_revived`)도 `revivedParentEndCount`를 찍는다는 것을 적었다.
 
 ## 맥락
 
@@ -247,6 +248,24 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
   `:ok`, 부모 알림은 저장소의 자식 상태를 반영할 뿐이고, 실패 워크플로우 시작은 저장된 ID의 `:conflict`를 성공으로
   본다(3e 구현). `child_revived`와 `retry`가 이미 실행 중인 대상에 무해한지는 조각 4e가 시험으로 확인하고, 아니면 그
   처리를 멱등하게 고친다.
+- **구현 세부(조각 4e).**
+  - 실행기는 `Archon.Runtime.Outbox`다. 결과는 `:done`, `{:retry, reason}`, `{:feedback, id, event}`, `{:already_registered, pid}`,
+    `:owner_down`(소유 프로세스가 먼저 끝남)이다. 프로세스는 `:done`이면 저장소의 남은 항목을 다시 읽어 있으면 새로 띄우고,
+    `{:retry, _}`와 실행기 Task의 비정상 종료는 지연 뒤 다시 띄운다. 첫 지연은 설정 `outbox_retry_ms`(기본 1초)이고 두 배씩
+    `workflow_offset_timeout_ms`까지 늘며, `:done`이면 처음으로 돌아간다. 되먹임 이벤트의 Commit이 실패하면(예외 격리) 항목이
+    남으므로 지연 뒤 다시 띄운다.
+  - 실행기를 띄우는 때는 메시지 처리가 끝나 답한 뒤다(답과 함께 `{:continue, :outbox}`). 그래서 최상위 `{:start}`가 실패해 지운 워크플로우의 항목은 실행되지 않는다.
+  - `:notify_parent` 항목은 메모리 저장소에도 자식 없이(`nil`) 넣고, 실행기가 실행할 때 소유 워크플로우를 읽어 보낸다.
+    두 저장소가 같은 값을 보낸다.
+  - `SubWorkflows.terminate_child/4`는 옵션 `end_count:`(outbox 항목의 부모 `endCount`)와 `in_process: true`(종료 경로의 `pre`)를
+    받는다. 조상을 가리키는 자식 종료는 `pre`일 때만 `TaskSupervisor`의 Task로 넘기고, 실행기 안에서는 직접 불러 기다린다
+    (실행기는 워크플로우 프로세스 밖이라 조상이 이 워크플로우를 다시 불러도 막히지 않는다). 자기 자신을 가리키는 종료와
+    `retry_child/2`의 자기·조상 건너뛰기는 3e 그대로 `:ok`(ack)다.
+  - 실패 워크플로우 시작에서 시작한 워크플로우의 프로세스가 단계 예외로 돌려준 거절은 `start_child/1`처럼 업무 오류(되먹임)로,
+    프로세스·저장소 쪽 실패(예외 격리 태그, 호출 exit)는 `{:error, :transient, message}`(재시도)로 가른다. 실행기 안 호출자 쪽에서
+    raise된 예외(정의 조회 중 DB 장애 등)는 일시적일 수 있으므로 `start_child/1`의 호출자 쪽 예외처럼 재시도한다.
+  - `Env.outbox_pending?`는 `:recover`에서 워크플로우가 종료 상태일 때만 읽는다(그 값을 쓰는 검사가 종료 상태 검사뿐이다).
+  - 시험 훅 지점 `:outbox`(항목 실행 전, `{id, effect}`)와 `:outbox_ack`(ack 전, `id`)를 더했다.
 - **다시 실행된 자식 종료가 재시작된 자식을 죽이지 않게.** 자식 종료 요청이 실행된 뒤 ack 전에 실행기가 죽고, 그 사이 자식이
   재시도·재시작되면 다시 실행된 요청이 새로 실행 중인 자식을 다시 종료할 수 있다. 그래서 outbox의 `:terminate_sub_workflow`는
   그 Commit 뒤 부모의 `endCount`를 함께 담고(`{:terminate_sub_workflow, child_id, reason, parent_end_count}`), 자식은
@@ -381,7 +400,7 @@ Archon.Runtime.Supervisor (rest_for_one)
 | 번호 | 처리 | 근거 |
 |---|---|---|
 | L1 | 해결: 결정 4(`:revive_parent`를 outbox + `call`, 살아 있는 프로세스의 재시도) | 부모가 처리한 뒤에만 항목을 지운다 |
-| L2 | 해결: `Workflow`에 내부 필드 둘(`wire: false`)을 더한다. `endCount`는 워크플로우가 종료 상태가 아닌 상태(`RUNNING`·`PAUSED`)에서 종료 상태로 바뀔 때마다 1씩 오른다(`State.set_status`에서 이전 상태가 종료 상태가 아니고 새 상태가 종료 상태일 때. 요청으로 다시 종료된 `FAILED` 워크플로우처럼 종료 상태끼리의 전이는 올리지 않는다. 종료 상태를 다시 저장하며 `endTime`을 새로 찍는 일, 예를 들어 실패 워크플로우 되먹임은 올리지 않는다). `revivedParentEndCount`는 종료 상태의 자식이 재시도·재시작으로 다시 실행될 때, 그 처리에서 저장소로 읽은 부모의 `endCount`(부모가 끝나지 않았거나 없으면 0)다. 일시정지·재개는 둘 다 바꾸지 않는다. 이를 위해 `WorkflowServer.env/2`는 `{:retry, _}`·`{:restart, _}`에서도 부모를 `Env.workflows`에 읽는다(조각 4e). `Step.Lifecycle.revived_after?/2`는 `previous_status`와 시각 비교 대신 "`revivedParentEndCount`가 0이 아니고 지금 부모의 `endCount`와 같다"로 판정한다. 자식이 부모의 그 종료를 읽은 뒤에 다시 실행되었다는 인과 관계를 저장하므로 같은 밀리초에도 순서가 갈리고, 뒤의 종료 상태 저장이 `endTime`을 바꿔도 흔들리지 않는다. 부모가 그 뒤 재개되어 다시 끝나면 `endCount`가 올라 일반 규칙으로 돌아간다 | 시각이 아니라 관찰한 종료로 순서를 정한다 |
+| L2 | 해결: `Workflow`에 내부 필드 둘(`wire: false`)을 더한다. `endCount`는 워크플로우가 종료 상태가 아닌 상태(`RUNNING`·`PAUSED`)에서 종료 상태로 바뀔 때마다 1씩 오른다(`State.set_status`에서 이전 상태가 종료 상태가 아니고 새 상태가 종료 상태일 때. 요청으로 다시 종료된 `FAILED` 워크플로우처럼 종료 상태끼리의 전이는 올리지 않는다. 종료 상태를 다시 저장하며 `endTime`을 새로 찍는 일, 예를 들어 실패 워크플로우 되먹임은 올리지 않는다). `revivedParentEndCount`는 종료 상태의 자식이 재시도·재시작으로 다시 실행될 때, 그 처리에서 저장소로 읽은 부모의 `endCount`(부모가 끝나지 않았거나 없으면 0)다. 종료 상태의 워크플로우가 자기 자식의 되살림 요청(`child_revived`)으로 다시 실행될 때도 같다(조각 4e. 그 워크플로우도 자기 부모 쪽에서 보면 다시 실행된 자식이고, 이전 판정은 `lastRetriedTime`으로 이 경우도 가렸다). 일시정지·재개는 둘 다 바꾸지 않는다. 이를 위해 `WorkflowServer.env/2`는 `{:retry, _}`·`{:restart, _}`·`{:child_revived, _}`에서도 부모를 `Env.workflows`에 읽는다(조각 4e). `Step.Lifecycle.revived_after?/2`는 `previous_status`와 시각 비교 대신 "`revivedParentEndCount`가 0이 아니고 지금 부모의 `endCount`와 같다"로 판정한다. 자식이 부모의 그 종료를 읽은 뒤에 다시 실행되었다는 인과 관계를 저장하므로 같은 밀리초에도 순서가 갈리고, 뒤의 종료 상태 저장이 `endTime`을 바꿔도 흔들리지 않는다. 부모가 그 뒤 재개되어 다시 끝나면 `endCount`가 올라 일반 규칙으로 돌아간다 | 시각이 아니라 관찰한 종료로 순서를 정한다 |
 | L3 | 수용 | 결과 상태에 차이가 없는 오류 경로다. Phase 5 REST가 오류 코드를 맞출 때 upstream 문구와 함께 다시 본다 |
 | L4 | 수용 | 결과 상태가 같고 반영이 더 이르다(ADR 0018 "하위 워크플로우 완료 알림" 차이와 같은 성질) |
 | L5 | 해결: `WorkflowServer`가 `env/2` 실패를 `{:env, reason}`으로 감싸 예외 격리로 보내고, 하위 워크플로우 시작은 이 오류를 일시적 오류로 분류해 태스크를 `SCHEDULED`로 둔다(`subWorkflowLaunchError`는 `"env: ..."`). 저장소 구현은 DB 장애에서 raise해도 된다. 시험용 훅 지점 `:env`(env를 읽기 전)를 더했다(조각 4d) | DB 장애는 일시적이다 |

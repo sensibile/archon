@@ -8,12 +8,15 @@ defmodule Archon.Runtime.Supervisor do
 
       Archon.Runtime.Supervisor
       ├── metadata, store and queue (`config :archon, Archon.Runtime`, memory by default)
-      ├── Archon.Runtime.Registry            (workflow ID → process)
+      ├── Archon.Runtime.Registry            (workflow ID → process, {:outbox, ID} → runner)
+      ├── Archon.Runtime.TaskSupervisor      (outbox runners and ancestor cancels, ADR 0021)
       ├── Archon.Runtime.WorkflowSupervisor  (a DynamicSupervisor of Archon.Runtime.WorkflowServer)
       └── Archon.Runtime.Recovery            (activates the running workflows once)
 
   When the store or the queue restarts, the registry and every workflow process restart after
-  it and `Archon.Runtime.Recovery` activates the running workflows again.
+  it and `Archon.Runtime.Recovery` activates the running workflows again. When the task
+  supervisor restarts, the workflow processes restart after it and run the outbox entries left
+  when they are activated again (ADR 0021, decision 8).
 
   The store writes a commit's queue operations with it (ADR 0021, decision 3), so the store and
   the queue must be the same backend: a configuration that mixes them, or names one this module
@@ -53,6 +56,7 @@ defmodule Archon.Runtime.Supervisor do
       Runtime.store(),
       {Runtime.queue(), clock: &Runtime.now/0},
       {Registry, keys: :unique, name: Archon.Runtime.Registry},
+      {Task.Supervisor, name: Archon.Runtime.TaskSupervisor},
       {DynamicSupervisor, name: Archon.Runtime.WorkflowSupervisor, strategy: :one_for_one},
       Archon.Runtime.Recovery
     ]

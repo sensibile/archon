@@ -368,10 +368,13 @@ defmodule Archon.Runtime.StepTest do
     child = new_workflow([], status: :completed, tasks: [])
 
     {:ok, stored, [], []} =
-      run(child, {:cancel_by_parent, "Parent workflow has been terminated with status FAILED"})
+      run(
+        child,
+        {:cancel_by_parent, "Parent workflow has been terminated with status FAILED", nil}
+      )
 
     assert {stored.status, stored.previous_status} == {:terminated, :completed}
-    assert {:ok, ^stored, [], []} = run(stored, {:cancel_by_parent, "again"})
+    assert {:ok, ^stored, [], []} = run(stored, {:cancel_by_parent, "again", 1})
   end
 
   describe "retry" do
@@ -721,7 +724,7 @@ defmodule Archon.Runtime.StepTest do
 
       assert [
                {:terminate_sub_workflow, "c",
-                "Parent workflow has been terminated with status FAILED"},
+                "Parent workflow has been terminated with status FAILED", 0},
                {:start_failure_workflow, %{workflow_id: "fw", name: "on_failure"}}
              ] = post
     end

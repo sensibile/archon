@@ -22,7 +22,9 @@ defmodule Archon.Runtime.Step.Event do
       `{:ok, child}`, `{:error, :transient, message}` or `{:error, message}`.
     * `{:failure_workflow_started, {:error, message}}` - the failure workflow did not start.
     * `{:terminate, reason}` - a termination request (`DELETE /api/workflow/{id}`).
-    * `{:cancel_by_parent, reason}` - the parent workflow ended.
+    * `{:cancel_by_parent, reason, parent_end_count}` - the parent workflow ended. A child that
+      ran again after reading that end of its parent (`revivedParentEndCount` at least
+      `parent_end_count`, ADR 0021, decision 4) stays as it is; `nil` skips the check.
     * `:pause`, `:resume` - upstream `pauseWorkflow`, `resumeWorkflow`.
     * `{:retry, push_parents?}` - upstream `retry`; without `push_parents?` the parent is not
       asked to revive (a parent retrying its failed child, `updateAndPushParents`).
@@ -48,7 +50,7 @@ defmodule Archon.Runtime.Step.Event do
           | {:sub_workflow_started, String.t(), sub_workflow_result()}
           | {:failure_workflow_started, {:error, String.t()}}
           | {:terminate, String.t() | nil}
-          | {:cancel_by_parent, String.t()}
+          | {:cancel_by_parent, String.t(), non_neg_integer() | nil}
           | :pause
           | :resume
           | {:retry, boolean()}
