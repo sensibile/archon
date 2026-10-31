@@ -15,7 +15,7 @@ defmodule Archon.Runtime.Postgres.NodeLock do
   `{:stop, :another_node_holds_the_database}`. A database it cannot reach is tried again for
   the same time on new connections (a restart or failover), then fails the start with
   `{:stop, {:node_lock_connection, reason}}`. With the lock it raises the epoch in
-  `node_lease` (`Archon.Runtime.Postgres.advance_epoch/1`) and publishes it
+  `node_lease` on its connection (`Archon.Runtime.Postgres.advance_epoch/3`) and publishes it
   (`Archon.Runtime.Postgres.put_epoch/1`), which lets the runtime's writes pass the fence.
 
   Every `check_interval` it checks, on its connection, that the same server process still holds
@@ -46,10 +46,14 @@ defmodule Archon.Runtime.Postgres.NodeLock do
   alias Archon.Runtime
   alias Archon.Runtime.Postgres
 
-  # The repository options that describe the connection; the pool and Ecto options are left out.
-  @connection_keys ~w(hostname port username password database socket socket_dir ssl
-                      socket_options parameters connect_timeout handshake_timeout ping_timeout
-                      timeout prepare transport_opts endpoints)a
+  # The repository options that are not the connection's: Ecto's, the pool's and the name. Every
+  # other option (endpoints with target_server_type, configure, ssl, ...) selects and opens the
+  # same server as the repository.
+  @repository_keys ~w(name otp_app repo url pool pool_size pool_count queue_target
+                      queue_interval log stacktrace telemetry_prefix telemetry_options
+                      migration_source migration_lock migration_primary_key
+                      migration_timestamps migration_default_prefix migration_repo priv
+                      start_apps_before_migration)a
 
   defmodule State do
     @moduledoc false
@@ -99,13 +103,15 @@ defmodule Archon.Runtime.Postgres.NodeLock do
   end
 
   # Tries until the deadline both while another node holds the lock and while the database
-  # cannot be reached (a restart or failover), on a new connection after a failed one. Raising
-  # the epoch goes through Archon.Repo, whose pool may still be reconnecting: a failure there
-  # releases the lock (closing the connection) and is tried again too.
+  # cannot be reached (a restart or failover), on a new connection after a failed one. A failure
+  # to raise the epoch releases the lock (closing the connection) and is tried again too.
   defp acquire(%State{instance: instance} = state, {deadline, interval, overrides} = retry) do
+    # Each attempt waits at most until the deadline, also on a connection that stalls.
+    timeout = max(deadline - System.monotonic_time(:millisecond), 1)
+
     result =
-      case connect(instance, overrides) do
-        {:ok, conn} -> lock(conn, state)
+      case connect(instance, overrides, timeout) do
+        {:ok, conn} -> lock(conn, state, timeout)
         {:error, reason} -> {:error, reason}
       end
 
@@ -123,10 +129,10 @@ defmodule Archon.Runtime.Postgres.NodeLock do
     end
   end
 
-  defp lock(conn, %State{instance: instance, lock_key: key}) do
-    case try_lock(conn, key) do
+  defp lock(conn, %State{instance: instance, lock_key: key}, timeout) do
+    case try_lock(conn, key, timeout) do
       {:ok, true, backend_pid} ->
-        case advance_epoch(instance) do
+        case advance_epoch(instance, conn, timeout) do
           {:ok, epoch} ->
             {:ok, conn, backend_pid, epoch}
 
@@ -150,24 +156,40 @@ defmodule Archon.Runtime.Postgres.NodeLock do
 
   # `max_restarts: 0`: the pool does not replace a lost connection with one that lacks the lock
   # but exits, and this process gets its {:EXIT, conn, _}.
-  defp connect(%Postgres{repo: repo}, overrides) do
-    repo.config()
-    |> Keyword.take(@connection_keys)
+  defp connect(%Postgres{repo: repo}, overrides, timeout) do
+    config = Keyword.drop(repo.config(), @repository_keys)
+    # Postgrex's defaults: 5 s to connect, 15 s for the handshake.
+    connect_timeout = min(Keyword.get(config, :connect_timeout, 5_000), timeout)
+    handshake_timeout = min(Keyword.get(config, :handshake_timeout, 15_000), timeout)
+
+    config
     |> Keyword.merge(overrides)
-    |> Keyword.merge(backoff_type: :stop, max_restarts: 0, pool_size: 1, name: nil)
+    |> Keyword.merge(
+      backoff_type: :stop,
+      max_restarts: 0,
+      pool_size: 1,
+      connect_timeout: connect_timeout,
+      handshake_timeout: handshake_timeout,
+      queue_target: timeout,
+      queue_interval: timeout
+    )
     |> Postgrex.start_link()
   end
 
-  defp advance_epoch(instance) do
-    Postgres.advance_epoch(instance)
+  # On this connection, so that the attempt is bounded by the deadline and does not wait for the
+  # repository's pool to reconnect after an outage.
+  defp advance_epoch(instance, conn, timeout) do
+    Postgres.advance_epoch(instance, conn, timeout)
   rescue
     exception -> {:error, exception}
   catch
     :exit, reason -> {:error, reason}
   end
 
-  defp try_lock(conn, key) do
-    case Postgrex.query(conn, "SELECT pg_try_advisory_lock($1), pg_backend_pid()", [key]) do
+  defp try_lock(conn, key, timeout) do
+    sql = "SELECT pg_try_advisory_lock($1), pg_backend_pid()"
+
+    case Postgrex.query(conn, sql, [key], timeout: timeout) do
       {:ok, %{rows: [[held?, backend_pid]]}} -> {:ok, held?, backend_pid}
       {:error, exception} -> {:error, exception}
     end

@@ -153,6 +153,19 @@ defmodule Archon.Runtime.Postgres.NodeLockTest do
     assert Postgres.epoch() == nil
   end
 
+  test "a database that accepts but never answers fails the start within the retry window",
+       %{instance: instance} do
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false])
+    {:ok, port} = :inet.port(listener)
+    on_exit(fn -> :gen_tcp.close(listener) end)
+    started = System.monotonic_time(:millisecond)
+
+    assert {:error, {:node_lock_connection, _reason}} =
+             start(instance, connection: [port: port], retry_timeout: 300, retry_interval: 50)
+
+    assert System.monotonic_time(:millisecond) - started < 2_000
+  end
+
   test "takes the lock its previous holder released while retrying", %{instance: instance} do
     {:ok, first} = start(instance)
     second = start_unlinked(instance, retry_timeout: 5_000, retry_interval: 20)
