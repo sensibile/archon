@@ -87,7 +87,8 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   같아서 그대로 두면 MVP 액션으로 들어간다(예: `POST /api/workflow/test`가 "test"라는 워크플로우를 시작). 라우터는 이 리터럴
   경로를 매개변수 경로보다 먼저 두고 404로 보낸다. 목록은 upstream 컨트롤러에서 옮긴다.
   - `WorkflowResource`: `GET /api/workflow/{search,search-v2,search-by-tasks,search-by-tasks-v2,externalstoragelocation,
-    external-storage-location}`, `POST /api/workflow/test`
+    external-storage-location}`, `GET /api/workflow/running/{name}`(이름이 `status`면 `/{workflowId}/status`와 겹친다),
+    `POST /api/workflow/test`
   - `MetadataResource`: `GET /api/metadata/workflow/{names-and-versions,names,latest-versions}`
   - `TaskResource`: `GET /api/tasks/{search,search-v2,externalstoragelocation,external-storage-location}`
   

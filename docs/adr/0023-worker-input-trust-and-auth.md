@@ -65,9 +65,10 @@ OpenAPI 스냅샷(`priv/contract/openapi.json`)에 없다.
 - **호출은 보내는 쪽이 먼저 확인한다.** 자식 취소(`SubWorkflows.terminate_child/4`, 종료 경로 `pre`와 outbox 모두)와 형제 자식
   재시도(`SubWorkflows.retry_child/2`)는 대상을 호출하기 전에 저장소에서 대상을 읽어(`Runtime.get_workflow(id, false)`)
   `parentWorkflowId`가 소유 워크플로우의 ID인지 본다. 맞지 않으면 호출하지 않는다.
-  - 취소에서 맞지 않거나 대상 기록이 없으면 지금의 "자식 없음"(`:not_found`)처럼 성공으로 본다. 부모 종료는 막히지 않고 outbox
-    항목은 ack된다.
-  - 재시도에서 맞지 않으면 경고를 남기고 `:ok`(ack)다. 지금의 자기·조상 건너뛰기와 같은 처리다.
+  - 취소에서 대상이 있지만 소유권이 맞지 않거나(`{:ok, 다른 부모}`) 대상 기록이 없으면(`{:error, :not_found}`) 지금의 "자식
+    없음"처럼 성공으로 본다. 부모 종료는 막히지 않고 outbox 항목은 ack된다. 저장소 읽기의 그 밖의 오류는 그대로 돌려준다. outbox는
+    재시도하고(ADR 0021 결정 4의 분류), 종료 경로 `pre`는 지금의 자식 취소 오류처럼 처리한다.
+  - 재시도에서 맞지 않으면 경고를 남기고 `:ok`(ack)다. 지금의 자기·조상 건너뛰기와 같은 처리다. 저장소 읽기 오류는 취소와 같다.
   - 대상을 호출하지 않으므로 관계없는 워크플로우의 프로세스를 활성화하지도 않는다. 종료 경로 `pre`가 워크플로우 프로세스 안에서
     조상을 동기 호출하는 일(교착)도 생기지 않는다. 조상은 부모 사슬에 순환이 없으므로 그 워크플로우의 자식일 수 없다.
   - Effect와 outbox 항목의 모양(`{:terminate_sub_workflow, child_id, reason[, parent_end_count]}`, `{:retry_sub_workflow, child_id}`)은
@@ -76,9 +77,13 @@ OpenAPI 스냅샷(`priv/contract/openapi.json`)에 없다.
     어차피 모든 자식을 취소한다.
 - **읽기는 쓰는 곳에서 거른다.** `Env.workflows`는 부모, 자식, 실패 워크플로우를 ID 하나로 담는 맵이므로 읽을 때 지우지 않는다
   (태스크의 대체값이 부모 ID와 같으면 부모 항목까지 지워져 `Step.Recover`의 고아 검사가 멈춘다). 대신 `Archon.Runtime.Step.Env`에
-  `child/2`(태스크 T의 자식: 맵에 있고 `parentWorkflowId`가 P, `parentWorkflowTaskId`가 T의 taskId인 워크플로우, 아니면 `nil`)를
-  두고, 자식을 쓰는 모든 곳(`Step.Async`, `Step.Lifecycle`의 되살림·형제 처리, `Step.Recover`의 종료 상태 검사, `Step.SubWorkflow`의
-  붙이기 확인)이 이 도우미로만 자식을 꺼낸다. 맞지 않는 ID는 "자식을 읽을 수 없음"으로 본다(지금 그 경우의 규칙 그대로).
+  `child/3`(`child(env, task, id)`: 각 사용처가 지금 쓰는 ID를 받아, 맵에 그 키가 없으면 `:error`(읽지 않음), 있지만 기록이 없거나
+  `parentWorkflowId`가 P가 아니거나 `parentWorkflowTaskId`가 T의 taskId가 아니면 `{:ok, nil}`, 맞으면 `{:ok, 워크플로우}`)를 두고,
+  `env.workflows`에서 자식을 꺼내는 곳(`Step.Async`의 반영, `Step.Lifecycle`의 되살림·형제 처리, `Step.Recover`의 종료 상태 검사)이 이
+  도우미로만 꺼낸다. 그래서 `Step.Async.due?`처럼 "읽지 않음"과 "읽음"을 가르는 곳은 그 구분을 유지하고, `Step.Recover`처럼
+  `Terminate.cancel_child/2`의 ID(저장된 값이 없으면 결정적 `child_id`)를 쓰는 곳은 그 ID를 그대로 넘긴다. 맞지 않는 ID는 "자식을
+  읽을 수 없음"으로 본다(지금 그 경우의 규칙 그대로). `Step.SubWorkflow`는 자식을 `env.workflows`에서 꺼내지 않는다(시작 결과는
+  `start_id`로, `child_changed`는 자식 자신의 메시지로 확인한다).
 - **`resumeSubworkflowTasks` 하강.** `Lifecycle.last_failed/3`은 읽은 자식의 `parentWorkflowId`·`parentWorkflowTaskId`가 지금
   워크플로우와 태스크일 때만 내려간다. 맞지 않으면 upstream `NotFoundException` 경우처럼 그 위 워크플로우를 재시도한다.
 - **자식 → 부모 알림은 바꾸지 않는다.** `child_revived`·`child_changed`의 주소(부모 ID와 부모 태스크 ID)는 자식 자신의
@@ -123,12 +128,14 @@ L7은 서로를 자식으로 가리키는 워크플로우가 생길 수 없으�
   - 부모 종료가 관계없는 워크플로우(L8), 부모 자신, 조상을 취소하지 않고 그 프로세스를 활성화하지 않는다.
   - 조부모 A를 종료할 때, 자식 P의 SUB_WORKFLOW 태스크(저장된 `subWorkflowId` 없음)의 `inputParameters.subWorkflowId`가
     `${workflow.parentWorkflowId}`(즉 A)여도 call timeout 없이 끝난다(지금 `cancel_later/2`가 막는 교착).
-  - 순환을 이루도록 위조한 저장 데이터에서 종료가 call timeout 없이 끝난다(L7).
+  - 저장된 태스크의 `subWorkflowId`들이 서로를 가리켜 순환을 이루도록 위조해도(부모 필드는 순환 없음) 종료가 call timeout 없이
+    끝난다(L7). 부모 필드 자체가 손상된 저장 데이터는 범위 밖이다.
   - 형제 자식 재시도가 소유권이 맞지 않는 대상을 호출하지 않고 ack된다.
   - `resumeSubworkflowTasks`가 소유권이 맞지 않는 ID로 내려가지 않는다.
-  - `Env.child/2`가 부모 ID와 같은 대체값에서 `nil`을 돌려주고, 그때도 `Step.Recover`의 고아 검사가 부모를 읽는다.
+  - `Env.child/3`가 부모 ID와 같은 대체값에서 `{:ok, nil}`을 돌려주고, 그때도 `Step.Recover`의 고아 검사가 부모를 읽는다.
+  - 소유권 확인의 저장소 읽기가 실패하면 outbox 항목이 ack되지 않고 재시도된다.
   - 기존 런타임 시험 전부를 두 백엔드에서 통과한다. 위조 ID를 전제로 한 기존 시험(자기·조상 취소 등)은 새 규칙의 기대값으로 바꾼다.
-- 건드리는 파일: `lib/archon/runtime/step/{tasks,env,async,lifecycle,recover,sub_workflow}.ex`,
+- 건드리는 파일: `lib/archon/runtime/step/{tasks,env,async,lifecycle,recover}.ex`,
   `lib/archon/runtime/{sub_workflows,lifecycle,effects}.ex`, `test/archon/runtime/{sub_workflow,lifecycle,outbox,step_tasks,tasks,
   recovery,step}_test.exs`. `workflow_server.ex`(자식 읽기는 그대로)와 `step/terminate.ex`(취소 대상 선택은 그대로, 확인은
   `terminate_child/4`가 함)는 고치지 않는다. Effect·outbox 항목 모양을 바꾸지 않으므로 `Store.Postgres`의 인코딩과 `outbox.ex`도
