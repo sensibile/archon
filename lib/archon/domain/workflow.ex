@@ -22,7 +22,11 @@ defmodule Archon.Domain.Workflow do
   and their order carries no meaning.
 
   `previous_status` and `failed_task_id` are internal execution state from upstream's
-  `WorkflowModel` (ADR 0014). They are never part of the wire JSON.
+  `WorkflowModel` (ADR 0014). `end_count` (how many times the workflow went from a non-terminal
+  to a terminal status) and `revived_parent_end_count` (the parent's `end_count` read when this
+  terminal child was retried or restarted, 0 if none) are Archon's own internal state that orders
+  a child's revival after its parent's end (ADR 0021, decision 10, L2). None of them is part of
+  the wire JSON; `to_storage/1` keeps them.
   """
 
   alias Archon.Domain.{AggregateTokenUsage, Codec, Task, Validation, WorkflowDef}
@@ -64,10 +68,16 @@ defmodule Archon.Domain.Workflow do
     {:rate_limited, "rateLimited", :bool, []},
     {:aggregate_token_usage, "aggregateTokenUsage", {:struct, AggregateTokenUsage}, []},
     {:previous_status, "previousStatus", {:enum, @statuses}, wire: false},
-    {:failed_task_id, "failedTaskId", :string, wire: false}
+    {:failed_task_id, "failedTaskId", :string, wire: false},
+    {:end_count, "endCount", :int, wire: false},
+    {:revived_parent_end_count, "revivedParentEndCount", :int, wire: false}
   ]
 
   defstruct Codec.defaults(@fields)
+
+  @doc false
+  @spec __fields__() :: [Codec.field()]
+  def __fields__, do: @fields
 
   @type t :: %__MODULE__{
           owner_app: String.t() | nil,
@@ -102,7 +112,9 @@ defmodule Archon.Domain.Workflow do
           rate_limited: boolean(),
           aggregate_token_usage: AggregateTokenUsage.t() | nil,
           previous_status: status() | nil,
-          failed_task_id: String.t() | nil
+          failed_task_id: String.t() | nil,
+          end_count: non_neg_integer(),
+          revived_parent_end_count: non_neg_integer()
         }
 
   @doc "All workflow statuses, in upstream declaration order."
@@ -158,6 +170,18 @@ defmodule Archon.Domain.Workflow do
         json
     end
   end
+
+  @doc """
+  The storage encoding (ADR 0021, decision 2): every field, internal ones included, so that
+  `from_storage/1` gives back the same struct. Not the wire shape; REST uses `to_json/1`.
+  """
+  @spec to_storage(t()) :: Codec.json_object()
+  def to_storage(%__MODULE__{} = workflow),
+    do: Codec.encode(__MODULE__, @fields, workflow, internal: true)
+
+  @doc "Decodes `to_storage/1` output. Keys missing from older rows decode to the field default."
+  @spec from_storage(Codec.json()) :: Codec.result(t())
+  def from_storage(json), do: Codec.decode(__MODULE__, @fields, json, [], internal: true)
 
   @doc "Upstream `getWorkflowName`: the embedded definition's name."
   @spec workflow_name(t()) :: String.t() | nil

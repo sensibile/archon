@@ -12,6 +12,7 @@ defmodule Archon.MixProject do
       make_targets: ["all"],
       make_clean: ["clean"],
       deps: deps(),
+      aliases: aliases(),
       test_coverage: [summary: [threshold: 0]],
       dialyzer: [
         plt_local_path: "priv/plts",
@@ -33,14 +34,27 @@ defmodule Archon.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_env), do: ["lib"]
 
+  # The runtime and contract test schemas (ADR 0021, decision 1); a release runs
+  # Archon.Release.migrate/0 instead.
+  defp aliases do
+    [
+      "ecto.setup": [
+        "ecto.create",
+        ~s|run --no-start -e 'Archon.Release.migrate(["public", "archon_contract"])'|
+      ]
+    ]
+  end
+
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:ecto_sql, "~> 3.14"},
       {:elixir_make, "~> 0.10.0", runtime: false},
       {:ex_json_schema, "~> 0.11.5", only: :test},
-      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
+      {:postgrex, "~> 0.22.4"}
     ]
   end
 end

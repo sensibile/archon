@@ -1,7 +1,7 @@
 # ADR 0021: Phase 4 PostgreSQL 영속성과 큐 설계
 
 - 상태: 제안
-- 날짜: 2026-10-30
+- 날짜: 2026-10-30 (2026-10-31 조각 4a 갱신: 결정 1의 개발용 마이그레이션 alias, 결정 2의 저장 인코딩 세부와 색인 열의 NUL)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(DB 라이브러리, 큐·Effect 원자성, 여러 노드, 지연 활성화)는 2026-10-30 BOSS가 이 문서의 추천안으로 정했다.
 
@@ -53,8 +53,10 @@ upstream Postgres 큐는 보일 시각을 먼저 본다. Archon은 이미 계약
   `DATABASE_URL`에서 읽는다.
 - 쿼리는 Ecto 스키마 없이 `Ecto.Query`(스키마 없는 원천 표 질의)나 `Repo.query/3`로 쓴다. 행을 도메인 struct로
   바꾸는 일은 결정 2의 저장 인코딩이 한다. Ecto 스키마 모듈을 두면 도메인 struct와 같은 필드를 두 벌 관리하게 된다.
-- 마이그레이션은 `priv/repo/migrations`의 Ecto 마이그레이션이다. 개발·시험은 `mix ecto.create`·`mix ecto.migrate`
-  alias로, 배포는 `Archon.Release.migrate/0`로 한다. 애플리케이션 시작이 마이그레이션을 실행하지는 않는다.
+- 마이그레이션은 `priv/repo/migrations`의 Ecto 마이그레이션이다. 개발은 `mix ecto.setup` alias(`ecto.create` 뒤
+  `Archon.Release.migrate/1`로 두 스키마), 시험은 `test/test_helper.exs`, 배포는 `Archon.Release.migrate/0`로 한다.
+  애플리케이션 시작이 마이그레이션을 실행하지는 않는다. Ecto 마이그레이터는 prefix의 `schema_migrations` 표를 먼저
+  만들므로 스키마 생성은 마이그레이션 파일이 아니라 `Archon.Release`가 마이그레이터보다 먼저 한다(조각 4a).
 - **인스턴스.** Postgres 구현의 콜백도 메모리 구현처럼 첫 인자로 인스턴스를 받는 형태가 있다(인자 없는 형태가 behaviour
   콜백). Postgres 인스턴스는 `%Archon.Runtime.Postgres{repo, prefix, clock}`이다. `prefix`는 Postgres 스키마 이름이고
   (런타임은 `public`), `clock`은 큐의 보일 시각 계산에 쓰는 시계다. 런타임 인스턴스의 `clock`은 `Archon.Runtime.now/0`
@@ -83,8 +85,16 @@ behaviour moduledoc: 계약 시험이 시계를 주입하므로 DB `now()`를 �
   정한다. `Workflow`, `Task`, `WorkflowDef`, `TaskDef`에 두고, `Archon.Domain.Codec`의 `encode/3`·`decode/4`에 옵션 인자
   (`internal: true`)를 더해 `wire: false` 필드까지 읽고 쓴다. 기존 `to_json/1`·`from_json/2`(REST)는 그대로다. 워크플로우
   행의 `json_data`는 `tasks`를 뺀 워크플로우다. 태스크는 `task` 표에서 `seq` 순으로 읽어 붙인다.
+- **저장 인코딩의 세부(조각 4a).** `internal: true`는 `nil`을 포함해 모든 필드를 쓰고, 명시적 `null`을 필드의 `:null`
+  값 대신 `nil`로 읽는다. 중첩 struct는 각 모듈의 `to_json`·`from_json`(파생 키, `taskDefName`·`subWorkflowId` 대체값,
+  사유 500자 자르기, 집합의 중복 제거)을 거치지 않고 모듈의 필드 표(`__fields__/0`)로 같은 규칙을 따른다. 그래서
+  `from_storage(to_storage(x)) == {:ok, x}`다. 없는 키는 기본값으로 읽으므로 필드가 더해지기 전에 저장된 행도 읽힌다.
+  `SubWorkflowParams`의 `:custom` 콜백도 옵션 인자를 받는다. `Workflow.to_storage/1`은 `tasks`까지 쓰고, 행에서
+  `tasks`를 빼는 일은 `Store.Postgres`(조각 4f)가 한다.
 - **`jsonb`가 아니라 `text`.** `jsonb`는 문자열 안의 `\u0000`을 받지 않아 upstream(`TEXT`)이 받는 입력을 거절하게
-  된다. 키 순서·숫자 표기도 바꾼다. 저장 형식은 질의 대상이 아니므로 바이트 그대로 두는 `text`를 쓴다.
+  된다. 키 순서·숫자 표기도 바꾼다. 저장 형식은 질의 대상이 아니므로 바이트 그대로 두는 `text`를 쓴다. `json_data`의
+  NUL은 JSON 이스케이프(`\u0000`)로 들어가지만, 색인 열(`workflow_id`, `task_def_name`, 큐 이름 등)은 그대로의 `text`라
+  NUL을 받지 않는다. upstream 표의 같은 열도 같다.
 - **`:erlang.term_to_binary`가 아닌 이유.** struct 모양이 바뀐 뒤 예전 행을 읽으면 빠진 필드가 조용히 생기고, DB에서
   내용을 볼 수 없다.
 - upstream의 `workflow_to_task`, `workflow_pending`, `task_in_progress`, `task_scheduled`, `workflow_def_to_workflow`,

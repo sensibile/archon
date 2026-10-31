@@ -64,6 +64,10 @@ defmodule Archon.Domain.WorkflowDef do
 
   defstruct Codec.defaults(@fields)
 
+  @doc false
+  @spec __fields__() :: [Codec.field()]
+  def __fields__, do: @fields
+
   @type t :: %__MODULE__{
           owner_app: String.t() | nil,
           create_time: integer(),
@@ -106,6 +110,18 @@ defmodule Archon.Domain.WorkflowDef do
   @doc "Encodes to upstream JSON."
   @spec to_json(t()) :: Codec.json_object()
   def to_json(%__MODULE__{} = definition), do: Codec.encode(__MODULE__, @fields, definition)
+
+  @doc """
+  The storage encoding (ADR 0021, decision 2): every field, internal ones included, so that
+  `from_storage/1` gives back the same struct. Not the wire shape; REST uses `to_json/1`.
+  """
+  @spec to_storage(t()) :: Codec.json_object()
+  def to_storage(%__MODULE__{} = value),
+    do: Codec.encode(__MODULE__, @fields, value, internal: true)
+
+  @doc "Decodes `to_storage/1` output. Keys missing from older rows decode to the field default."
+  @spec from_storage(Codec.json()) :: Codec.result(t())
+  def from_storage(json), do: Codec.decode(__MODULE__, @fields, json, [], internal: true)
 
   @doc "Upstream `WorkflowDef.getKey/2`: `name.version`."
   @spec key(String.t(), integer()) :: String.t()

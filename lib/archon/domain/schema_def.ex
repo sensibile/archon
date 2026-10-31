@@ -35,6 +35,10 @@ defmodule Archon.Domain.SchemaDef do
 
   defstruct Codec.defaults(@fields)
 
+  @doc false
+  @spec __fields__() :: [Codec.field()]
+  def __fields__, do: @fields
+
   @type t :: %__MODULE__{
           owner_app: String.t() | nil,
           create_time: integer(),

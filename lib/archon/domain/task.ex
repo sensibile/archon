@@ -111,6 +111,10 @@ defmodule Archon.Domain.Task do
 
   defstruct Codec.defaults(@fields)
 
+  @doc false
+  @spec __fields__() :: [Codec.field()]
+  def __fields__, do: @fields
+
   @type t :: %__MODULE__{
           task_type: String.t() | nil,
           status: status() | nil,
@@ -218,6 +222,18 @@ defmodule Archon.Domain.Task do
       "loopOverTask" => loop_over_task?(task)
     })
   end
+
+  @doc """
+  The storage encoding (ADR 0021, decision 2): every field, internal ones included, so that
+  `from_storage/1` gives back the same struct. Not the wire shape; REST uses `to_json/1`.
+  """
+  @spec to_storage(t()) :: Codec.json_object()
+  def to_storage(%__MODULE__{} = task),
+    do: Codec.encode(__MODULE__, @fields, task, internal: true)
+
+  @doc "Decodes `to_storage/1` output. Keys missing from older rows decode to the field default."
+  @spec from_storage(Codec.json()) :: Codec.result(t())
+  def from_storage(json), do: Codec.decode(__MODULE__, @fields, json, [], internal: true)
 
   @doc "Upstream `getTaskDefName`: the stored name, or `taskType` when it is empty."
   @spec task_def_name(t()) :: String.t() | nil

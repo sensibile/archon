@@ -13,4 +13,7 @@ config :archon, Archon.Runtime,
   idle_timeout: 5_000,
   hibernate_after: 15_000
 
+# The Postgres backend's repository (ADR 0021, decision 1); the connection is in runtime.exs.
+config :archon, ecto_repos: [Archon.Repo]
+
 if config_env() == :test, do: import_config("test.exs")
