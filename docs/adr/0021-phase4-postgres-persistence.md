@@ -6,6 +6,7 @@
 - 비고: 설계 갈림길 네 가지(DB 라이브러리, 큐·Effect 원자성, 여러 노드, 지연 활성화)는 2026-10-30 BOSS가 이 문서의 추천안으로 정했다.
 - 갱신: 2026-10-31 조각 4b가 결정 3의 메모리 큐 적용 방식(`Queue.Memory.apply_ops/2`, 보일 시각 그대로)을 고치고, 결정 2·3에 워크플로우 ID의 바이트 순(`COLLATE "C"`)을 적었다.
 - 갱신: 2026-10-31 조각 4c가 결정 2에 색인 열 NUL·잘못된 UTF-8의 처리(추가는 `ArgumentError`, 조회·삭제는 없는 것으로 봄)를, 결정 7에 오류 반환이 없는 콜백의 펜싱 실패(`FencedError`)를 적었다.
+- 갱신: 2026-10-31 조각 4d가 결정 4의 빈 Commit 판정을 새 필드 다섯 모두로 넓히고(`wake` 포함), 결정 5에 같은 단계 안의 개수 반영과 검사 밖 경로를, 결정 3에 큐 Effect를 더는 `Effects`가 실행하지 않음과 혼합 거절의 형태를 적었다.
 
 ## 맥락
 
@@ -138,7 +139,11 @@ ADR 0018 결정 2의 `Commit` 필드 네 개에 다음 다섯을 더한다. 저�
   `Queue.Memory.apply_ops/2`로 한 메시지에 넘기고, `Queue.Memory`는 보일 시각을 그대로 쓴다. 지연으로 바꿔 넘기면 두
   프로세스가 시계를 따로 읽어 보일 시각이 조금씩 밀리기 때문이다(조각 4b에서 갱신). 그 호출이 exit하면 Commit을 적용하지 않고
   호출자가 같은 이유로 exit한다. 설정이 둘을 섞으면
-  `Archon.Runtime.Supervisor`가 시작을 거절한다.
+  `Archon.Runtime.Supervisor`가 시작을 거절한다. 판정은 알려진 모듈 표(`Store.Memory`·`Queue.Memory`는 메모리,
+  `Store.Postgres`·`Queue.Postgres`는 Postgres)로 하고, 백엔드가 다르거나 표에 없는 모듈이면 자식을 띄우기 전에
+  `start_link`가 `{:error, {:mixed_backends, store, queue}}`를 돌려준다(조각 4d).
+- **큐 Effect는 프로세스가 실행하지 않는다(조각 4d).** `Archon.Runtime.Effects`의 큐 절을 없앴다. 큐 연산의 실패는
+  `{:commit, {:exit, _}}` 등 Commit 실패로 예외 격리에 가고, 시험 훅은 `:effect` 대신 `:commit`(Commit의 `queue`)에서 본다.
 - **Store behaviour의 새 콜백.**
 
   | 콜백 | 의미 |
@@ -221,6 +226,7 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
 - **빈 Commit 판정.** `WorkflowServer`는 지금 Phase 3의 네 필드가 비면 Commit을 건너뛴다. 새 필드(`queue`, `outbox`,
   `outbox_ack`, `limits`, `wake`가 `:keep`이 아님)만 있어도 빈 Commit이 아니다. 앞의 넷은 조각 4d·4e, `wake`는 4g가 이 판정에
   더한다. 그러지 않으면 출력이 이미 오류인 되먹임 재실행의 `outbox_ack`만 담은 Commit이 건너뛰어져 항목이 지워지지 않는다.
+  조각 4d가 다섯 필드(`wake`가 `:keep`이 아님 포함) 모두를 한 번에 더했으므로 4e·4g는 이 판정을 고치지 않는다.
 - **멱등.** 항목은 한 번 이상 실행된다. 각 Effect가 두 번 실행돼도 결과가 같아야 한다: 자식 종료는 이미 끝난 자식에
   `:ok`, 부모 알림은 저장소의 자식 상태를 반영할 뿐이고, 실패 워크플로우 시작은 저장된 ID의 `:conflict`를 성공으로
   본다(3e 구현). `child_revived`와 `retry`가 이미 실행 중인 대상에 무해한지는 조각 4e가 시험으로 확인하고, 아니면 그
@@ -242,6 +248,17 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
 - `WorkflowServer`는 이 오류를 받으면 `Env.in_progress[name]`를 한도로 두고 같은 이벤트로 `Step.run`을 한 번 더 부른다.
   `Step`은 한도 초과 규칙(ADR 0018 결정 7과 "upstream과 의도적으로 다른 점")대로 워커 태스크는 60초 미루고, 비동기
   시스템 태스크는 다음 `:wake`에 다시 본다. 이 재실행도 ADR 0018 결정 4의 반복 상한에 든다.
+- **같은 단계 안의 개수(조각 4d).** `Step`은 한도 아래에서 태스크를 `IN_PROGRESS`로 바꿀 때마다 그 단계의
+  `Env.in_progress[name]`를 1 올린다(`Step.State.limit/2`). 그러지 않으면 한 `:wake`에서 같은 정의의 태스크 둘이 마지막
+  한 자리를 함께 보고 둘 다 시작해 Commit이 거절되고, 재실행은 둘 다 미루므로 다음 `:wake`에서도 같은 일이 되풀이된다.
+  `Commit.limits`에는 Commit 뒤 `IN_PROGRESS`로 남는 태스크의 정의만 넣는다(같은 단계에서 시작한 뒤 끝난 태스크는 빠진다).
+  한도 재실행은 그 이름의 태스크를 그 단계에서 하나도 시작하지 않는다(한도 3에서 다른 워크플로우가 한 자리를 가져가도
+  남은 두 자리를 쓰지 않고 다음 기회로 미룬다). 재실행은 `pre` Effect를 다시 실행하므로 `pre`는 멱등이어야 하고(지금은 자식
+  종료뿐이다), 재실행 판정은 그 시도의 Commit 거절만 본다(되먹임 이벤트의 거절은 그대로 오류다).
+- **검사 밖 경로.** 한도는 `Step`이 확인하는 두 곳(워커 poll, `SCHEDULED` 비동기 시스템 태스크의 시작)에만 건다. 매퍼가
+  처음부터 `IN_PROGRESS`로 만드는 태스크(`WAIT`, `JOIN`)와, 자식 시작 결과(`{:sub_workflow_started, ...}`)로
+  `IN_PROGRESS`가 되는 `SUB_WORKFLOW`는 검사하지 않는다. 앞의 것은 upstream도 검사하지 않고, 뒤의 것은 자식이 이미
+  시작했으므로 거절하면 자식만 남는다. `SUB_WORKFLOW`의 한도는 시작 전 `Env`로 보는 Phase 3 성질 그대로다.
 - upstream `exceedsLimit`의 도착 순서 공정성 검사는 여전히 옮기지 않는다.
 
 ### 6. 지연 활성화와 `Archon.Runtime.Waker`
@@ -347,7 +364,7 @@ Archon.Runtime.Supervisor (rest_for_one)
 | L2 | 해결: `Workflow`에 내부 필드 둘(`wire: false`)을 더한다. `endCount`는 워크플로우가 종료 상태가 아닌 상태(`RUNNING`·`PAUSED`)에서 종료 상태로 바뀔 때마다 1씩 오른다(`State.set_status`에서 이전 상태가 종료 상태가 아니고 새 상태가 종료 상태일 때. 요청으로 다시 종료된 `FAILED` 워크플로우처럼 종료 상태끼리의 전이는 올리지 않는다. 종료 상태를 다시 저장하며 `endTime`을 새로 찍는 일, 예를 들어 실패 워크플로우 되먹임은 올리지 않는다). `revivedParentEndCount`는 종료 상태의 자식이 재시도·재시작으로 다시 실행될 때, 그 처리에서 저장소로 읽은 부모의 `endCount`(부모가 끝나지 않았거나 없으면 0)다. 일시정지·재개는 둘 다 바꾸지 않는다. 이를 위해 `WorkflowServer.env/2`는 `{:retry, _}`·`{:restart, _}`에서도 부모를 `Env.workflows`에 읽는다(조각 4e). `Step.Lifecycle.revived_after?/2`는 `previous_status`와 시각 비교 대신 "`revivedParentEndCount`가 0이 아니고 지금 부모의 `endCount`와 같다"로 판정한다. 자식이 부모의 그 종료를 읽은 뒤에 다시 실행되었다는 인과 관계를 저장하므로 같은 밀리초에도 순서가 갈리고, 뒤의 종료 상태 저장이 `endTime`을 바꿔도 흔들리지 않는다. 부모가 그 뒤 재개되어 다시 끝나면 `endCount`가 올라 일반 규칙으로 돌아간다 | 시각이 아니라 관찰한 종료로 순서를 정한다 |
 | L3 | 수용 | 결과 상태에 차이가 없는 오류 경로다. Phase 5 REST가 오류 코드를 맞출 때 upstream 문구와 함께 다시 본다 |
 | L4 | 수용 | 결과 상태가 같고 반영이 더 이르다(ADR 0018 "하위 워크플로우 완료 알림" 차이와 같은 성질) |
-| L5 | 해결: `WorkflowServer`가 `env/2` 실패를 `{:env, reason}`으로 감싸 예외 격리로 보내고, 하위 워크플로우 시작은 이 오류를 일시적 오류로 분류해 태스크를 `SCHEDULED`로 둔다. 저장소 구현은 DB 장애에서 raise해도 된다 | DB 장애는 일시적이다 |
+| L5 | 해결: `WorkflowServer`가 `env/2` 실패를 `{:env, reason}`으로 감싸 예외 격리로 보내고, 하위 워크플로우 시작은 이 오류를 일시적 오류로 분류해 태스크를 `SCHEDULED`로 둔다(`subWorkflowLaunchError`는 `"env: ..."`). 저장소 구현은 DB 장애에서 raise해도 된다. 시험용 훅 지점 `:env`(env를 읽기 전)를 더했다(조각 4d) | DB 장애는 일시적이다 |
 | L6 | 해결: 결정 4·8(`TaskSupervisor`) | |
 | L7 | Phase 5로 넘김: 인증·인가 ADR에서 L8과 함께 본다. 실행기 Task 안에서 기다리므로 워크플로우 프로세스는 막히지 않는다 | 신뢰 결정 범위 |
 | L8 | Phase 5로 넘김: 태스크 갱신이 외부에 열리기 전 인증·인가 ADR | BOSS 2026-10-30 결정 |

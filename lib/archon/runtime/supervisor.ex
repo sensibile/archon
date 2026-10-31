@@ -14,15 +14,36 @@ defmodule Archon.Runtime.Supervisor do
 
   When the store or the queue restarts, the registry and every workflow process restart after
   it and `Archon.Runtime.Recovery` activates the running workflows again.
+
+  The store writes a commit's queue operations with it (ADR 0021, decision 3), so the store and
+  the queue must be the same backend: a configuration that mixes them, or names one this module
+  does not know, is refused with `{:error, {:mixed_backends, store, queue}}` before anything
+  starts.
   """
 
   use Supervisor
 
   alias Archon.Runtime
 
+  @backends %{
+    Archon.Runtime.Store.Memory => :memory,
+    Archon.Runtime.Queue.Memory => :memory,
+    Archon.Runtime.Store.Postgres => :postgres,
+    Archon.Runtime.Queue.Postgres => :postgres
+  }
+
   @doc false
   def start_link(opts \\ []) do
-    Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+    store = Runtime.store()
+    queue = Runtime.queue()
+
+    case {Map.get(@backends, store), Map.get(@backends, queue)} do
+      {backend, backend} when backend != nil ->
+        Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+
+      _mixed ->
+        {:error, {:mixed_backends, store, queue}}
+    end
   end
 
   @impl true

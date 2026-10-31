@@ -551,6 +551,33 @@ defmodule Archon.Runtime.SubWorkflowTest do
       assert sub_task.reason_for_incompletion == nil
       assert workflow(sub_task.sub_workflow_id).status == :running
     end
+
+    # ADR 0021, L5: a store that fails while the child's process reads its env is down, not a
+    # reason to fail the parent's task.
+    test "a store failure while the child reads its env is transient" do
+      parent_id = "archon-parent-" <> Runtime.new_id()
+
+      RuntimeHooks.install(
+        clock: 1_000_000,
+        timer: self(),
+        hook: fn
+          :env, id, {:start_idempotent, _child} when id != parent_id -> raise "store down"
+          _point, _id, _data -> :ok
+        end
+      )
+
+      input = %{"param1" => "p1 value", "param2" => "p2 value", "subwf" => "sub_workflow"}
+
+      start("integration_test_wf_with_sub_wf", input, workflow_id: parent_id)
+      complete(parent_id, "t1")
+
+      sub_task = task(parent_id, "t2")
+      assert sub_task.status == :scheduled
+      assert sub_task.output_data["subWorkflowLaunchError"] == "env: store down"
+
+      assert Runtime.get_workflow(SubWorkflow.child_id(parent_id, sub_task)) ==
+               {:error, :not_found}
+    end
   end
 
   describe "the effects on their own" do
