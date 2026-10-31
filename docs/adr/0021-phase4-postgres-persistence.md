@@ -82,7 +82,7 @@ behaviour moduledoc: 계약 시험이 시계를 주입하므로 DB `now()`를 �
 | `meta_task_def` | `name text` PK, `json_data text` | |
 | `meta_workflow_def` | `name text`, `version integer`(둘이 PK), `json_data text` | |
 
-- **ID 순서는 바이트 순이다.** `workflow.workflow_id`·`outbox.workflow_id`와 FK 열 `task.workflow_id`는 `COLLATE "C"`다. 결정 3의 키셋 콜백은 워크플로우
+- **ID 순서는 바이트 순이다.** `workflow.workflow_id`와 이를 가리키는 `task`·`outbox`의 `workflow_id`는 `COLLATE "C"`다. 결정 3의 키셋 콜백은 워크플로우
   ID를 바이트 순(`"B" < "a"`)으로 매기고 계약 시험이 이를 고정한다(조각 4b). DB 기본 collation을 쓰면 질의마다 `COLLATE "C"`를
   붙여야 하고 그러면 키셋 색인을 쓰지 못한다.
 - **저장 인코딩.** ADR 0014 결정 3이 미뤄 둔 "내부 필드를 포함하는 인코딩"을 `to_storage/1`·`from_storage/1`로
