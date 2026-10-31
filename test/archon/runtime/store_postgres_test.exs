@@ -192,6 +192,9 @@ defmodule Archon.Runtime.StorePostgresTest do
             {:queue_push, "q", "t", 0, 0},
             {:start_sub_workflow, "t", %{}},
             {:retry_sub_workflow, "c", :extra},
+            {:terminate_sub_workflow, "c", :shutdown},
+            {:revive_parent, :p, nil},
+            {:start_failure_workflow, %{workflow_id: "f", definition: %{"name" => "x"}}},
             {:start_failure_workflow, %{workflow_id: "f", unknown: 1}},
             :cancel_wake
           ] do

@@ -330,6 +330,10 @@ defmodule Archon.Runtime.Store.Postgres do
 
   # Applies the encoded commit inside the fenced transaction, in the order of the memory store.
   defp apply_commit(instance, workflow_id, commit, rows) do
+    # The limit count needs a snapshot taken after the lock; the runtime fence already sets this.
+    if instance.fence == nil,
+      do: query!(instance, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED", [])
+
     lock_limits(instance, commit.limits)
 
     with :ok <- create_or_lock(instance, workflow_id, rows.create),
@@ -483,7 +487,8 @@ defmodule Archon.Runtime.Store.Postgres do
 
   defp put_tasks(_instance, _workflow_id, []), do: :ok
 
-  # A task ID another workflow owns is neither inserted nor updated, so it is not counted.
+  # A task ID another workflow owns is neither inserted nor updated, so it is not counted. Rows
+  # are locked in task ID order, so two commits over the same IDs never wait on each other.
   defp put_tasks(instance, workflow_id, tasks) do
     [ids, seqs, statuses, names, jsons] = transpose(tasks, 5)
     table = table(instance, "task")
@@ -496,6 +501,7 @@ defmodule Archon.Runtime.Store.Postgres do
         SELECT u.task_id, $1, u.seq, u.status, u.task_def_name, u.json_data
         FROM unnest($2::text[], $3::integer[], $4::text[], $5::text[], $6::text[])
           AS u(task_id, seq, status, task_def_name, json_data)
+        ORDER BY u.task_id
         ON CONFLICT (task_id) DO UPDATE SET seq = EXCLUDED.seq, status = EXCLUDED.status,
           task_def_name = EXCLUDED.task_def_name, json_data = EXCLUDED.json_data
         WHERE t.workflow_id = EXCLUDED.workflow_id
@@ -647,20 +653,23 @@ defmodule Archon.Runtime.Store.Postgres do
   defp encode_effect!(effect) do
     {kind, args} =
       case effect do
-        {:terminate_sub_workflow, child, reason} ->
+        {:terminate_sub_workflow, child, reason} when is_binary(child) and is_binary(reason) ->
           {"terminate_sub_workflow", [child, reason]}
 
         # Slice 4e adds the parent's end count (ADR 0021, decision 4).
-        {:terminate_sub_workflow, child, reason, end_count} when is_integer(end_count) ->
+        {:terminate_sub_workflow, child, reason, end_count}
+        when is_binary(child) and is_binary(reason) and is_integer(end_count) ->
           {"terminate_sub_workflow", [child, reason, end_count]}
 
-        {:notify_parent, parent, task, _child} ->
+        {:notify_parent, parent, task, _child}
+        when is_binary(parent) and (is_binary(task) or task == nil) ->
           {"notify_parent", [parent, task]}
 
-        {:revive_parent, parent, task} ->
+        {:revive_parent, parent, task}
+        when is_binary(parent) and (is_binary(task) or task == nil) ->
           {"revive_parent", [parent, task]}
 
-        {:retry_sub_workflow, child} ->
+        {:retry_sub_workflow, child} when is_binary(child) ->
           {"retry_sub_workflow", [child]}
 
         {:start_failure_workflow, %{} = start} ->
@@ -682,8 +691,17 @@ defmodule Archon.Runtime.Store.Postgres do
     for key <- @start_keys, Map.has_key?(start, key), into: %{} do
       value =
         case {key, start[key]} do
-          {:definition, %WorkflowDef{} = definition} -> WorkflowDef.to_storage(definition)
-          {_key, value} -> value
+          {:definition, %WorkflowDef{} = definition} ->
+            WorkflowDef.to_storage(definition)
+
+          {:definition, nil} ->
+            nil
+
+          {:definition, other} ->
+            raise ArgumentError, "a stored start's definition: #{inspect(other)}"
+
+          {_key, value} ->
+            value
         end
 
       {Atom.to_string(key), value}

@@ -109,6 +109,8 @@ behaviour moduledoc: 계약 시험이 시계를 주입하므로 DB `now()`를 �
   상태, 부모 워크플로우 ID와 poll 데이터의 큐 이름·도메인·워커 ID에 위의 규칙을 적용한다. `NOT NULL` 열인 태스크 `seq`·상태가
   없는 태스크와, JSON으로 바꿀 수 없는 값(잘못된 UTF-8 문자열 등)이 든 워크플로우·태스크도 DB에 보내기 전에 `ArgumentError`다.
   키셋 페이지 커서에 NUL·잘못된 UTF-8이 있으면 저장된 ID에서 나올 수 없는 값이므로 `ArgumentError`다. 한도의 이름은 개수 0으로 본다.
+  열 범위를 넘는 정수(`int4`인 태스크 `seq`, `bigint`인 `wake`·커서 키·poll 시각·`limit`)는 우선순위·버전처럼 인코딩 오류다.
+  Commit 트랜잭션은 펜스가 없는 인스턴스(`fence: nil`)에서도 첫 문장으로 READ COMMITTED를 정해, 한도 개수가 잠금 뒤의 스냅샷을 쓴다.
 - **poll 데이터.** `poll_data` 행은 쓸 때마다 바꾼다. upstream `PostgresPollDataDAO`의 `lastPollTime`이 줄지 않게 하는 트리거(V10)는
   두지 않는다. 메모리 구현과 계약 시험이 마지막 쓰기를 돌려주기 때문이다.
 - **`:erlang.term_to_binary`가 아닌 이유.** struct 모양이 바뀐 뒤 예전 행을 읽으면 빠진 필드가 조용히 생기고, DB에서
