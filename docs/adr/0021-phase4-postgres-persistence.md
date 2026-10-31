@@ -6,6 +6,7 @@
 - 비고: 설계 갈림길 네 가지(DB 라이브러리, 큐·Effect 원자성, 여러 노드, 지연 활성화)는 2026-10-30 BOSS가 이 문서의 추천안으로 정했다.
 - 갱신: 2026-10-31 조각 4b가 결정 3의 메모리 큐 적용 방식(`Queue.Memory.apply_ops/2`, 보일 시각 그대로)을 고치고, 결정 2·3에 워크플로우 ID의 바이트 순(`COLLATE "C"`)을 적었다.
 - 갱신: 2026-10-31 조각 4c가 결정 2에 색인 열 NUL·잘못된 UTF-8의 처리(추가는 `ArgumentError`, 조회·삭제는 없는 것으로 봄)를, 결정 7에 오류 반환이 없는 콜백의 펜싱 실패(`FencedError`)를 적었다.
+- 갱신: 2026-10-31 조각 4f가 결정 2에 `Store.Postgres`의 쓰기 전 검사(태스크 `seq`·상태, JSON으로 바꿀 수 없는 값, 페이지 커서)와 poll 데이터를, 결정 3에 `commit/2`의 `{:error, :fenced}`와 공용 검사 `Commit.check!/2`를, 결정 4에 outbox 항목의 저장 모양을, 결정 5에 한도 잠금 키와 잠금 순서(이름 순이 아니라 키 순)를 적었다.
 
 ## 맥락
 
@@ -104,6 +105,12 @@ behaviour moduledoc: 계약 시험이 시계를 주입하므로 DB `now()`를 �
   정의 저장)은 `ArgumentError`를 내고, 찾거나 지우는 연산(pop, ack, remove, `contains?`, `size`, 정의 조회)은 그런 행이 없는
   것으로 답한다(조각 4c). 메모리 구현은 이런 값을 받으므로 이 입력에서 두 백엔드가 다르다. `int4` 열(우선순위, 버전) 범위를 넘는 정수는
   upstream(`int`)처럼 받지 않는다(인코딩 오류).
+- **`Store.Postgres`의 쓰기 전 검사(조각 4f).** Commit의 워크플로우 ID, 태스크 ID, 태스크 정의 이름(`Task.task_def_name/1`),
+  상태, 부모 워크플로우 ID와 poll 데이터의 큐 이름·도메인·워커 ID에 위의 규칙을 적용한다. `NOT NULL` 열인 태스크 `seq`·상태가
+  없는 태스크와, JSON으로 바꿀 수 없는 값(잘못된 UTF-8 문자열 등)이 든 워크플로우·태스크도 DB에 보내기 전에 `ArgumentError`다.
+  키셋 페이지 커서에 NUL·잘못된 UTF-8이 있으면 저장된 ID에서 나올 수 없는 값이므로 `ArgumentError`다. 한도의 이름은 개수 0으로 본다.
+- **poll 데이터.** `poll_data` 행은 쓸 때마다 바꾼다. upstream `PostgresPollDataDAO`의 `lastPollTime`이 줄지 않게 하는 트리거(V10)는
+  두지 않는다. 메모리 구현과 계약 시험이 마지막 쓰기를 돌려주기 때문이다.
 - **`:erlang.term_to_binary`가 아닌 이유.** struct 모양이 바뀐 뒤 예전 행을 읽으면 빠진 필드가 조용히 생기고, DB에서
   내용을 볼 수 없다.
 - upstream의 `workflow_to_task`, `workflow_pending`, `task_in_progress`, `task_scheduled`, `workflow_def_to_workflow`,
@@ -148,7 +155,10 @@ ADR 0018 결정 2의 `Commit` 필드 네 개에 다음 다섯을 더한다. 저�
   | `outbox_workflow_ids(after, limit)` | 남은 항목이 있는 워크플로우 ID를 `after` 다음부터 ID의 바이트 순으로(키셋 페이지) |
   | `due_workflow_ids(before_ms, after, limit)` | `RUNNING`이고 `wake_at`이 `before_ms` 이하이거나 없는 워크플로우를 `(COALESCE(wake_at, 0), workflow_id)` 순(ID는 바이트 순)으로 `after` 다음부터(키셋 페이지). 결과는 `[{wake_key, workflow_id}]`이고 `after`는 마지막 결과의 그 쌍(첫 페이지는 `nil`). `wake_at`이 없는 행은 `wake_key` 0이다 |
 
-  `commit/2`의 오류에 `{:error, {:limit, task_def_name}}`(결정 5)을 더한다.
+  `commit/2`의 오류에 `{:error, {:limit, task_def_name}}`(결정 5)을 더한다. Postgres 구현의 펜싱 실패는 `{:error, :fenced}`이며
+  (결정 7) `WorkflowServer`는 다른 Commit 오류처럼 예외 격리로 보낸다(조각 4f). 두 구현은 Commit 모양 검사를 공용
+  `Archon.Runtime.Commit.check!/2`로 하고, 큐 연산은 각자의 큐 모듈(`Queue.Memory.check_ops!/1`, `Queue.Postgres.check_ops!/1`)로
+  트랜잭션 전에 검사한다.
 
 ### 4. 다른 워크플로우에 하는 일은 outbox에 남기고 워크플로우마다 실행기 하나가 순서대로 실행한다 (L1, L6, L9)
 
@@ -161,6 +171,10 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
 - **항목 형식.** `effect`는 JSON이다: `kind`와 인자. 워크플로우 struct는 담지 않는다. `:notify_parent`는 자식 ID만
   남기고 실행할 때 저장소에서 다시 읽는다. `:start_failure_workflow`는 `Step.Effect.start` 맵 전체를 담는다(정의가
   박혀 있으면 `WorkflowDef.to_storage/1`).
+  조각 4f의 저장 모양은 `{"kind": 이름, "args": [...]}`이다. `:notify_parent`는 부모 ID와 부모 태스크 ID만 담고, 자식은 항목의
+  주인 워크플로우이므로 `pending_outbox/1`이 읽을 때의 주인(태스크 포함)을 네 번째 원소로 붙여 돌려준다. `:terminate_sub_workflow`는
+  지금의 3-튜플과 4e의 4-튜플(`parent_end_count`)을 모두 받는다. start 맵은 `Step.Effect.start`의 키만 받고 모르는 키는
+  `ArgumentError`다. 그 밖의 Effect도 `ArgumentError`다. 4e가 대상 Effect의 모양을 바꾸면 `Store.Postgres`의 인코딩도 함께 고친다.
 - **실행기 하나.** 워크플로우 프로세스는 outbox 실행기를 한 번에 하나만 둔다. outbox를 담은 Commit 뒤나 활성화 직후
   (남은 항목이 있을 때) 실행기가 없으면 `Archon.Runtime.TaskSupervisor`(`Task.Supervisor`)에서
   `async_nolink`로 하나 띄운다. **프로세스가 재시작해도 하나다.** 실행기는 시작할 때 `Archon.Runtime.Registry`에
@@ -237,8 +251,12 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
 - `Step`이 태스크를 `IN_PROGRESS`로 바꾸는 Commit(워커 poll, 비동기 시스템 태스크 시작)에 그 태스크 정의의 한도를
   `Commit.limits`에 넣는다(한도는 `concurrentExecLimit`가 0보다 큰 정의만).
 - 저장소는 Commit을 적용한 뒤, 이름마다 `IN_PROGRESS` 태스크 수가 한도를 넘으면 트랜잭션을 되돌리고
-  `{:error, {:limit, name}}`을 돌려준다. Postgres 구현은 개수를 세기 전에 이름 순으로 `pg_advisory_xact_lock`(정의 이름의
+  `{:error, {:limit, name}}`을 돌려준다. Postgres 구현은 개수를 세기 전에 `pg_advisory_xact_lock`(정의 이름의
   해시)을 잡아 같은 정의의 Commit을 직렬화한다. 메모리 구현은 GenServer 하나라 그대로 원자적이다.
+  조각 4f: 잠금은 두 키 형태 `pg_advisory_xact_lock(0x41726368, crc32(이름)을 부호 있는 32비트로)`이고(한 키 형태인 NodeLock·펜스
+  키와 공간이 겹치지 않는다), 펜스 바로 뒤 다른 쓰기보다 먼저 **키 순으로** 중복 없이 잡는다. 이름 순으로 잡으면 해시가 겹치는
+  두 이름에서 두 Commit이 서로의 잠금을 기다릴 수 있다. 개수는 쓰기를 마친 뒤 한 SQL 문으로 세고, 반환할 이름은 이름의 바이트
+  순으로 고른다.
 - `WorkflowServer`는 이 오류를 받으면 `Env.in_progress[name]`를 한도로 두고 같은 이벤트로 `Step.run`을 한 번 더 부른다.
   `Step`은 한도 초과 규칙(ADR 0018 결정 7과 "upstream과 의도적으로 다른 점")대로 워커 태스크는 60초 미루고, 비동기
   시스템 태스크는 다음 `:wake`에 다시 본다. 이 재실행도 ADR 0018 결정 4의 반복 상한에 든다.

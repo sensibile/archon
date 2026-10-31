@@ -66,4 +66,65 @@ defmodule Archon.Runtime.Commit do
           limits: %{optional(String.t()) => pos_integer()},
           queue: [queue_op()]
         }
+
+  @doc """
+  The checks every store makes before it applies `commit` to `workflow_id`, raising
+  `ArgumentError` in the caller: the workflows belong to `workflow_id` and have a known status,
+  the tasks have IDs and reference names and belong to `workflow_id`, and `outbox_ack`, `outbox`,
+  `wake` and `limits` have their shapes. The queue operations are checked by the store's queue.
+  """
+  @spec check!(String.t(), t()) :: :ok
+  # Upstream ExecutionDAO#createTasks rejects these before writing; a bad commit is a bug in the
+  # caller, so it raises there instead of crashing the store.
+  def check!(workflow_id, %__MODULE__{create: create, workflow: workflow} = commit) do
+    for %Workflow{workflow_id: id, status: status} <- [create, workflow] do
+      if id != workflow_id,
+        do: raise(ArgumentError, "commit for #{workflow_id} carries workflow #{inspect(id)}")
+
+      if status not in Workflow.statuses(),
+        do: raise(ArgumentError, "workflow #{id} has status #{inspect(status)}")
+    end
+
+    created_tasks = if create, do: create.tasks, else: []
+    Enum.each(created_tasks ++ commit.upsert_tasks, &check_task!(workflow_id, &1))
+    check_outbox!(commit.outbox, commit.outbox_ack)
+    check_wake!(commit.wake)
+    check_limits!(commit.limits)
+    :ok
+  end
+
+  defp check_outbox!(outbox, acks) do
+    unless is_list(outbox) and is_list(acks) and Enum.all?(acks, &(is_integer(&1) and &1 > 0)),
+      do: raise(ArgumentError, "invalid outbox #{inspect(outbox)} or acks #{inspect(acks)}")
+  end
+
+  defp check_wake!(wake) when wake in [:keep, :none], do: :ok
+  defp check_wake!({tag, ms}) when tag in [:at, :before] and is_integer(ms), do: :ok
+  defp check_wake!(wake), do: raise(ArgumentError, "invalid wake #{inspect(wake)}")
+
+  defp check_limits!(limits) do
+    valid? = fn {name, limit} -> is_binary(name) and is_integer(limit) and limit > 0 end
+
+    unless is_map(limits) and Enum.all?(limits, valid?),
+      do: raise(ArgumentError, "invalid limits #{inspect(limits)}")
+  end
+
+  defp check_task!(workflow_id, %Task{} = task) do
+    cond do
+      task.task_id in [nil, ""] ->
+        raise ArgumentError, "Task id cannot be null"
+
+      task.workflow_instance_id in [nil, ""] ->
+        raise ArgumentError, "Workflow instance id cannot be null"
+
+      task.workflow_instance_id != workflow_id ->
+        raise ArgumentError, "task #{task.task_id} belongs to #{task.workflow_instance_id}"
+
+      task.reference_task_name in [nil, ""] ->
+        raise ArgumentError, "Task reference name cannot be null"
+
+      true ->
+        :ok
+    end
+  end
 end

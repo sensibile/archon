@@ -70,8 +70,8 @@ defmodule Archon.Runtime.Queue.Postgres do
   Raises `ArgumentError` for a malformed operation or outside a transaction.
   """
   @spec apply_ops(Postgres.t(), [Commit.queue_op()]) :: :ok
-  def apply_ops(%Postgres{repo: repo} = instance, ops) when is_list(ops) do
-    Enum.each(ops, &check_op!/1)
+  def apply_ops(%Postgres{repo: repo} = instance, ops) do
+    check_ops!(ops)
 
     unless repo.in_transaction?(),
       do: raise(ArgumentError, "apply_ops/2 must run inside the commit's transaction")
@@ -79,8 +79,14 @@ defmodule Archon.Runtime.Queue.Postgres do
     Enum.each(ops, &apply_op(instance, &1))
   end
 
-  def apply_ops(%Postgres{}, ops),
-    do: raise(ArgumentError, "invalid queue operations #{inspect(ops)}")
+  @doc """
+  The checks of `apply_ops/2` without a database: raises `ArgumentError` for a malformed
+  operation or a queue name or message ID that cannot be stored. `Archon.Runtime.Store.Postgres`
+  calls it before it opens the commit's transaction.
+  """
+  @spec check_ops!([Commit.queue_op()]) :: :ok
+  def check_ops!(ops) when is_list(ops), do: Enum.each(ops, &check_op!/1)
+  def check_ops!(ops), do: raise(ArgumentError, "invalid queue operations #{inspect(ops)}")
 
   @impl Queue
   @spec pop(Postgres.t(), String.t(), integer(), integer()) :: [String.t()]
