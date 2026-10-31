@@ -636,6 +636,44 @@ defmodule Archon.Runtime.LifecycleTest do
                &match?({:start_sub_workflow, _task_id, %{workflow_id: id}} when id != child, &1)
              )
     end
+
+    # WorkflowExecutorOps#findLastFailedSubWorkflowIfAny: a failed DO_WHILE hands the retry to
+    # the failed SUB_WORKFLOW among the workflow's tasks, so the child is retried in place.
+    test "retry with the resume flag retries the failed child inside a DO_WHILE" do
+      define(~S"""
+      {"name": "lifecycle_loop_child", "version": 1, "tasks": [
+        {"name": "loop", "taskReferenceName": "loop", "type": "DO_WHILE", "inputParameters": {},
+         "loopCondition": "$.loop['iteration'] < 1",
+         "loopOver": [
+          {"name": "sub_workflow_task", "taskReferenceName": "st", "type": "SUB_WORKFLOW",
+           "inputParameters": {},
+           "subWorkflowParam": {"name": "integration_test_wf", "version": 1}}]}]}
+      """)
+
+      parent = start("lifecycle_loop_child", @input)
+      child = child_of(parent, "st__1")
+      complete(child, "t1")
+      fail(child, "t2")
+      await_status(child, :failed)
+
+      # the DO_WHILE is the first unsuccessful terminal task (UNSUCCESSFUL_TERMINAL_TASK)
+      assert [%Task{task_type: "DO_WHILE"} = loop, %Task{task_type: "SUB_WORKFLOW"}] =
+               await_status(parent, :failed).tasks
+
+      assert Step.Lifecycle.unsuccessful_terminal_task?(loop)
+
+      assert :ok = Lifecycle.retry(parent, true)
+      assert_leaf_retried(child, :scheduled)
+
+      # the parent keeps its SUB_WORKFLOW task and child, IN_PROGRESS again, instead of
+      # scheduling new ones (updateAndPushParents)
+      revived = await_status(parent, :running)
+
+      assert [%Task{sub_workflow_id: ^child}] =
+               Enum.filter(revived.tasks, &(&1.task_type == "SUB_WORKFLOW"))
+
+      eventually(fn -> match?(%Task{status: :in_progress}, last(parent, "st__1")) end)
+    end
   end
 
   defp assert_retried_pair_status(%Workflow{tasks: tasks}, ref, old_status) do
