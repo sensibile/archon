@@ -101,7 +101,9 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   컨트롤러가 같은 순서로 한다.
   저장은 `Archon.Runtime.Metadata` behaviour를 그대로 쓰고, 목록 조회를 위해 콜백 `get_all_task_defs/0`을 더한다(메모리·Postgres
   구현과 계약 시험).
-- 컨트롤러는 런타임 API와 `Archon.Metadata`만 부른다. 저장소·큐·`WorkflowServer`를 직접 부르지 않는다. 백엔드는 런타임
+- 컨트롤러는 런타임 API와 `Archon.Metadata`만 부른다. 저장소·큐·`WorkflowServer`를 직접 부르지 않는다. ADR 0018 결정 7은
+  REST가 부를 API를 `Archon.Runtime`·`Archon.Runtime.Tasks`로 정했으나 정의 등록 API가 없었으므로, 이 결정이 그 경계에
+  `Archon.Metadata`를 더한다(아래 결과 절의 "일부 0022가 대체"). 백엔드는 런타임
   설정이 정하고 REST는 모른다(ADR 0021 결과 절).
 - MVP 범위는 ADR 0001의 19개 그대로다. 생명주기 REST(pause, resume, retry, restart)는 런타임 API(`Archon.Runtime.Lifecycle`)가
   있지만 Later로 두고 Phase 5 뒤에 픽스처를 캡처해 연다(BOSS 결정).
@@ -161,9 +163,11 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   (`WorkflowExecutorOps`, `org/conductoross/conductor/service/SchemaService.java`, networknt). 기본값은 `WorkflowDef`가 true,
   `TaskDef`가 false(primitive)다. `SchemaService.resolve`는 `data`가 있으면 인라인 스키마로 쓰고, `externalRef`가 있으면
   `SchemaValidationException`(400)을 던지며, 나머지는 이름으로 `/api/schema`(Later) 등록본을 찾는다. 못 찾으면 upstream도 검사하지
-  않고 넘어간다("unresolvable reference leaves the payload unchecked"). 그래서 Archon과 upstream이 갈리는 것은 `data`가 있는 인라인
-  스키마와 `externalRef`가 있는 스키마다.
-- 거절 대상은 `enforceSchema`가 참이고 `inputSchema` 또는 `outputSchema`에 `data`나 `externalRef`가 있는 정의다. 문구는
+  않고 넘어간다("unresolvable reference leaves the payload unchecked"). 이름도 없으면 `SchemaValidationException`(400)이다. 그래서 Archon과
+  upstream이 갈리는 것은 이름 참조가 아닌 스키마 전부다.
+- 거절 대상은 `enforceSchema`가 참이고 `inputSchema` 또는 `outputSchema`가 이름 참조가 아닌 정의다. 이름 참조는 `data`와
+  `externalRef`가 없고 `name`이 비어 있지 않은 스키마다. 그래서 `data`가 있는 인라인 스키마, `externalRef`가 있는 스키마, 셋 다
+  없는 스키마(upstream은 "neither an inline document nor a name"으로 400)를 거절한다. 문구는
   `"Schema validation is not supported yet: <정의 이름> <inputSchema|outputSchema>"`이고 400(`IllegalArgumentException` 모양,
   `retryable` false)이다. 이 판정은 도메인의 순수 함수(`WorkflowDef`·`TaskDef`)로 두고 다음 두 곳이 부른다.
   - `Archon.Metadata`의 등록·갱신: 최상위 정의와 그 안에 박힌 정의(`WorkflowTask.taskDefinition`,
@@ -172,7 +176,7 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   - `Archon.Runtime.start_workflow/1`·`start_workflow_idempotent/1`의 정의 확인(`new_workflow`): `StartWorkflowRequest.workflowDef`로
     들어온 정의, 런타임에 식으로 정해지는 하위 워크플로우 정의(`subWorkflowDefinition`), 그 안의 태스크 정의까지. 시작 오류
     `{:invalid, 문구}`로 돌려주므로 REST에서는 400, 하위 워크플로우 시작에서는 기존 분류대로 SUB_WORKFLOW 태스크 `FAILED`다.
-- 이름 참조(`data`·`externalRef` 없음)는 upstream처럼 받고 검사하지 않는다. `enforceSchema`가 거짓이면 어떤 스키마도 받는다
+- 이름 참조는 upstream처럼 받고 검사하지 않는다. `enforceSchema`가 거짓이면 어떤 스키마도 받는다
   (upstream도 검사하지 않는다).
 - 검증기 채택과 `/api/schema`는 Later의 별도 ADR이다. 그때 이 거절을 없앤다.
 
@@ -252,7 +256,8 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 
 - 이 ADR은 결정만 담는다. 구현은 결정 7의 조각 5a~5f로 하며, 마지막 조각이 머지되면 `승인`으로 바꾼다.
 - 정의 등록 REST를 열기 전에 스키마 검증을 정하라는 ADR 0018 결과 절의 조건은 결정 5로 채운다. 그 절은 검증기 채택을 요구했으나
-  이 ADR은 거절로 대신하므로, `승인`으로 바꿀 때 ADR 0018의 목록 상태에 "일부 0022가 대체"를 적는다.
+  이 ADR은 거절로 대신한다. 또 ADR 0018 결정 7의 REST 호출 경계에 `Archon.Metadata`를 더한다(결정 2). 그래서 `승인`으로 바꿀 때
+  ADR 0018의 목록 상태에 "일부 0022가 대체"(결과 절의 스키마 검증, 결정 7의 호출 경계)를 적는다.
 - ADR 0021 결과 절의 Phase 5 출시 조건(L7·L8)은 [ADR 0023](0023-worker-input-trust-and-auth.md)과 조각 5b가 채운다. 5e는 5b 뒤다.
 - 아직 범위 밖: 생명주기·검색·이벤트 등 Later 경로, 인증(ADR 0023 결정 4), 스키마 검증기와 `/api/schema`, 여러 노드(ADR 0021
   결정 7), 배포 절차(release 설정과 마이그레이션 실행 시점), ADR 0021 결정 6에 남은 이른 활성화의 `timeoutSeconds` 밀림(메모리
