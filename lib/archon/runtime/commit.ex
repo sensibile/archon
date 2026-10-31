@@ -15,7 +15,9 @@ defmodule Archon.Runtime.Commit do
     * `outbox_ack` - IDs of the workflow's outbox entries to delete. IDs the workflow does not
       have are ignored.
     * `outbox` - work on other workflows (`t:Archon.Runtime.Step.Effect.t/0`), appended to the
-      workflow's outbox in this order (ADR 0021, decision 4).
+      workflow's outbox in this order (ADR 0021, decision 4). Only `:terminate_sub_workflow`,
+      `:notify_parent`, `:revive_parent`, `:retry_sub_workflow` and `:start_failure_workflow` go
+      there; slice 4e settles their stored shape.
     * `wake` - the workflow's stored re-evaluation time (ADR 0021, decision 6): `:keep` leaves it,
       `{:at, ms}` sets it, `{:before, ms}` sets it to `ms` unless it is set earlier, and `:none`
       clears it.

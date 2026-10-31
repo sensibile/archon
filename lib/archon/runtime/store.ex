@@ -69,7 +69,7 @@ defmodule Archon.Runtime.Store do
   @type outbox_id :: pos_integer()
 
   @typedoc "A due workflow's place in `c:due_workflow_ids/3`: its re-evaluation time (0 unset) and ID."
-  @type due_key :: {wake_key :: non_neg_integer(), workflow_id :: String.t()}
+  @type due_key :: {wake_key :: integer(), workflow_id :: String.t()}
 
   @callback commit(workflow_id :: String.t(), Commit.t()) ::
               :ok | {:error, :conflict | :not_found | {:limit, String.t()}}

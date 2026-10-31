@@ -39,7 +39,8 @@ defmodule Archon.Runtime.StoreTest do
     assert Memory.pending_outbox("store-test-named") == []
     assert Memory.ack_outbox("store-test-named", [1]) == :ok
     assert is_list(Memory.outbox_workflow_ids(nil, 10))
-    assert {0, "store-test-named"} in Memory.due_workflow_ids(0, nil, 1_000)
+    # The shared store may hold many running workflows; start the page just before this one.
+    assert Memory.due_workflow_ids(0, {0, "store-test-name"}, 1) == [{0, "store-test-named"}]
     assert Memory.remove_workflow("store-test-named") == :ok
   end
 

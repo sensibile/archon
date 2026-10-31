@@ -525,12 +525,12 @@ defmodule Archon.Runtime.StoreContract do
 
           create(ctx, workflow("wf2"))
           commit(ctx, "wf2", outbox: [{:retry_sub_workflow, "x"}])
-          commit(ctx, "wf1", outbox: [{:terminate_sub_workflow, "c2", "why"}])
+          commit(ctx, "wf1", outbox: [{:retry_sub_workflow, "c2"}])
 
           assert outbox_effects(ctx, "wf1") == [
                    {:retry_sub_workflow, "c1"},
                    {:revive_parent, "p", "pt"},
-                   {:terminate_sub_workflow, "c2", "why"}
+                   {:retry_sub_workflow, "c2"}
                  ]
 
           ids = outbox_ids(ctx, "wf1")
@@ -693,6 +693,8 @@ defmodule Archon.Runtime.StoreContract do
           assert due(ctx, 30, {20, "B"}, 10) == [{20, "a"}, {30, "e"}]
           assert due(ctx, 30, {20, "Z"}, 10) == [{20, "a"}, {30, "e"}]
           assert due(ctx, 30, {30, "e"}, 10) == []
+          assert due(ctx, 30, {0, "d"}, 1) == [{10, "c"}]
+          assert due(ctx, 30, {0, "a"}, 1) == [{0, "d"}]
           assert due(ctx, 30, nil, 0) == []
 
           s(ctx, :remove_workflow, ["c"])
@@ -726,6 +728,13 @@ defmodule Archon.Runtime.StoreContract do
                      task("wf2", 1, task_def_name: "lim", status: :completed),
                      in_progress("wf2", 2, "lim")
                    ],
+                   limits: %{"lim" => 2}
+                 ) == :ok
+
+          # So does a deleted one.
+          assert commit(ctx, "wf1",
+                   upsert_tasks: [in_progress("wf1", 3, "lim")],
+                   delete_task_ids: ["wf1_t1"],
                    limits: %{"lim" => 2}
                  ) == :ok
         end

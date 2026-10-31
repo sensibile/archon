@@ -4,7 +4,7 @@
 - 날짜: 2026-10-30
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(DB 라이브러리, 큐·Effect 원자성, 여러 노드, 지연 활성화)는 2026-10-30 BOSS가 이 문서의 추천안으로 정했다.
-- 갱신: 2026-10-31 조각 4b가 결정 3의 메모리 큐 적용 방식(`Queue.Memory.apply_ops/2`, 보일 시각 그대로)을 고쳤다.
+- 갱신: 2026-10-31 조각 4b가 결정 3의 메모리 큐 적용 방식(`Queue.Memory.apply_ops/2`, 보일 시각 그대로)을 고치고, 결정 2·3에 워크플로우 ID의 바이트 순(`COLLATE "C"`)을 적었다.
 
 ## 맥락
 
@@ -71,15 +71,18 @@ behaviour moduledoc: 계약 시험이 시계를 주입하므로 DB `now()`를 �
 
 | 표 | 열 | 색인·제약 |
 |---|---|---|
-| `workflow` | `workflow_id text` PK, `status text`, `parent_workflow_id text`, `wake_at bigint`(결정 6), `json_data text` | `status = 'RUNNING'`인 행의 `(COALESCE(wake_at, 0), workflow_id)` 부분 식 색인 |
+| `workflow` | `workflow_id text COLLATE "C"` PK, `status text`, `parent_workflow_id text`, `wake_at bigint`(결정 6), `json_data text` | `status = 'RUNNING'`인 행의 `(COALESCE(wake_at, 0), workflow_id)` 부분 식 색인 |
 | `task` | `task_id text` PK, `workflow_id text`(FK → `workflow`, `ON DELETE CASCADE`), `seq integer`, `status text`, `task_def_name text`, `json_data text` | `(workflow_id, seq)`, `status = 'IN_PROGRESS'`인 행의 `task_def_name` 부분 색인 |
-| `outbox` | `id bigserial` PK, `workflow_id text`(FK → `workflow`, `ON DELETE CASCADE`), `effect text`, `inserted_at bigint` | `(workflow_id, id)` |
+| `outbox` | `id bigserial` PK, `workflow_id text COLLATE "C"`(FK → `workflow`, `ON DELETE CASCADE`), `effect text`, `inserted_at bigint` | `(workflow_id, id)` |
 | `queue_message` | `queue_name text`, `message_id text`(둘이 PK), `priority integer`, `deliver_on bigint`, `popped boolean`, `unack_on bigint`, `seq bigserial` | `(queue_name, priority DESC, deliver_on, seq)` |
 | `node_lease` | `id integer` PK(항상 1), `epoch bigint` | 결정 7 |
 | `poll_data` | `queue_name text`, `domain_key text`(둘이 PK, `nil`은 `"DEFAULT"`), `domain text`, `worker_id text`, `last_poll_time bigint` | |
 | `meta_task_def` | `name text` PK, `json_data text` | |
 | `meta_workflow_def` | `name text`, `version integer`(둘이 PK), `json_data text` | |
 
+- **ID 순서는 바이트 순이다.** `workflow.workflow_id`·`outbox.workflow_id`는 `COLLATE "C"`다. 결정 3의 키셋 콜백은 워크플로우
+  ID를 바이트 순(`"B" < "a"`)으로 매기고 계약 시험이 이를 고정한다(조각 4b). DB 기본 collation을 쓰면 질의마다 `COLLATE "C"`를
+  붙여야 하고 그러면 키셋 색인을 쓰지 못한다.
 - **저장 인코딩.** ADR 0014 결정 3이 미뤄 둔 "내부 필드를 포함하는 인코딩"을 `to_storage/1`·`from_storage/1`로
   정한다. `Workflow`, `Task`, `WorkflowDef`, `TaskDef`에 두고, `Archon.Domain.Codec`의 `encode/3`·`decode/4`에 옵션 인자
   (`internal: true`)를 더해 `wire: false` 필드까지 읽고 쓴다. 기존 `to_json/1`·`from_json/2`(REST)는 그대로다. 워크플로우
@@ -127,8 +130,8 @@ ADR 0018 결정 2의 `Commit` 필드 네 개에 다음 다섯을 더한다. 저�
   |---|---|
   | `pending_outbox(workflow_id)` | 그 워크플로우의 남은 항목 `[{id, effect}]`(`id` 순) |
   | `ack_outbox(workflow_id, [id])` | 실행을 마친 outbox 항목을 지운다 |
-  | `outbox_workflow_ids(after, limit)` | 남은 항목이 있는 워크플로우 ID를 `after` 다음부터 ID 순으로(키셋 페이지) |
-  | `due_workflow_ids(before_ms, after, limit)` | `RUNNING`이고 `wake_at`이 `before_ms` 이하이거나 없는 워크플로우를 `(COALESCE(wake_at, 0), workflow_id)` 순으로 `after` 다음부터(키셋 페이지). 결과는 `[{wake_key, workflow_id}]`이고 `after`는 마지막 결과의 그 쌍(첫 페이지는 `nil`). `wake_at`이 없는 행은 `wake_key` 0이다 |
+  | `outbox_workflow_ids(after, limit)` | 남은 항목이 있는 워크플로우 ID를 `after` 다음부터 ID의 바이트 순으로(키셋 페이지) |
+  | `due_workflow_ids(before_ms, after, limit)` | `RUNNING`이고 `wake_at`이 `before_ms` 이하이거나 없는 워크플로우를 `(COALESCE(wake_at, 0), workflow_id)` 순(ID는 바이트 순)으로 `after` 다음부터(키셋 페이지). 결과는 `[{wake_key, workflow_id}]`이고 `after`는 마지막 결과의 그 쌍(첫 페이지는 `nil`). `wake_at`이 없는 행은 `wake_key` 0이다 |
 
   `commit/2`의 오류에 `{:error, {:limit, task_def_name}}`(결정 5)을 더한다.
 

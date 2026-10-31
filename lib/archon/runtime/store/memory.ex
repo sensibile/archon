@@ -40,6 +40,8 @@ defmodule Archon.Runtime.Store.Memory do
   alias Archon.Runtime.Queue.Memory, as: Queue
   alias Archon.Runtime.Step.Effect
 
+  @queue_timeout 5_000
+
   @doc false
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
@@ -52,7 +54,8 @@ defmodule Archon.Runtime.Store.Memory do
   def commit(server \\ __MODULE__, workflow_id, %Commit{} = commit) when is_binary(workflow_id) do
     check_commit!(workflow_id, commit)
 
-    case GenServer.call(server, {:commit, workflow_id, commit}) do
+    # Longer than the queue call, so a slow queue ends as an unapplied commit and an exit.
+    case GenServer.call(server, {:commit, workflow_id, commit}, @queue_timeout + 5_000) do
       {:exit, reason} -> exit(reason)
       reply -> reply
     end
@@ -351,7 +354,7 @@ defmodule Archon.Runtime.Store.Memory do
   defp apply_queue(_queue, []), do: :ok
 
   defp apply_queue(queue, ops) do
-    Queue.apply_ops(queue, ops)
+    Queue.apply_ops(queue, ops, @queue_timeout)
   catch
     :exit, reason -> {:exit, reason}
   end

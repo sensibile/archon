@@ -65,10 +65,10 @@ defmodule Archon.Runtime.Queue.Memory do
   time of this server's clock; each operation means the callback of the same name with the delay
   that ends at `deliver_on`.
   """
-  @spec apply_ops(GenServer.server(), [Commit.queue_op()]) :: :ok
-  def apply_ops(server \\ __MODULE__, ops) when is_list(ops) do
+  @spec apply_ops(GenServer.server(), [Commit.queue_op()], timeout()) :: :ok
+  def apply_ops(server \\ __MODULE__, ops, timeout \\ 5_000) when is_list(ops) do
     check_ops!(ops)
-    GenServer.call(server, {:apply_ops, ops})
+    GenServer.call(server, {:apply_ops, ops}, timeout)
   end
 
   @doc false
