@@ -39,3 +39,5 @@ Archon의 합의된 기술·운영 결정을 누적합니다. 파일 이름은 `
 | [0020](0020-taeguk-codex-transmission-list-removal.md) | 태극 번들 갱신과 Codex 전송 저장소 허용 목록 제거 | 승인 |
 | [0021](0021-phase4-postgres-persistence.md) | Phase 4 PostgreSQL 영속성과 큐 설계 | 승인 |
 | [0022](0022-taeguk-validation-health.md) | 태극 검증 건강도 워커 적용과 주간 CI 실행 | 제안 |
+| [0023](0023-phase5-rest.md) | Phase 5 REST 설계 (MVP 엔드포인트) | 제안 |
+| [0024](0024-worker-input-trust-and-auth.md) | worker 입력의 신뢰 경계와 MVP 인증 | 제안 |
