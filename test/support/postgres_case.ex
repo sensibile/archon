@@ -48,8 +48,10 @@ defmodule Archon.PostgresCase do
     config = Repo.config()
 
     with :ok <- reachable(config),
-         :ok <- storage_up(config),
-         {:ok, _pid} <- Supervisor.start_child(Archon.Supervisor, Repo) do
+         :ok <- storage_up(config) do
+      # The server answered, so a repo that cannot start is a setup error, not a skip.
+      {:ok, _pid} = Supervisor.start_child(Archon.Supervisor, Repo)
+
       for prefix <- [Postgres.runtime_prefix(), Postgres.contract_prefix()],
           do: Archon.Release.migrate(Repo, prefix)
 
