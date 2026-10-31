@@ -185,38 +185,57 @@ defmodule Archon.Runtime.PostgresTest do
       assert task_def_names(fenced) == ["a"]
     end
 
-    test "a write waiting for the fence reads the epoch raised while it waited",
-         %{fenced: fenced} do
-      {:ok, epoch} = Postgres.advance_epoch(fenced)
-      Postgres.put_epoch(epoch)
-      test = self()
+    # Under REPEATABLE READ the epoch read would reuse the snapshot taken before the lock wait.
+    for isolation <- ["READ COMMITTED", "REPEATABLE READ"] do
+      test "a write waiting for the fence reads the epoch raised while it waited (#{isolation})",
+           %{fenced: fenced} do
+        assert_fenced_after_wait(fenced, unquote(isolation))
+      end
+    end
+  end
 
-      # Holds the exclusive fence lock with the epoch already raised, as a new node does.
-      holder =
-        Task.async(fn ->
-          Repo.transaction(fn ->
-            Repo.query!("SELECT pg_advisory_xact_lock($1)", [Postgres.fence_key()])
+  defp assert_fenced_after_wait(fenced, isolation) do
+    {:ok, epoch} = Postgres.advance_epoch(fenced)
+    Postgres.put_epoch(epoch)
+    test = self()
 
-            Repo.query!(
-              "UPDATE #{Postgres.table(fenced, "node_lease")} SET epoch = epoch + 1 WHERE id = 1"
-            )
+    # Holds the exclusive fence lock with the epoch already raised, as a new node does.
+    holder =
+      Task.async(fn ->
+        Repo.transaction(fn ->
+          Repo.query!("SELECT pg_advisory_xact_lock($1)", [Postgres.fence_key()])
 
-            send(test, :locked)
-            receive do: (:release -> :ok)
-          end)
+          Repo.query!(
+            "UPDATE #{Postgres.table(fenced, "node_lease")} SET epoch = epoch + 1 WHERE id = 1"
+          )
+
+          send(test, :locked)
+          receive do: (:release -> :ok)
         end)
+      end)
 
-      assert_receive :locked
+    assert_receive :locked
 
-      writer =
-        Task.async(fn -> Postgres.transaction(fenced, fn -> insert_task_def(fenced, "a") end) end)
+    writer =
+      Task.async(fn ->
+        # As if the server default isolation were stricter than READ COMMITTED.
+        Repo.transaction(fn -> fenced_insert(fenced, isolation) end)
+      end)
 
-      refute Task.yield(writer, 200)
+    refute Task.yield(writer, 200)
 
-      send(holder.pid, :release)
-      assert Task.await(holder) == {:ok, :ok}
-      assert Task.await(writer) == {:error, :fenced}
-      assert task_def_names(fenced) == []
+    send(holder.pid, :release)
+    assert Task.await(holder) == {:ok, :ok}
+    assert Task.await(writer) == {:error, :fenced}
+    assert task_def_names(fenced) == []
+  end
+
+  defp fenced_insert(fenced, isolation) do
+    Repo.query!("SET TRANSACTION ISOLATION LEVEL #{isolation}")
+
+    case Postgres.check_fence(fenced) do
+      :ok -> insert_task_def(fenced, "a")
+      {:error, :fenced} -> Repo.rollback(:fenced)
     end
   end
 

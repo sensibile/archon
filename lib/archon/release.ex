@@ -23,14 +23,7 @@ defmodule Archon.Release do
   """
   @spec migrate([String.t()]) :: :ok
   def migrate(prefixes) when is_list(prefixes) do
-    for repo <- repos() do
-      {:ok, _result, _apps} =
-        Ecto.Migrator.with_repo(repo, fn repo ->
-          Enum.each(prefixes, &migrate(repo, &1))
-        end)
-    end
-
-    :ok
+    Enum.each(repos(), &migrate_repo(&1, prefixes))
   end
 
   @doc """
@@ -62,6 +55,13 @@ defmodule Archon.Release do
       Ecto.Migrator.run(repo, direction, [log: false] ++ opts)
     after
       Code.put_compiler_option(:ignore_module_conflict, previous)
+    end
+  end
+
+  defp migrate_repo(repo, prefixes) do
+    case Ecto.Migrator.with_repo(repo, fn repo -> Enum.each(prefixes, &migrate(repo, &1)) end) do
+      {:ok, _result, _apps} -> :ok
+      {:error, reason} -> raise "cannot start #{inspect(repo)}: #{inspect(reason)}"
     end
   end
 

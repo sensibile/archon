@@ -130,17 +130,21 @@ defmodule Archon.Runtime.Postgres do
   def rollback(%__MODULE__{repo: repo}, reason), do: repo.rollback(reason)
 
   @doc """
-  The write fence (ADR 0021, decision 7). Must be the first statements of a write transaction;
-  `transaction/2` calls it. With `fence: nil` it does nothing.
+  The write fence (ADR 0021, decision 7). Call it only inside a transaction, before any other
+  statement: `transaction/2` does. Outside a transaction the lock ends with its statement and
+  fences nothing. With `fence: nil` it does nothing.
 
-  With `fence: :runtime` it takes `pg_advisory_xact_lock_shared` on `fence_key/0` and then, in
-  a separate statement, reads the epoch in `node_lease`. It returns `{:error, :fenced}` when that
+  With `fence: :runtime` it first sets the transaction to READ COMMITTED (the epoch read needs
+  its own snapshot even when the server default is stricter, and the setting fails loudly if a
+  statement already ran), takes `pg_advisory_xact_lock_shared` on `fence_key/0` and then, in a
+  separate statement, reads the epoch in `node_lease`. It returns `{:error, :fenced}` when that
   epoch differs from the one `put_epoch/1` published, or when none was published.
   """
   @spec check_fence(t()) :: :ok | {:error, :fenced}
   def check_fence(%__MODULE__{fence: nil}), do: :ok
 
   def check_fence(%__MODULE__{fence: :runtime, repo: repo} = instance) do
+    repo.query!("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
     repo.query!("SELECT pg_advisory_xact_lock_shared($1)", [@fence_key])
 
     %{rows: [[epoch]]} =
