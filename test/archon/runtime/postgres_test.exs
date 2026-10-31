@@ -122,6 +122,27 @@ defmodule Archon.Runtime.PostgresTest do
     end
   end
 
+  describe "transaction!/2" do
+    test "returns fun's result, and raises on a fenced write or a rollback", %{instance: instance} do
+      assert Postgres.transaction!(instance, fn -> insert_task_def(instance, "a") end) ==
+               :inserted
+
+      assert_raise ArgumentError, ~r/rollback/, fn ->
+        Postgres.transaction!(instance, fn -> Postgres.rollback(instance, :nope) end)
+      end
+
+      Postgres.clear_epoch()
+
+      assert_raise Postgres.FencedError, fn ->
+        Postgres.transaction!(%{instance | fence: :runtime}, fn ->
+          insert_task_def(instance, "b")
+        end)
+      end
+
+      assert task_def_names(instance) == ["a"]
+    end
+  end
+
   describe "the write fence" do
     setup %{instance: instance} do
       on_exit(&Postgres.clear_epoch/0)
