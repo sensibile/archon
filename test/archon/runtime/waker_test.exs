@@ -15,7 +15,7 @@ defmodule Archon.Runtime.WakerTest do
 
   @moduletag :capture_log
 
-  alias Archon.Domain.{TaskResult, Workflow}
+  alias Archon.Domain.{TaskDef, TaskResult, Workflow, WorkflowDef}
   alias Archon.Runtime.{Commit, Waker}
 
   import ExUnit.CaptureLog
@@ -157,6 +157,39 @@ defmodule Archon.Runtime.WakerTest do
       RuntimeHooks.advance(late_at - 5_000 - Runtime.now())
       assert Waker.run() >= 1
       assert WorkflowServer.whereis(late)
+    end
+
+    test "an early activation keeps the stored time, so a workflow timeout is not put off" do
+      :ok = Runtime.metadata().update_task_def(%TaskDef{name: "waker_task", retry_count: 0})
+
+      {:ok, definition} =
+        WorkflowDef.from_json(%{
+          "name" => "waker_timeout",
+          "version" => 1,
+          "timeoutSeconds" => 120,
+          "timeoutPolicy" => "TIME_OUT_WF",
+          "tasks" => [
+            %{"name" => "waker_task", "taskReferenceName" => "t1", "type" => "SIMPLE"}
+          ]
+        })
+
+      :ok = Runtime.metadata().update_workflow_def(definition)
+      {:ok, id} = Runtime.start_workflow(%{name: "waker_timeout", input: %{}})
+      at = stored_wake(id)
+      assert at == @t0 + 121_000
+      stop_process(id)
+
+      RuntimeHooks.advance(at - 5_000 - Runtime.now())
+      Waker.run()
+      assert eventually(fn -> match?(%{message: :wake, at: ^at}, timer(id)) end)
+      assert stored_wake(id) == at
+
+      RuntimeHooks.advance(at - Runtime.now())
+      send(WorkflowServer.whereis(id), :wake)
+
+      assert eventually(fn ->
+               match?({:ok, %Workflow{status: :timed_out}}, Runtime.get_workflow(id))
+             end)
     end
 
     test "reads every keyset page and leaves paused and running processes alone" do

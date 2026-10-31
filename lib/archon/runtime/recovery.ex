@@ -28,7 +28,9 @@ defmodule Archon.Runtime.Recovery do
     * in both, the workflows that have outbox entries (`Store.outbox_workflow_ids/2`), terminal
       ones included.
 
-  Workflows that already have a process are left alone.
+  Workflows that already have a process are left alone. A process started for a stored time is
+  told that time (`WorkflowServer.due/2`), so its recovery check, run ahead of it, does not put
+  the evaluation off.
   """
 
   use Task, restart: :transient
@@ -50,7 +52,7 @@ defmodule Archon.Runtime.Recovery do
   def run(selection \\ default_selection()) do
     started =
       case selection do
-        :all -> activate(Runtime.store().running_workflow_ids())
+        :all -> activate(Enum.map(Runtime.store().running_workflow_ids(), &{0, &1}))
         :due -> due(Runtime.now() + Runtime.setting(:activation_margin, 5_000), nil, 0)
       end
 
@@ -62,7 +64,7 @@ defmodule Archon.Runtime.Recovery do
 
   defp due(before_ms, cursor, started) do
     page = Runtime.store().due_workflow_ids(before_ms, cursor, page_size())
-    started = started + activate(Enum.map(page, fn {_wake_key, id} -> id end))
+    started = started + activate(page)
 
     if last_page?(page),
       do: started,
@@ -71,19 +73,20 @@ defmodule Archon.Runtime.Recovery do
 
   defp outbox(cursor, started) do
     page = Runtime.store().outbox_workflow_ids(cursor, page_size())
-    started = started + activate(page)
+    started = started + activate(Enum.map(page, &{0, &1}))
 
     if last_page?(page),
       do: started,
       else: outbox(List.last(page), started)
   end
 
-  defp activate(ids) do
-    Enum.count(ids, fn id ->
+  # `{wake_key, id}`; a process started ahead of a stored time is told it (0 is none).
+  defp activate(keys) do
+    Enum.count(keys, fn {wake_key, id} ->
       WorkflowServer.whereis(id) == nil and
         case WorkflowServer.activate(id) do
-          {:ok, _pid} ->
-            true
+          {:ok, pid} ->
+            tell_due(pid, wake_key)
 
           {:error, reason} ->
             Logger.warning("could not activate workflow #{id}: #{inspect(reason)}")
@@ -91,6 +94,9 @@ defmodule Archon.Runtime.Recovery do
         end
     end)
   end
+
+  defp tell_due(_pid, 0), do: true
+  defp tell_due(pid, wake_key), do: WorkflowServer.due(pid, wake_key) == :ok
 
   defp last_page?(page), do: page == [] or length(page) < page_size()
 
