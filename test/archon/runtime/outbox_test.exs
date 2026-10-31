@@ -81,9 +81,9 @@ defmodule Archon.Runtime.OutboxTest do
   defp child_of(id),
     do: eventually(fn -> Task.sub_workflow_id(task(id, "st")) end)
 
+  # The last instance of t1, once it is scheduled.
   defp finish(id, status) do
-    task =
-      eventually(fn -> match?(%Task{status: :scheduled}, task(id, "t1")) and task(id, "t1") end)
+    task = eventually(fn -> match?(%Task{status: :scheduled}, last_t1(id)) and last_t1(id) end)
 
     assert %Task{status: :in_progress} = WorkflowServer.poll(id, task.task_id, "w")
 
@@ -93,6 +93,9 @@ defmodule Archon.Runtime.OutboxTest do
       status: status
     })
   end
+
+  defp last_t1(id),
+    do: workflow(id).tasks |> Enum.filter(&(&1.reference_task_name == "t1")) |> List.last()
 
   defp pending(id), do: Runtime.store().pending_outbox(id)
 
@@ -356,6 +359,40 @@ defmodule Archon.Runtime.OutboxTest do
       assert :ok = Runtime.Lifecycle.retry(child)
       assert await_status(parent, :running)
       assert eventually(fn -> pending(child) == [] end)
+    end
+  end
+
+  describe "an entry run twice (decision 4, idempotence)" do
+    test "a revival request for a parent that already revived changes nothing" do
+      {parent, child} = parent_and_child()
+      assert %Task{status: :failed} = finish(child, :failed)
+      assert await_status(parent, :failed)
+
+      assert :ok = Runtime.Lifecycle.retry(child)
+      assert await_status(parent, :running)
+      assert eventually(fn -> pending(child) == [] end)
+      before = workflow(parent)
+
+      task_id = task(parent, "st").task_id
+      assert Outbox.run_effect(child, {:revive_parent, parent, task_id}) == :ok
+      after_again = workflow(parent)
+      assert {after_again.status, after_again.end_count} == {:running, before.end_count}
+      assert [%Task{status: :in_progress}] = after_again.tasks
+
+      assert %Task{status: :completed} = finish(child, :completed)
+      assert await_status(parent, :completed)
+    end
+
+    test "a retry of a child that already runs is acked and leaves it running" do
+      {parent, child} = parent_and_child()
+      before = workflow(child)
+
+      assert {:error, {:not_found, _message}} =
+               Outbox.run_effect(parent, {:retry_sub_workflow, child})
+
+      activate_with(parent, [{:retry_sub_workflow, child}])
+      assert eventually(fn -> pending(parent) == [] end)
+      assert workflow(child) == before
     end
   end
 
