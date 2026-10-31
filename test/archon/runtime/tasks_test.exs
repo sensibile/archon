@@ -17,9 +17,14 @@ defmodule Archon.Runtime.TasksTest do
   @moduletag :capture_log
 
   alias Archon.Domain.{Task, TaskDef, TaskResult, WorkflowDef, WorkflowTask}
-  alias Archon.Runtime.Tasks
+  alias Archon.Runtime.{Tasks, Waker}
 
+  # The tests poll the shared queues of the captured definitions. The waker is suspended so that
+  # it does not activate a workflow left by another test, whose recovery check would queue its
+  # task again (on the Postgres backend, whose stored times other tests set with their clock).
   setup do
+    :ok = :sys.suspend(Waker)
+    on_exit(fn -> with(pid when is_pid(pid) <- Process.whereis(Waker), do: :sys.resume(pid)) end)
     drain(["archon_task_a", "archon_task_b"])
     :ok
   end

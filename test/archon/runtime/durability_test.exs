@@ -165,10 +165,14 @@ defmodule Archon.Runtime.DurabilityTest do
 
     Process.exit(Process.whereis(NodeLock), :kill)
 
-    assert eventually(fn ->
-             Process.whereis(Archon.Runtime.Registry) not in [nil, registry] and
-               Process.whereis(Archon.Runtime.Waker) != nil
-           end)
+    # A killed lock is not released by an unlock, so the new one may wait a retry interval.
+    assert eventually(
+             fn ->
+               Process.whereis(Archon.Runtime.Registry) not in [nil, registry] and
+                 Process.whereis(Archon.Runtime.Waker) != nil
+             end,
+             1_000
+           )
 
     assert NodeLock.epoch() > previous
     assert Postgres.epoch() == NodeLock.epoch()

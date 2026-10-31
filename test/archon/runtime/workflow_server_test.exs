@@ -161,7 +161,8 @@ defmodule Archon.Runtime.WorkflowServerTest do
       Process.exit(pid, :kill)
       await_down_pid(pid)
 
-      # Restarted by its supervisor, or activated here when other tests used up its restarts.
+      # Restarted by its supervisor, or activated here when killed processes of other tests used
+      # up its restart intensity (one_for_one, 3 in 5 s); either way it restarts from the store.
       restarted =
         eventually(fn ->
           case WorkflowServer.activate(id) do

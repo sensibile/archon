@@ -9,8 +9,9 @@ defmodule Archon.Runtime.Postgres.NodeLock do
   On start it opens its own Postgrex connection, outside `Archon.Repo`'s pool and linked to it,
   with `backoff_type: :stop` and `max_restarts: 0` so that a lost connection is not silently
   replaced by one without the lock: the connection exits instead. It takes the session advisory
-  lock on `Archon.Runtime.Postgres.node_lock_key/0` with `pg_try_advisory_lock`, trying again for `retry_timeout` (the lock of this node's
-  previous connection may not be released by the server yet) and then failing with
+  lock on `Archon.Runtime.Postgres.node_lock_key/0` with `pg_try_advisory_lock`, trying again
+  for `retry_timeout` (the lock of this node's previous connection may not be released by the
+  server yet) and then failing with
   `{:stop, :another_node_holds_the_database}`. A database it cannot reach is tried again for
   the same time on new connections (a restart or failover), then fails the start with
   `{:stop, {:node_lock_connection, reason}}`. With the lock it raises the epoch in
@@ -87,8 +88,7 @@ defmodule Archon.Runtime.Postgres.NodeLock do
       {deadline, Keyword.get(opts, :retry_interval, 500), Keyword.get(opts, :connection, [])}
 
     case acquire(state, retry) do
-      {:ok, conn, backend_pid} ->
-        {:ok, epoch} = Postgres.advance_epoch(state.instance)
+      {:ok, conn, backend_pid, epoch} ->
         if state.publish, do: Postgres.put_epoch(epoch)
         Logger.info("took the node lock with epoch #{epoch}")
         {:ok, schedule(%{state | conn: conn, backend_pid: backend_pid, epoch: epoch})}
@@ -99,20 +99,19 @@ defmodule Archon.Runtime.Postgres.NodeLock do
   end
 
   # Tries until the deadline both while another node holds the lock and while the database
-  # cannot be reached (a restart or failover), on a new connection after a failed one.
-  defp acquire(
-         %State{instance: instance, lock_key: key} = state,
-         {deadline, interval, overrides} = retry
-       ) do
+  # cannot be reached (a restart or failover), on a new connection after a failed one. Raising
+  # the epoch goes through Archon.Repo, whose pool may still be reconnecting: a failure there
+  # releases the lock (closing the connection) and is tried again too.
+  defp acquire(%State{instance: instance} = state, {deadline, interval, overrides} = retry) do
     result =
       case connect(instance, overrides) do
-        {:ok, conn} -> lock(conn, key)
+        {:ok, conn} -> lock(conn, state)
         {:error, reason} -> {:error, reason}
       end
 
     case result do
-      {:ok, conn, backend_pid} ->
-        {:ok, conn, backend_pid}
+      {:ok, _conn, _backend_pid, _epoch} = acquired ->
+        acquired
 
       failure ->
         if System.monotonic_time(:millisecond) + interval > deadline do
@@ -124,10 +123,17 @@ defmodule Archon.Runtime.Postgres.NodeLock do
     end
   end
 
-  defp lock(conn, key) do
+  defp lock(conn, %State{instance: instance, lock_key: key}) do
     case try_lock(conn, key) do
       {:ok, true, backend_pid} ->
-        {:ok, conn, backend_pid}
+        case advance_epoch(instance) do
+          {:ok, epoch} ->
+            {:ok, conn, backend_pid, epoch}
+
+          {:error, reason} ->
+            close(conn)
+            {:error, reason}
+        end
 
       {:ok, false, _backend_pid} ->
         close(conn)
@@ -150,6 +156,14 @@ defmodule Archon.Runtime.Postgres.NodeLock do
     |> Keyword.merge(overrides)
     |> Keyword.merge(backoff_type: :stop, max_restarts: 0, pool_size: 1, name: nil)
     |> Postgrex.start_link()
+  end
+
+  defp advance_epoch(instance) do
+    Postgres.advance_epoch(instance)
+  rescue
+    exception -> {:error, exception}
+  catch
+    :exit, reason -> {:error, reason}
   end
 
   defp try_lock(conn, key) do
@@ -239,11 +253,14 @@ defmodule Archon.Runtime.Postgres.NodeLock do
 
   defp close(nil), do: :ok
 
+  # Unlinked first, so that its exit does not reach this process later as a lost connection.
   defp close(conn) do
-    if Process.alive?(conn), do: GenServer.stop(conn, :normal)
+    Process.unlink(conn)
     flush_exit(conn)
+    if Process.alive?(conn), do: GenServer.stop(conn, :normal)
+    :ok
   catch
-    :exit, _reason -> flush_exit(conn)
+    :exit, _reason -> :ok
   end
 
   defp flush_exit(conn) do
