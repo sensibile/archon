@@ -18,7 +18,8 @@ defmodule Archon.Runtime.OutboxTest do
 
   alias Archon.Domain.{Task, TaskResult, Workflow, WorkflowDef}
   alias Archon.Runtime.{Commit, Outbox}
-  alias Archon.Runtime.Step.{Lifecycle, State}
+  alias Archon.Runtime.Step
+  alias Archon.Runtime.Step.{Env, Lifecycle, State}
 
   @child ~S"""
   {"name": "outbox_child", "version": 1, "tasks": [
@@ -343,10 +344,10 @@ defmodule Archon.Runtime.OutboxTest do
 
     test "a refusal that arrives after a retry leaves the new run's output alone" do
       wf = %Workflow{workflow_id: "w", status: :running, output: %{"a" => 1}, tasks: []}
-      env = Archon.Runtime.Step.Env.new(now: 1)
+      env = Env.new(now: 1)
 
       assert {:ok, ^wf, [], %Commit{workflow: nil}, []} =
-               Archon.Runtime.Step.run(wf, {:failure_workflow_started, {:error, "gone"}}, env)
+               Step.run(wf, {:failure_workflow_started, {:error, "gone"}}, env)
     end
 
     test "a start that failed in the store is tried again" do
