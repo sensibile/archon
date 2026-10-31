@@ -68,6 +68,13 @@ defmodule Archon.Runtime.Postgres do
     instance
   end
 
+  @doc """
+  The runtime instance: the runtime schema, `Archon.Runtime.now/0` and the write fence. The
+  behaviour arities of the Postgres implementations use it.
+  """
+  @spec runtime() :: t()
+  def runtime, do: %__MODULE__{fence: :runtime}
+
   @doc "The Postgres schema of the runtime's tables."
   @spec runtime_prefix() :: String.t()
   def runtime_prefix, do: "public"
@@ -127,6 +134,20 @@ defmodule Archon.Runtime.Postgres do
         {:error, :fenced} -> repo.rollback(:fenced)
       end
     end)
+  end
+
+  @doc """
+  Like `transaction/2`, for writes whose callers cannot take an error tuple (the queue and
+  metadata callbacks): returns `fun`'s result and raises `Archon.Runtime.Postgres.FencedError`
+  when the fence check fails, which the runtime's exception isolation handles (ADR 0021,
+  decision 7). `fun` must not call `rollback/2`.
+  """
+  @spec transaction!(t(), (-> value)) :: value when value: term()
+  def transaction!(%__MODULE__{} = instance, fun) do
+    case transaction(instance, fun) do
+      {:ok, value} -> value
+      {:error, :fenced} -> raise __MODULE__.FencedError
+    end
   end
 
   @doc "Rolls back the transaction `transaction/2` is running with `{:error, reason}`."
