@@ -12,10 +12,11 @@ defmodule Archon.Runtime.RecoveryTest do
 
   use Archon.RuntimeCase
 
+  alias Archon.Runtime.Queue.Memory, as: QueueMemory
+
   @moduletag :capture_log
 
   alias Archon.Runtime.Commit
-  alias Archon.Runtime.Queue.Memory, as: Queue
   alias Archon.Runtime.{Recovery, Waker}
 
   defp stop_process(id),
@@ -39,31 +40,33 @@ defmodule Archon.Runtime.RecoveryTest do
       )
 
     task_id = task(running, "task_a_ref").task_id
-    Queue.remove("archon_task_a", task_id)
+    Runtime.queue().remove("archon_task_a", task_id)
 
-    assert Recovery.run() >= 1
+    assert Recovery.run(:all) >= 1
     assert WorkflowServer.whereis(running)
     assert WorkflowServer.whereis(terminated) == nil
-    eventually(fn -> Queue.contains?("archon_task_a", task_id) end)
+    eventually(fn -> Runtime.queue().contains?("archon_task_a", task_id) end)
   end
 
+  # The memory queue is a process of its own; the Postgres one is a table of the store.
+  @tag backend: :memory
   test "a restart of the queue restarts the workflow processes, which refill it" do
     id = start_simple(%{"x" => 1})
     pid = WorkflowServer.whereis(id)
-    queue = Process.whereis(Queue)
+    queue = Process.whereis(QueueMemory)
     task_id = task(id, "task_a_ref").task_id
-    assert Queue.contains?("archon_task_a", task_id)
+    assert Runtime.queue().contains?("archon_task_a", task_id)
 
     Process.exit(queue, :kill)
 
     restarted =
       eventually(fn ->
-        Process.whereis(Queue) not in [nil, queue] and WorkflowServer.whereis(id)
+        Process.whereis(QueueMemory) not in [nil, queue] and WorkflowServer.whereis(id)
       end)
 
     assert restarted != pid
     refute Process.alive?(pid)
-    eventually(fn -> Queue.contains?("archon_task_a", task_id) end)
+    eventually(fn -> Runtime.queue().contains?("archon_task_a", task_id) end)
   end
 
   test "with :due, activates the due running workflows and those with outbox entries only" do

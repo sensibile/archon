@@ -1,6 +1,6 @@
 # ADR 0021: Phase 4 PostgreSQL 영속성과 큐 설계
 
-- 상태: 제안
+- 상태: 승인
 - 날짜: 2026-10-30 (2026-10-31 조각 4a 갱신: 결정 1의 개발용 마이그레이션 alias, 결정 2의 저장 인코딩 세부, 색인 열의 NUL)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(DB 라이브러리, 큐·Effect 원자성, 여러 노드, 지연 활성화)는 2026-10-30 BOSS가 이 문서의 추천안으로 정했다.
@@ -10,6 +10,8 @@
 - 갱신: 2026-10-31 조각 4f가 결정 2에 `Store.Postgres`의 쓰기 전 검사(태스크 `seq`·상태, JSON으로 바꿀 수 없는 값, 페이지 커서)와 poll 데이터를, 결정 3에 `commit/2`의 `{:error, :fenced}`와 공용 검사 `Commit.check!/2`를, 결정 4에 outbox 항목의 저장 모양을, 결정 5에 한도 잠금 키와 잠금 순서(이름 순이 아니라 키 순)를 적었다.
 - 갱신: 2026-10-31 조각 4e가 결정 4에 실행기의 구현 세부(모듈, 결과 값, 재시도 지연 설정, 시험 훅, `notify_parent` 항목의 자식, 조상 처리)를, 결정 10의 L2에 부모의 되살림 요청(`child_revived`)도 `revivedParentEndCount`를 찍는다는 것을 적었다.
 - 갱신: 2026-10-31 조각 4g가 결정 6에 메모리 백엔드의 `Recovery`(실행 중 워크플로우 전체), 한 단계의 타이머 Effect 여럿을 합치는 규칙, 결정 루프 halt의 즉시 `:wake` 저장, 예외 격리 기한 저장의 범위(`RUNNING`), 유휴 종료의 구현(GenServer timeout, 저장된 `:wake` 타이머만)과 설정 이름을 적었다.
+- 갱신: 2026-10-31 조각 4g 후속(sensibile/archon#53 머지 뒤 GitHub Codex 리뷰 지적, 조각 4h PR에 포함)이 결정 6에 이른 활성화가 저장된 재평가 시각을 지키는 규칙(`WorkflowServer.due/2`)을 적었다.
+- 갱신: 2026-10-31 조각 4h가 결정 7에 NodeLock의 확인 항목(같은 서버 프로세스, 락, epoch)·멈출 때 epoch 거두기·시험용 옵션을, 결정 8에 Postgres 백엔드의 자식(메모리 메타데이터 허용)과 배포 설정을, 결정 9에 시험의 런타임 시작 순서·백엔드 태그·epoch 복원을 적고 상태를 `승인`으로 바꿨다.
 
 ## 맥락
 
@@ -342,6 +344,15 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
     남는 것이 없어 선택 활성화로 아낄 것이 없고, `rest_for_one`에서 큐만 다시 뜨면 저장소는 남은 채 큐 메시지를 잃는데 그 메시지를
     다시 넣는 것은 활성화된 프로세스의 복구 검사뿐이기 때문이다. 둘 다 이미 프로세스가 있는 워크플로우는 건드리지 않고, 볼 때
     프로세스가 없던 워크플로우의 수를 돌려준다. 페이지 크기는 설정 `activation_page_size`(기본 100)다.
+  - **이른 활성화는 저장된 시각을 지킨다.** `:due` 선택은 저장된 시각보다 최대 활성화 여유만큼 일찍 프로세스를 띄우고,
+    활성화의 복구 검사는 결정을 다시 돌려 타이머를 지금부터 다시 계산한다. `computePostpone`의 `timeoutSeconds` 대체 후보
+    (poll 타임아웃 없는 `SCHEDULED` 태스크)처럼 지금을 기준으로 하는 후보는 그러면 한 주기만큼 밀려, 예를 들어 120초
+    `TIME_OUT_WF`가 121초가 아니라 한 주기 가까이 늦게(230초대) 걸린다. 그래서 `Recovery`는 저장된 시각(`wake_key`가 0보다 클 때)으로 띄운
+    프로세스에 `WorkflowServer.due(pid, wake_key)`를 보내고, 프로세스는 `RUNNING`이고 `:wake` 타이머가 없거나 그보다 늦으면
+    타이머를 그 시각으로 당기며 `{:before, 시각}`만 담은 Commit으로 저장을 시도한다(실패하면 기록하고, 그 타이머는 유휴 종료에
+    세지 않는다). `:recover` 타이머와, 활성화의 복구 검사가 이미 그 시각 이후에 돈 경우는 건드리지 않는다. 읽은 뒤 요청이 먼저
+    시각을 늦췄으면 한 번 더 평가될 수 있고, 이는 받아들인다. 메모리 백엔드의 `:all` 활성화와 프로세스 크래시 뒤 재시작은
+    저장된 시각을 받지 않으므로 같은 밀림이 남는다(Phase 3와 같은 성질, 4h 이후 과제). upstream은 스위퍼가 메시지의 시각이 되어서야 평가하므로 이 밀림이 없다.
   - **`Waker`.** `GenServer`이고 설정 `waker_interval`(기본 1초)마다 `Recovery.run(:due)`를 부른다. 한 회차가 실패하면(저장소 장애)
     기록하고 다음 회차를 건다. 활성화 여유는 설정 `activation_margin`(기본 5초)이다.
     메모리 백엔드에서도 돈다. 유휴 종료가 꺼져 있어 할 일은 드물지만(재시작 한도를 넘어 내려간 프로세스, outbox가 남은 워크플로우),
@@ -383,6 +394,28 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
   메타데이터 쓰기)은 `Archon.Runtime.Postgres.FencedError`를 raise한다(`Postgres.transaction!/2`, 조각 4c). 펜싱은 인스턴스 필드(`%Archon.Runtime.Postgres{fence:
   :runtime | nil}`)로 켠다. 런타임 인스턴스(`fence: :runtime`)만 NodeLock이 `:persistent_term`에 둔 epoch로 검사하고, 계약 시험
   인스턴스(`fence: nil`)는 런타임이 함께 돌아도 검사하지 않는다.
+- **구현 세부(조각 4h).**
+  - 주기 확인은 NodeLock 연결에서 한 문장으로 `pg_backend_pid()`, `pg_locks`의 자기 락(같은 서버 프로세스, `granted`),
+    `node_lease`의 epoch를 읽는다. 서버 프로세스가 락을 잡을 때와 다르거나(다시 연결됨), 락이 없거나, epoch가 자기 것과 다르면
+    (다른 노드가 다른 키로 올림) `{:node_lock_lost, _}`로 멈춘다. epoch 비교는 락 확인만으로는 못 보는 "모르는 사이 다른 노드가
+    epoch를 올린" 경우를 다음 확인에서 잡는다.
+  - 멈출 때(`terminate`) 자기가 게시한 epoch가 아직 게시돼 있으면 먼저 거둔다(`clear_epoch/0`). 그래서 락을 다시 잡기 전까지
+    런타임 쓰기는 펜싱된다. 정상 종료(`:normal`·`:shutdown`)에서만 `pg_advisory_unlock`을 부르고, 어느 경우든 연결을 닫는다.
+  - 설정은 `node_lock_retry_timeout`(10초), `node_lock_check_interval`(5초)이고, 다시 시도 간격은 500ms다. 연결은
+    `Archon.Repo` 설정에서 Ecto·풀 항목(`pool_size`, `url`, `migration_*` 등)만 빼고 나머지(`endpoints`와 `target_server_type`,
+    `configure`, `ssl` 등 서버를 고르고 여는 항목)를 그대로 가져와 `backoff_type: :stop`, `max_restarts: 0`, `pool_size: 1`로 연다.
+    Repo와 같은 서버(쓰기 가능한 primary)에 붙어야 락이 뜻을 가진다. `backoff_type: :stop`만으로는
+    Postgrex 풀이 끊긴 연결을 새 연결(락 없음)로 다시 띄우므로 `max_restarts: 0`으로 풀 자체가 끝나게 해 `{:EXIT, conn, _}`가 온다.
+    주기 확인의 서버 프로세스 비교는 그래도 다시 연결된 경우를 잡는 둘째 장치다.
+  - DB에 닿지 못하는 동안(재시작, failover)도 락이 잡혀 있을 때처럼 `node_lock_retry_timeout` 동안 새 연결로 다시 시도한 뒤
+    `{:stop, {:node_lock_connection, reason}}`로 실패한다. 시도마다 연결·질의·epoch 올리기를 남은 기한(`connect_timeout`,
+    `handshake_timeout`, 질의 `timeout`, 풀 대기)으로 묶어, 응답하지 않는 서버에서도 기한을 크게 넘기지 않는다. epoch 올리기는 Repo 풀이 아니라
+    NodeLock 연결에서 한다(`Postgres.advance_epoch/3`). 장애 직후 다시 연결 중인 Repo 풀을 기다리지 않기 위해서다. 그래서 짧은 DB 장애가 NodeLock의 연속 재시작으로 감독자 한도를 바로
+    넘기지 않는다. 그보다 긴 장애는 애플리케이션 정지까지 이어질 수 있고, 그때는 배포 환경(오케스트레이터)이 다시 띄운다.
+  - 시험용 옵션: `:name`, `:instance`(epoch 표의 스키마), `:lock_key`, `:publish`(epoch 게시 여부). 한 VM에서 다른 노드를
+    흉내 낼 때 다른 락 키와 `publish: false`를 쓴다.
+  - 락을 못 잡아 시작에 실패하면 `Archon.Runtime.Supervisor`도 시작에 실패하고, 애플리케이션 감독자의 재시작 한도를 넘으면
+    애플리케이션이 멈춘다. 두 번째 노드가 조용히 대기하지 않고 드러나게 실패하는 쪽을 택한다.
 - 여러 노드의 소유권(워크플로우별 advisory lock·lease, 분산 레지스트리, 노드 간 라우팅)은 Phase 5 뒤 별도 ADR에서 정한다.
 
 ### 8. 프로세스 트리
@@ -404,6 +437,10 @@ Archon.Runtime.Supervisor (rest_for_one)
 
 `TaskSupervisor`가 다시 뜨면 `rest_for_one`으로 워크플로우 프로세스도 다시 뜨고, 남은 outbox 항목은 활성화 때 다시 실행된다.
 
+조각 4h: 백엔드는 `:store`·`:queue` 설정으로 정한다(결정 3의 혼합 거절과 같은 표). Postgres 백엔드의 앞 자식은 `Archon.Repo`와
+`NodeLock`이고, 메타데이터가 `Metadata.Memory`이면 그 프로세스를 NodeLock 뒤에 둔다(메타데이터는 Commit과 같은 트랜잭션이 아니므로
+섞어도 된다). 배포(`:prod`) 설정은 세 구현을 Postgres로 두고 `DATABASE_URL`을 요구한다. 애플리케이션 시작은 마이그레이션을 하지 않는다(결정 1).
+
 ### 9. 시험 전략
 
 - **계약 시험을 양쪽에.** `test/support/runtime/{store,queue,metadata}_contract.ex`를 메모리와 Postgres 구현이 함께
@@ -418,6 +455,12 @@ Archon.Runtime.Supervisor (rest_for_one)
 - **내구성 시험.** `Archon.Runtime.Supervisor`를 멈췄다 다시 띄워(VM 재시작 흉내) 실행 중·대기 중·outbox가 남은
   워크플로우가 이어지는지 본다. Commit과 outbox 실행 사이, outbox 실행과 ack 사이에서 죽는 경우는 기존 시험 훅
   (`Archon.RuntimeHooks`)으로 만든다.
+- **시험의 런타임 시작(조각 4h).** 시험 설정은 `start_runtime: false`라 애플리케이션이 런타임을 띄우지 않고, `test_helper.exs`가
+  DB 준비 뒤에 띄운다. Postgres 백엔드면 `public` 스키마를 비우고, DB 준비가 띄운 `Archon.Repo`를 멈춘 뒤 런타임 트리가 Repo를
+  소유하게 띄운다. `ARCHON_BACKEND`는 `memory`·`postgres`만 받고, `postgres`면 DB가 없을 때 `ARCHON_REQUIRE_POSTGRES`와
+  무관하게 실패한다. 한 백엔드에서만 뜻이 있는 시험은 `@tag backend: :memory | :postgres`이고 다른 백엔드 실행에서 빠진다
+  (메모리 큐 프로세스를 죽이거나 등록을 지우는 시험, 메모리 기본 `evict_after`, 재시작 내구성 시험). 전역 epoch를 바꾸는
+  펜스 시험은 `Archon.PostgresCase.keep_epoch/0`로 시험 뒤 런타임의 epoch를 되돌린다.
 - **CI.** `test` 작업에 Postgres 서비스 컨테이너(공식 `postgres` 이미지, 버전 고정)를 붙이고, `mix test`(메모리)와
   `ARCHON_BACKEND=postgres mix test`(Postgres)를 차례로 돈다. 필수 체크 이름(`test`)은 그대로라 ruleset을 바꾸지 않는다.
   로컬은 Docker의 같은 이미지로 돈다. Postgres 시험 파일은 `@moduletag :postgres`이고, DB가 없으면 `test_helper.exs`가
@@ -438,7 +481,7 @@ Archon.Runtime.Supervisor (rest_for_one)
 | L8 | Phase 5로 넘김: 태스크 갱신이 외부에 열리기 전 인증·인가 ADR | BOSS 2026-10-30 결정 |
 | L9 | 해결: 인코딩 결정 2, 큐 원자성 결정 3, 지연 활성화 결정 6, 노드 결정 7, 종료 상태의 남은 일 결정 4 | |
 | L10 | 해결: 결정 5 | |
-| L11 | 해결: 고정 ID는 조각 4h에서 고유 ID로 바꾼다. `effects.ex`의 낡은 주석은 조각 4e가 그 함수를 고치며 없앤다 | Postgres 시험이 DB를 공유하므로 필요하다 |
+| L11 | 해결: 고정 ID(`runtime_test.exs`의 `idem-1`·`idem-2`, `workflow_server_test.exs`의 `ws-crash-after-commit`)는 조각 4h에서 고유 ID로 바꿨다(`ws-push-fails`는 4d에서 이미 바뀜). `effects.ex`의 낡은 주석은 조각 4e가 그 함수를 고치며 없앴다 | Postgres 시험이 DB를 공유하므로 필요하다 |
 
 ### 11. 구현 조각
 

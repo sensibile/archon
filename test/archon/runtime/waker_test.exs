@@ -15,7 +15,7 @@ defmodule Archon.Runtime.WakerTest do
 
   @moduletag :capture_log
 
-  alias Archon.Domain.{TaskResult, Workflow}
+  alias Archon.Domain.{TaskDef, TaskResult, Workflow, WorkflowDef}
   alias Archon.Runtime.{Commit, Waker}
 
   import ExUnit.CaptureLog
@@ -159,6 +159,53 @@ defmodule Archon.Runtime.WakerTest do
       assert WorkflowServer.whereis(late)
     end
 
+    test "an early activation keeps the stored time, so a workflow timeout is not put off" do
+      :ok = Runtime.metadata().update_task_def(%TaskDef{name: "waker_task", retry_count: 0})
+
+      {:ok, definition} =
+        WorkflowDef.from_json(%{
+          "name" => "waker_timeout",
+          "version" => 1,
+          "timeoutSeconds" => 120,
+          "timeoutPolicy" => "TIME_OUT_WF",
+          "tasks" => [
+            %{"name" => "waker_task", "taskReferenceName" => "t1", "type" => "SIMPLE"}
+          ]
+        })
+
+      :ok = Runtime.metadata().update_workflow_def(definition)
+      {:ok, id} = Runtime.start_workflow(%{name: "waker_timeout", input: %{}})
+      at = stored_wake(id)
+      assert at == @t0 + 121_000
+      stop_process(id)
+
+      RuntimeHooks.advance(at - 5_000 - Runtime.now())
+      Waker.run()
+      assert eventually(fn -> match?(%{message: :wake, at: ^at}, timer(id)) end)
+      assert stored_wake(id) == at
+
+      RuntimeHooks.advance(at - Runtime.now())
+      send(WorkflowServer.whereis(id), :wake)
+
+      assert eventually(fn ->
+               match?({:ok, %Workflow{status: :timed_out}}, Runtime.get_workflow(id))
+             end)
+    end
+
+    test "a stored time already past is not pulled again after the recovery check" do
+      id = start_simple(%{"x" => 1})
+      at = stored_wake(id)
+      stop_process(id)
+      RuntimeHooks.advance(at + 10_000 - Runtime.now())
+      capture_commits(id)
+
+      Waker.run()
+      assert eventually(fn -> WorkflowServer.whereis(id) end)
+      assert %{message: :wake, at: next} = timer(id)
+      assert next > Runtime.now()
+      refute_receive {:commit, %Commit{workflow: nil, wake: {:before, ^at}}}
+    end
+
     test "reads every keyset page and leaves paused and running processes alone" do
       put_settings(activation_page_size: 2)
       ids = for x <- 1..5, do: start_simple(%{"x" => x})
@@ -273,6 +320,7 @@ defmodule Archon.Runtime.WakerTest do
       assert Runtime.store().pending_outbox(id) == []
     end
 
+    @tag backend: :memory
     test "is off with the memory store by default, and on when set" do
       saved = Application.get_env(:archon, Archon.Runtime)
 
@@ -296,6 +344,21 @@ defmodule Archon.Runtime.WakerTest do
 
       put_settings(evict_after: 60_000)
       evicted = start_simple(%{"x" => 2})
+      await_down(evicted)
+    end
+
+    @tag backend: :postgres
+    test "is 60 s with the Postgres store by default" do
+      put_settings(hibernate_after: 20, settings: [workflow_offset_timeout_ms: 600_000])
+
+      Application.put_env(
+        :archon,
+        Archon.Runtime,
+        Keyword.delete(Application.get_env(:archon, Archon.Runtime), :evict_after)
+      )
+
+      evicted = start_simple(%{"x" => 1})
+      assert stored_wake(evicted) - Runtime.now() > 60_000
       await_down(evicted)
     end
 

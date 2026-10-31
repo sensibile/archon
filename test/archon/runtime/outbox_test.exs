@@ -79,8 +79,9 @@ defmodule Archon.Runtime.OutboxTest do
   defp await_status(id, status),
     do: eventually(fn -> match?(%Workflow{status: ^status}, workflow(id)) and workflow(id) end)
 
+  # A child workflow decides after its start answered, so its task may not be stored yet.
   defp child_of(id),
-    do: eventually(fn -> Task.sub_workflow_id(task(id, "st")) end)
+    do: eventually(fn -> (st = task(id, "st")) && Task.sub_workflow_id(st) end)
 
   # The last instance of t1, once it is scheduled.
   defp finish(id, status) do
@@ -166,8 +167,10 @@ defmodule Archon.Runtime.OutboxTest do
       )
 
       assert %Task{status: :completed} = finish(child, :completed)
-      assert_receive {:ran, {:notify_parent, ^parent, _task, nil}}
-      assert_receive {:ran, {:notify_parent, ^parent, _task, nil}}, 1_000
+      # The child is read when the entry runs: the memory store gives nil, the Postgres store the
+      # owner it read with the entry (ADR 0021, decision 4).
+      assert_receive {:ran, {:notify_parent, ^parent, _task, _child}}
+      assert_receive {:ran, {:notify_parent, ^parent, _task, _child}}, 1_000
       assert eventually(fn -> pending(child) == [] end)
       assert await_status(parent, :completed)
       refute_receive {:ran, _effect}, 100
@@ -543,7 +546,7 @@ defmodule Archon.Runtime.OutboxTest do
     test "is cancelled from a task under the task supervisor" do
       grandparent = start("outbox_grandparent")
       parent = child_of(grandparent)
-      sub_task = eventually(fn -> task(parent, "st").sub_workflow_id && task(parent, "st") end)
+      sub_task = eventually(fn -> (st = task(parent, "st")) && st.sub_workflow_id && st end)
       test = self()
 
       assert %Task{} =

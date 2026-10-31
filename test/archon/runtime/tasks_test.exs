@@ -17,21 +17,24 @@ defmodule Archon.Runtime.TasksTest do
   @moduletag :capture_log
 
   alias Archon.Domain.{Task, TaskDef, TaskResult, WorkflowDef, WorkflowTask}
-  alias Archon.Runtime.Queue.Memory, as: Queue
-  alias Archon.Runtime.Store.Memory, as: Store
-  alias Archon.Runtime.Tasks
+  alias Archon.Runtime.{Tasks, Waker}
 
+  # The tests poll the shared queues of the captured definitions. The waker is suspended so that
+  # it does not activate a workflow left by another test, whose recovery check would queue its
+  # task again (on the Postgres backend, whose stored times other tests set with their clock).
   setup do
+    :ok = :sys.suspend(Waker)
+    on_exit(fn -> with(pid when is_pid(pid) <- Process.whereis(Waker), do: :sys.resume(pid)) end)
     drain(["archon_task_a", "archon_task_b"])
     :ok
   end
 
   defp drain(queues) do
-    for queue <- queues, id <- pop_all(queue), do: Queue.remove(queue, id)
+    for queue <- queues, id <- pop_all(queue), do: Runtime.queue().remove(queue, id)
   end
 
   defp pop_all(queue) do
-    case Queue.pop(queue, 100, 0) do
+    case Runtime.queue().pop(queue, 100, 0) do
       [] -> []
       ids -> ids ++ pop_all(queue)
     end
@@ -66,7 +69,7 @@ defmodule Archon.Runtime.TasksTest do
 
       assert task_id == scheduled.task_id
       assert %Task{status: :in_progress, worker_id: "w"} = task(id, "task_a_ref")
-      refute Queue.contains?("archon_task_a", task_id)
+      refute Runtime.queue().contains?("archon_task_a", task_id)
     end
 
     test "every poll records the poll data, also an empty one" do
@@ -76,20 +79,20 @@ defmodule Archon.Runtime.TasksTest do
       assert Tasks.poll("archon_task_b", "w-empty", domain) == {:ok, nil}
 
       assert {:ok, %{worker_id: "w-empty", domain: ^domain, last_poll_time: 1_000_000}} =
-               Store.get_poll_data("archon_task_b", domain)
+               Runtime.store().get_poll_data("archon_task_b", domain)
 
       RuntimeHooks.advance(5)
       assert Tasks.batch_poll("archon_task_b", "w-batch", domain, 3, 0) == {:ok, []}
 
       assert {:ok, %{worker_id: "w-batch", last_poll_time: 1_000_005}} =
-               Store.get_poll_data("archon_task_b", domain)
+               Runtime.store().get_poll_data("archon_task_b", domain)
     end
 
     test "a message whose task the store does not have is removed" do
-      :ok = Queue.push("archon_task_a", "tasks-ghost", 0, 0)
+      :ok = Runtime.queue().push("archon_task_a", "tasks-ghost", 0, 0)
 
       assert Tasks.poll("archon_task_a", "w") == {:ok, nil}
-      refute Queue.contains?("archon_task_a", "tasks-ghost")
+      refute Runtime.queue().contains?("archon_task_a", "tasks-ghost")
     end
 
     test "a message of a terminal task is removed" do
@@ -97,10 +100,10 @@ defmodule Archon.Runtime.TasksTest do
       {:ok, task} = Tasks.poll("archon_task_a", "w")
       assert {:ok, %Task{status: :completed}} = Tasks.update(completed(id, task))
 
-      :ok = Queue.push("archon_task_a", task.task_id, 0, 0)
+      :ok = Runtime.queue().push("archon_task_a", task.task_id, 0, 0)
 
       assert Tasks.poll("archon_task_a", "w") == {:ok, nil}
-      refute Queue.contains?("archon_task_a", task.task_id)
+      refute Runtime.queue().contains?("archon_task_a", task.task_id)
       assert task(id, "task_a_ref").poll_count == 1
     end
 
@@ -117,7 +120,7 @@ defmodule Archon.Runtime.TasksTest do
       )
 
       assert Tasks.poll("archon_task_a", "w") == {:ok, nil}
-      assert Queue.contains?("archon_task_a", task_id)
+      assert Runtime.queue().contains?("archon_task_a", task_id)
       assert %Task{status: :scheduled, poll_count: 0} = task(id, "task_a_ref")
 
       RuntimeHooks.install(hook: fn _point, _id, _data -> :ok end)
@@ -160,7 +163,7 @@ defmodule Archon.Runtime.TasksTest do
       [second] = ids -- [first]
       assert Runtime.store().in_progress_count(ctx.name) == 1
       assert %Task{status: :scheduled, poll_count: 0} = task(second, "limited")
-      assert Queue.size(ctx.name) == 1
+      assert Runtime.queue().size(ctx.name) == 1
 
       # Still over the limit while the first one runs, and postponed by 60 s.
       RuntimeHooks.advance(60_000)
@@ -227,17 +230,17 @@ defmodule Archon.Runtime.TasksTest do
       domain = unique("dom")
       id = start_simple(%{"x" => 1}, task_to_domain: %{"archon_task_a" => domain})
       assert %Task{domain: ^domain, task_id: task_id} = task(id, "task_a_ref")
-      assert Queue.contains?("#{domain}:archon_task_a", task_id)
+      assert Runtime.queue().contains?("#{domain}:archon_task_a", task_id)
 
       assert Tasks.poll("archon_task_a", "w") == {:ok, nil}
 
       assert {:ok, %Task{task_id: ^task_id, domain: ^domain}} =
                Tasks.poll("archon_task_a", "w", domain)
 
-      refute Queue.contains?("#{domain}:archon_task_a", task_id)
+      refute Runtime.queue().contains?("#{domain}:archon_task_a", task_id)
 
       assert {:ok, %{worker_id: "w", domain: ^domain}} =
-               Store.get_poll_data("archon_task_a", domain)
+               Runtime.store().get_poll_data("archon_task_a", domain)
     end
 
     test "the recorded polls choose the active domain of a new task" do
@@ -291,7 +294,7 @@ defmodule Archon.Runtime.TasksTest do
 
       assert Tasks.update_v2(%{completed(id, task) | status: :in_progress}) == {:ok, nil}
       assert %Task{status: :scheduled} = task(id, "task_a_ref")
-      assert Queue.contains?("archon_task_a", task.task_id)
+      assert Runtime.queue().contains?("archon_task_a", task.task_id)
     end
 
     test "update_v2 of a terminal task polls the next task of its type for the worker" do
@@ -323,7 +326,7 @@ defmodule Archon.Runtime.TasksTest do
       assert {:ok, %Task{workflow_instance_id: ^other, domain: ^domain, worker_id: "w2"}} =
                Tasks.update_v2(result)
 
-      assert {:ok, %{worker_id: "w2"}} = Store.get_poll_data("archon_task_a", domain)
+      assert {:ok, %{worker_id: "w2"}} = Runtime.store().get_poll_data("archon_task_a", domain)
     end
 
     test "update_v2 of an unknown workflow is not found" do

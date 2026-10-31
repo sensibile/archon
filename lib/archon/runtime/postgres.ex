@@ -183,20 +183,38 @@ defmodule Archon.Runtime.Postgres do
   Raises the epoch in `node_lease` under the exclusive transaction lock on `fence_key/0` and
   returns it. The exclusive lock waits for every write transaction holding the shared lock, and
   a write that starts after it reads the new epoch, so once this returns no write of an older
-  epoch can commit. `Archon.Runtime.Postgres.NodeLock` calls it after taking the node lock.
+  epoch can commit. `Archon.Runtime.Postgres.NodeLock` calls it after taking the node lock, on
+  its own connection (`advance_epoch/3`) so that the attempt is bounded by its retry deadline.
   """
   @spec advance_epoch(t()) :: {:ok, pos_integer()}
   def advance_epoch(%__MODULE__{repo: repo} = instance) do
-    repo.transaction(fn ->
-      repo.query!("SELECT pg_advisory_xact_lock($1)", [@fence_key])
+    repo.transaction(fn -> raise_epoch(instance, &repo.query!/2) end)
+  end
 
-      %{rows: [[epoch]]} =
-        repo.query!(
-          "UPDATE #{table(instance, "node_lease")} SET epoch = epoch + 1 WHERE id = 1 RETURNING epoch"
-        )
+  @doc """
+  `advance_epoch/1` on the Postgrex connection `conn`, each statement within `timeout` ms.
+  Returns `{:error, reason}` when the transaction fails.
+  """
+  @spec advance_epoch(t(), DBConnection.conn(), timeout()) ::
+          {:ok, pos_integer()} | {:error, term()}
+  def advance_epoch(%__MODULE__{} = instance, conn, timeout) do
+    Postgrex.transaction(
+      conn,
+      fn conn -> raise_epoch(instance, &Postgrex.query!(conn, &1, &2, timeout: timeout)) end,
+      timeout: timeout
+    )
+  end
 
-      epoch
-    end)
+  defp raise_epoch(instance, query!) do
+    query!.("SELECT pg_advisory_xact_lock($1)", [@fence_key])
+
+    %{rows: [[epoch]]} =
+      query!.(
+        "UPDATE #{table(instance, "node_lease")} SET epoch = epoch + 1 WHERE id = 1 RETURNING epoch",
+        []
+      )
+
+    epoch
   end
 
   @doc "Publishes this node's epoch for `check_fence/1`."

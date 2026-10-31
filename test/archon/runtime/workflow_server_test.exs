@@ -11,11 +11,12 @@ defmodule Archon.Runtime.WorkflowServerTest do
 
   use Archon.RuntimeCase
 
+  alias Archon.Runtime.Queue.Memory, as: QueueMemory
+
   @moduletag :capture_log
 
   alias Archon.Domain.{Task, TaskResult}
   alias Archon.Runtime.Commit
-  alias Archon.Runtime.Queue.Memory, as: Queue
 
   defp complete(id, ref) do
     task = task(id, ref)
@@ -73,7 +74,7 @@ defmodule Archon.Runtime.WorkflowServerTest do
       id = start_simple(%{"x" => 1})
       complete(id, "task_a_ref")
       assert task(id, "task_b_ref").status == :scheduled
-      assert Queue.contains?("archon_task_b", task(id, "task_b_ref").task_id)
+      assert Runtime.queue().contains?("archon_task_b", task(id, "task_b_ref").task_id)
       complete(id, "task_b_ref")
 
       assert {:ok, %{status: :completed, output: %{"y" => "task_b_ref"}}} =
@@ -108,12 +109,12 @@ defmodule Archon.Runtime.WorkflowServerTest do
       assert_receive {:timer_set, ^pid, wake, 30_000}
 
       task_id = task(id, "task_a_ref").task_id
-      Queue.remove("archon_task_a", task_id)
+      Runtime.queue().remove("archon_task_a", task_id)
 
       RuntimeHooks.advance(30_000)
       send(pid, wake)
       assert_receive {:timer_set, ^pid, _wake, 30_000}
-      assert Queue.contains?("archon_task_a", task_id)
+      assert Runtime.queue().contains?("archon_task_a", task_id)
     end
 
     test "a stale timer message is ignored and a poll only pulls the timer" do
@@ -148,23 +149,36 @@ defmodule Archon.Runtime.WorkflowServerTest do
     end
   end
 
+  defp await_down_pid(pid), do: eventually(fn -> not Process.alive?(pid) end)
+
   describe "crashes" do
     test "a killed process restarts from the store and repairs what it lost" do
       id = start_simple(%{"x" => 1})
       pid = WorkflowServer.whereis(id)
       task_id = task(id, "task_a_ref").task_id
-      Queue.remove("archon_task_a", task_id)
+      Runtime.queue().remove("archon_task_a", task_id)
 
       Process.exit(pid, :kill)
-      restarted = eventually(fn -> (p = WorkflowServer.whereis(id)) != pid and p end)
+      await_down_pid(pid)
+
+      # Restarted by its supervisor, or activated here when killed processes of other tests used
+      # up its restart intensity (one_for_one, 3 in 5 s); either way it restarts from the store.
+      restarted =
+        eventually(fn ->
+          case WorkflowServer.activate(id) do
+            {:ok, p} when p != pid -> p
+            _other -> nil
+          end
+        end)
+
       assert is_pid(restarted)
 
-      eventually(fn -> Queue.contains?("archon_task_a", task_id) end)
+      eventually(fn -> Runtime.queue().contains?("archon_task_a", task_id) end)
       assert %Task{status: :in_progress} = WorkflowServer.poll(id, task_id, "w")
     end
 
     test "a crash after the commit and before the effects is made good on restart" do
-      id = "ws-crash-after-commit"
+      id = "ws-crash-after-commit-" <> Runtime.new_id()
 
       RuntimeHooks.install(
         hook: fn
@@ -179,7 +193,7 @@ defmodule Archon.Runtime.WorkflowServerTest do
       RuntimeHooks.reset()
 
       task_id = eventually(fn -> task(id, "task_a_ref") end).task_id
-      eventually(fn -> Queue.contains?("archon_task_a", task_id) end)
+      eventually(fn -> Runtime.queue().contains?("archon_task_a", task_id) end)
     end
   end
 
@@ -235,7 +249,7 @@ defmodule Archon.Runtime.WorkflowServerTest do
       assert task(id, "task_a_ref").status == :completed
       # the queue push was written with the commit (ADR 0021, decision 3)
       b = task(id, "task_b_ref")
-      assert Queue.contains?("archon_task_b", b.task_id)
+      assert Runtime.queue().contains?("archon_task_b", b.task_id)
       assert_receive {:timer_set, ^pid, recover, 30_000}
 
       RuntimeHooks.install(hook: fn _point, _id, _data -> :ok end)
@@ -265,22 +279,25 @@ defmodule Archon.Runtime.WorkflowServerTest do
 
       assert_receive {:pushed, "archon_task_a", task_id}
       assert Runtime.get_workflow(id) == {:error, :not_found}
-      refute Queue.contains?("archon_task_a", task_id)
+      refute Runtime.queue().contains?("archon_task_a", task_id)
       await_down(id)
     end
 
     # ADR 0021, decision 3: the push is part of the commit, so a queue that is down fails it.
+    # The memory queue fails apart from the store; the Postgres queue writes in the commit's
+    # transaction (store_postgres_test.exs).
+    @tag backend: :memory
     test "a queue push that fails fails the start and leaves nothing behind" do
       id = "ws-push-fails-" <> Runtime.new_id()
       test = self()
-      queue = Process.whereis(Queue)
-      on_exit(fn -> Process.whereis(Queue) || Process.register(queue, Queue) end)
+      queue = Process.whereis(QueueMemory)
+      on_exit(fn -> Process.whereis(QueueMemory) || Process.register(queue, QueueMemory) end)
 
       RuntimeHooks.install(
         hook: fn
           :commit, ^id, %Commit{queue: [{:push, _queue, task_id, _priority, _at}]} ->
             send(test, {:pushing, task_id})
-            Process.unregister(Queue)
+            Process.unregister(QueueMemory)
 
           _point, _id, _data ->
             :ok
@@ -290,32 +307,33 @@ defmodule Archon.Runtime.WorkflowServerTest do
       assert {:error, {:commit, {:exit, {:noproc, _call}}}} =
                Runtime.start_workflow(%{name: "archon_simple", workflow_id: id, input: %{}})
 
-      Process.register(queue, Queue)
+      Process.register(queue, QueueMemory)
       assert_receive {:pushing, task_id}
       assert Runtime.get_workflow(id) == {:error, :not_found}
-      refute Queue.contains?("archon_task_a", task_id)
+      refute Runtime.queue().contains?("archon_task_a", task_id)
       await_down(id)
     end
 
+    @tag backend: :memory
     test "a queue operation that fails fails the commit; the update sent again applies it" do
       id = start_simple(%{"x" => 1})
       pid = WorkflowServer.whereis(id)
       assert_receive {:timer_set, ^pid, _wake, 30_000}
       a = task(id, "task_a_ref")
       assert %Task{} = WorkflowServer.poll(id, a.task_id, "w")
-      queue = Process.whereis(Queue)
-      on_exit(fn -> Process.whereis(Queue) || Process.register(queue, Queue) end)
+      queue = Process.whereis(QueueMemory)
+      on_exit(fn -> Process.whereis(QueueMemory) || Process.register(queue, QueueMemory) end)
 
       RuntimeHooks.install(
         hook: fn
-          :commit, ^id, %Commit{queue: [_ | _]} -> Process.unregister(Queue)
+          :commit, ^id, %Commit{queue: [_ | _]} -> Process.unregister(QueueMemory)
           _point, _id, _data -> :ok
         end
       )
 
       result = %TaskResult{workflow_instance_id: id, task_id: a.task_id, status: :completed}
       assert {:error, {:commit, {:exit, _reason}}} = WorkflowServer.update(result)
-      Process.register(queue, Queue)
+      Process.register(queue, QueueMemory)
       assert task(id, "task_a_ref").status == :in_progress
       assert task(id, "task_b_ref") == nil
       assert_receive {:timer_set, ^pid, _recover, 30_000}
@@ -323,7 +341,7 @@ defmodule Archon.Runtime.WorkflowServerTest do
       RuntimeHooks.install(hook: fn _point, _id, _data -> :ok end)
       assert %Task{status: :completed} = WorkflowServer.update(result)
       b = task(id, "task_b_ref")
-      assert Queue.contains?("archon_task_b", b.task_id)
+      assert Runtime.queue().contains?("archon_task_b", b.task_id)
     end
   end
 
@@ -346,7 +364,7 @@ defmodule Archon.Runtime.WorkflowServerTest do
       assert_receive {:commit, %Commit{create: %{}, queue: [push]}}
       task_id = task(id, "task_a_ref").task_id
       assert push == {:push, "archon_task_a", task_id, 0, 4_000_000}
-      assert Queue.contains?("archon_task_a", task_id)
+      assert Runtime.queue().contains?("archon_task_a", task_id)
 
       # a poll of a terminal task commits only the queue removal
       assert Runtime.terminate_workflow(id, "done") == :ok

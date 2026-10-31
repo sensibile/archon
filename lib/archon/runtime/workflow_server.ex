@@ -96,6 +96,9 @@ defmodule Archon.Runtime.WorkflowServer do
   `:none`, so the store knows when to activate a workflow without a process. The immediate
   `:wake` after the decide iteration limit is not saved, and the `:recover` deadline of an
   isolated exception is saved by a commit of only `{:before, deadline}`, whose failure is logged.
+  `due/2`, sent by `Archon.Runtime.Recovery` to a process it activated ahead of the stored time,
+  pulls a later `:wake` timer of a running workflow back to that time and saves it the same way,
+  unless the activation's recovery check ran at or after it or a `:recover` timer is set.
 
   ## Exception isolation
 
@@ -136,6 +139,7 @@ defmodule Archon.Runtime.WorkflowServer do
     :runner,
     :blocker,
     :outbox_delay,
+    recovered_at: 0,
     kick?: false,
     ack: []
   ]
@@ -160,6 +164,7 @@ defmodule Archon.Runtime.WorkflowServer do
             | nil,
           blocker: pid() | nil,
           outbox_delay: pos_integer() | nil,
+          recovered_at: integer(),
           kick?: boolean(),
           ack: [Archon.Runtime.Store.outbox_id()]
         }
@@ -172,6 +177,16 @@ defmodule Archon.Runtime.WorkflowServer do
       name: {:via, Registry, {@registry, id}},
       hibernate_after: hibernate_after()
     )
+  end
+
+  @doc """
+  Tells a process activated ahead of `at`, the workflow's stored re-evaluation time, to be
+  evaluated no later than then (`Archon.Runtime.Recovery`).
+  """
+  @spec due(pid(), integer()) :: :ok
+  def due(pid, at) do
+    send(pid, {:due, at})
+    :ok
   end
 
   @doc "The process of the workflow, or `nil` when it is not running."
@@ -325,7 +340,7 @@ defmodule Archon.Runtime.WorkflowServer do
   @impl GenServer
   def handle_continue(:recover, state) do
     terminal? = terminal?(state.workflow)
-    {_reply, state} = handle_event(:recover, state)
+    {_reply, state} = handle_event(:recover, %{state | recovered_at: Runtime.now()})
     state = check_outbox(state)
     if terminal?, do: idle(state), else: settle(state)
   end
@@ -414,6 +429,22 @@ defmodule Archon.Runtime.WorkflowServer do
     {_reply, state} = handle_event(event, state)
     settle(state)
   end
+
+  # ADR 0021, decision 6: activated ahead of its stored re-evaluation time, the workflow is still
+  # evaluated by then. The recovery check may have set a later timer, computed from now
+  # (computePostpone's timeoutSeconds fallback), which would put off a workflow timeout.
+  def handle_info({:due, at}, %__MODULE__{workflow: %Workflow{status: :running}} = state)
+      when is_integer(at) do
+    case state.timer do
+      # The recovery check already ran at or after that time.
+      _timer when at <= state.recovered_at -> noreply(state)
+      %{message: :recover} -> noreply(state)
+      %{at: current} when current <= at -> noreply(state)
+      _later -> noreply(set_timer(state, :wake, at, save_before(state, at)))
+    end
+  end
+
+  def handle_info({:due, _at}, state), do: noreply(state)
 
   # The outbox runner (ADR 0021, decision 4).
   def handle_info({ref, result}, %__MODULE__{runner: {:running, %Elixir.Task{ref: ref}}} = state) do
@@ -804,13 +835,13 @@ defmodule Archon.Runtime.WorkflowServer do
       end
 
     at = Runtime.now() + offset_timeout()
-    save_recover(state, at)
+    save_before(state, at)
     set_timer(state, :recover, at, false)
   end
 
-  # ADR 0021, decision 6: best effort, so a restart before the deadline still activates the
-  # workflow by then; when the store is down, by its stored time.
-  defp save_recover(%__MODULE__{workflow: %Workflow{status: :running}} = state, at) do
+  # ADR 0021, decision 6: best effort, so a restart before `at` still activates the workflow by
+  # then; when the store is down, by its stored time. Whether it was saved.
+  defp save_before(%__MODULE__{workflow: %Workflow{status: :running}} = state, at) do
     commit = %Commit{wake: {:before, at}}
 
     case guard(fn ->
@@ -818,16 +849,15 @@ defmodule Archon.Runtime.WorkflowServer do
            Runtime.store().commit(state.id, commit)
          end) do
       {:ok, :ok} ->
-        :ok
+        true
 
       failed ->
-        Logger.warning(
-          "workflow #{state.id} could not save its recovery time: #{inspect(failed)}"
-        )
+        Logger.warning("workflow #{state.id} could not save its wake time: #{inspect(failed)}")
+        false
     end
   end
 
-  defp save_recover(_state, _at), do: :ok
+  defp save_before(_state, _at), do: false
 
   ## Timer
 

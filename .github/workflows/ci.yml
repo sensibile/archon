@@ -33,6 +33,10 @@ jobs:
       - run: mix format --check-formatted
       - run: mix compile --warnings-as-errors
       - run: mix test
+      # The runtime tests again on the Postgres backend (ADR 0021, decision 9).
+      - run: mix test
+        env:
+          ARCHON_BACKEND: postgres
 
   # archon_js under AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer (ADR 0015).
   # Every job already builds archon_js with warnings as errors through `mix compile`.

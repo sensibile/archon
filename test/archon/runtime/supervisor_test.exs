@@ -26,17 +26,17 @@ defmodule Archon.Runtime.SupervisorTest do
   end
 
   test "a memory store with a Postgres queue is refused" do
-    assert start_with(queue: Queue.Postgres) ==
+    assert start_with(store: Store.Memory, queue: Queue.Postgres) ==
              {:error, {:mixed_backends, Store.Memory, Queue.Postgres}}
   end
 
   test "a Postgres store with a memory queue is refused" do
-    assert start_with(store: Store.Postgres) ==
+    assert start_with(store: Store.Postgres, queue: Queue.Memory) ==
              {:error, {:mixed_backends, Store.Postgres, Queue.Memory}}
   end
 
   test "a store of an unknown backend is refused" do
-    assert start_with(store: __MODULE__) ==
+    assert start_with(store: __MODULE__, queue: Queue.Memory) ==
              {:error, {:mixed_backends, __MODULE__, Queue.Memory}}
   end
 end

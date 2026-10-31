@@ -31,6 +31,7 @@ defmodule Archon.Runtime.StorePostgresTest do
   end
 
   test "the behaviour arities use the runtime instance" do
+    keep_epoch()
     Postgres.clear_epoch()
     assert PgStore.get_workflow("store-postgres-none", false) == {:error, :not_found}
     assert is_list(PgStore.running_workflow_ids())
@@ -285,7 +286,7 @@ defmodule Archon.Runtime.StorePostgresTest do
 
   describe "the write fence" do
     setup %{server: server} do
-      on_exit(&Postgres.clear_epoch/0)
+      keep_epoch()
       Postgres.clear_epoch()
       %{fenced: %{server | fence: :runtime}}
     end

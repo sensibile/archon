@@ -11,4 +11,8 @@ database_url =
     if config_env() in [:dev, :test],
       do: "ecto://postgres:postgres@localhost/archon_#{config_env()}"
 
-if database_url, do: config(:archon, Archon.Repo, url: database_url)
+cond do
+  database_url -> config(:archon, Archon.Repo, url: database_url)
+  config_env() == :prod -> raise "DATABASE_URL is required: the runtime runs on Postgres"
+  true -> :ok
+end

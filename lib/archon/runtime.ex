@@ -33,7 +33,7 @@ defmodule Archon.Runtime do
 
     * `:store`, `:queue`, `:metadata` - the implementations of `Archon.Runtime.Store`,
       `Archon.Runtime.Queue` and `Archon.Runtime.Metadata`, started by
-      `Archon.Runtime.Supervisor` (the memory ones by default).
+      `Archon.Runtime.Supervisor` (the memory ones by default, the Postgres ones in `:prod`).
     * `:clock` - epoch milliseconds; `:new_id` - workflow and task IDs; `:timer` - sets the
       `:wake` timer, called with `(pid, message, delay_ms)` and returning a reference. Each is a
       function or `{module, function, args}` (the arguments are appended).
@@ -49,6 +49,9 @@ defmodule Archon.Runtime do
     * `:activation_margin` - how far ahead a stored re-evaluation time is due for activation,
       5 s; longer than `:waker_interval`.
     * `:activation_page_size` - the keyset page of `Archon.Runtime.Recovery`, 100.
+    * `:node_lock_retry_timeout` - how long `Archon.Runtime.Postgres.NodeLock` tries to take
+      the node lock before the runtime fails to start, 10 s; `:node_lock_check_interval` - how
+      often it checks that it still holds the lock and the epoch, 5 s (Postgres backend).
     * `:settings` - `Archon.Runtime.Step.Env` settings (`workflow_offset_timeout_ms`, ...).
     * `:hook` - for tests only: called with `(point, workflow_id, data)` at the points
       `Archon.Runtime.WorkflowServer` documents, so a test can fail or kill the process there.
