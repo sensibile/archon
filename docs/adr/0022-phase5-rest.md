@@ -166,7 +166,8 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   않고 넘어간다("unresolvable reference leaves the payload unchecked"). 이름도 없으면 `SchemaValidationException`(400)이다. 그래서 Archon과
   upstream이 갈리는 것은 이름 참조가 아닌 스키마 전부다.
 - 거절 대상은 `enforceSchema`가 참이고 `inputSchema` 또는 `outputSchema`가 이름 참조가 아닌 정의다. 이름 참조는 `data`와
-  `externalRef`가 없고 `name`이 비어 있지 않은 스키마다. 그래서 `data`가 있는 인라인 스키마, `externalRef`가 있는 스키마, 셋 다
+  `externalRef`가 없고(JSON에 키가 없거나 `null`. 빈 객체 `{}`나 빈 문자열은 있는 것으로 본다, upstream의 `null` 검사) `name`이
+  공백만으로 된 문자열도 아닌(upstream `StringUtils.isBlank`) 스키마다. 그래서 `data`가 있는 인라인 스키마, `externalRef`가 있는 스키마, 셋 다
   없는 스키마(upstream은 "neither an inline document nor a name"으로 400)를 거절한다. 문구는
   `"Schema validation is not supported yet: <정의 이름> <inputSchema|outputSchema>"`이고 400(`IllegalArgumentException` 모양,
   `retryable` false)이다. 이 판정은 도메인의 순수 함수(`WorkflowDef`·`TaskDef`)로 두고 다음 두 곳이 부른다.
@@ -228,7 +229,9 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 
 ## upstream과 의도적으로 다른 점
 
-- **인라인·외부 참조 스키마를 강제하는 정의를 받지 않는다**(결정 5). upstream은 받아서 검증하거나(인라인) 그 정의로 시작·갱신할 때 400을 준다(`externalRef`).
+- **이름 참조가 아닌 스키마(인라인, `externalRef`, 이름 없음)를 강제하는 정의를 등록 때 받지 않는다**(결정 5). upstream은 인라인이면
+  받아서 검증하고, `externalRef`나 이름 없음이면 등록은 받되(스키마 필드에 `@Valid`가 없어 등록 때 검사하지 않는다) 그 정의로
+  시작·태스크 갱신할 때 400을 준다.
 - **MVP 경로의 다른 메서드도 405가 아니라 404다**(결정 2).
 - **Later 경로는 없는 경로처럼 404다**(ADR 0001). upstream은 그 경로를 처리한다.
 - **기본 주소가 `127.0.0.1`이다**(ADR 0023 결정 4). upstream Spring Boot는 모든 주소에서 듣는다.
