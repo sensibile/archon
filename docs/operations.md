@@ -18,7 +18,7 @@ archon 세션에서 예약 시각과 머지 방식을 포함한 계획에 "진�
 | 범위 | archon 저장소만. 다른 저장소와 시험 프로젝트는 건드리지 않는다 |
 
 2026-11-01 태극 세션에서 BOSS가 "archon 도 검증 건강도 작업 추가해"라고 했다. 내용은 태극 기본값(sensibile/taeguk#31,
-2026-10-29 BOSS 승인)을 따르되, archon AGENTS.md 검증에 있는 audit(`mix hex.audit`, `mix deps.audit`)을 스위트에 넣는다.
+2026-10-29 BOSS 승인)을 따르되, archon AGENTS.md 검증의 `mix deps.audit`과 CI `audit` job의 `mix hex.audit`을 스위트에 넣는다.
 같은 날 archon 세션에서 BOSS가 Postgres 스위트를 실행마다 일회용 컨테이너(CI와 같은 이미지)로 돌리는 방식을 골랐다.
 
 | 항목 | 내용 |
