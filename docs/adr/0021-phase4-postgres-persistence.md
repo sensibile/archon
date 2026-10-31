@@ -5,6 +5,7 @@
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(DB 라이브러리, 큐·Effect 원자성, 여러 노드, 지연 활성화)는 2026-10-30 BOSS가 이 문서의 추천안으로 정했다.
 - 갱신: 2026-10-31 조각 4b가 결정 3의 메모리 큐 적용 방식(`Queue.Memory.apply_ops/2`, 보일 시각 그대로)을 고치고, 결정 2·3에 워크플로우 ID의 바이트 순(`COLLATE "C"`)을 적었다.
+- 갱신: 2026-10-31 조각 4c가 결정 2에 색인 열 NUL·잘못된 UTF-8의 처리(추가는 `ArgumentError`, 조회·삭제는 없는 것으로 봄)를, 결정 7에 오류 반환이 없는 콜백의 펜싱 실패(`FencedError`)를 적었다.
 
 ## 맥락
 
@@ -99,6 +100,10 @@ behaviour moduledoc: 계약 시험이 시계를 주입하므로 DB `now()`를 �
   된다. 키 순서·숫자 표기도 바꾼다. 저장 형식은 질의 대상이 아니므로 바이트 그대로 두는 `text`를 쓴다. `json_data`의
   NUL은 JSON 이스케이프(`\u0000`)로 들어가지만, 색인 열(`workflow_id`, `task_def_name`, 큐 이름 등)은 그대로의 `text`라
   NUL을 받지 않는다. upstream 표의 같은 열도 같다.
+  Postgres 구현은 NUL이나 잘못된 UTF-8이 든 이름·ID를 DB에 보내지 않는다. 행을 더하는 연산(큐 push·postpone과 `Commit.queue`의 그 연산,
+  정의 저장)은 `ArgumentError`를 내고, 찾거나 지우는 연산(pop, ack, remove, `contains?`, `size`, 정의 조회)은 그런 행이 없는
+  것으로 답한다(조각 4c). 메모리 구현은 이런 값을 받으므로 이 입력에서 두 백엔드가 다르다. `int4` 열(우선순위, 버전) 범위를 넘는 정수는
+  upstream(`int`)처럼 받지 않는다(인코딩 오류).
 - **`:erlang.term_to_binary`가 아닌 이유.** struct 모양이 바뀐 뒤 예전 행을 읽으면 빠진 필드가 조용히 생기고, DB에서
   내용을 볼 수 없다.
 - upstream의 `workflow_to_task`, `workflow_pending`, `task_in_progress`, `task_scheduled`, `workflow_def_to_workflow`,
@@ -289,7 +294,8 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
   공유 잠금을 얻은 다음 올라간 epoch를 읽으므로, 새 노드가 epoch를 올린 뒤에는 이전 노드의 어떤 쓰기도 커밋되지 않는다.
   행 잠금(`FOR SHARE`) 대신 advisory 잠금을 쓰는 이유는 쓰기마다 한 행에 잠금 기록(MultiXact)을 남기지 않기 위해서다.
   긴 poll은 100ms마다의 pop 시도를 각각 펜싱된 트랜잭션 하나로 하고, 5초 동안 트랜잭션을 잡고 있지 않는다.
-  `:fenced`는 예외 격리로 가고, NodeLock의 다음 확인이 런타임을 내린다. 펜싱은 인스턴스 필드(`%Archon.Runtime.Postgres{fence:
+  `:fenced`는 예외 격리로 가고, NodeLock의 다음 확인이 런타임을 내린다. 오류 값을 돌려줄 수 없는 콜백(큐 push·pop·ack·remove·postpone,
+  메타데이터 쓰기)은 `Archon.Runtime.Postgres.FencedError`를 raise한다(`Postgres.transaction!/2`, 조각 4c). 펜싱은 인스턴스 필드(`%Archon.Runtime.Postgres{fence:
   :runtime | nil}`)로 켠다. 런타임 인스턴스(`fence: :runtime`)만 NodeLock이 `:persistent_term`에 둔 epoch로 검사하고, 계약 시험
   인스턴스(`fence: nil`)는 런타임이 함께 돌아도 검사하지 않는다.
 - 여러 노드의 소유권(워크플로우별 advisory lock·lease, 분산 레지스트리, 노드 간 라우팅)은 Phase 5 뒤 별도 ADR에서 정한다.
