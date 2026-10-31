@@ -762,6 +762,26 @@ defmodule Archon.Runtime.StepTest do
       assert task(stored, "w2").status == :scheduled
     end
 
+    test "a task started and ended in one step asks for no check" do
+      waits = limited_waits()
+
+      # the workflow times out in the same :wake, cancelling the WAIT it just started
+      timed = %{
+        waits
+        | workflow_definition: %{
+            waits.workflow_definition
+            | timeout_seconds: 1,
+              timeout_policy: :time_out_wf
+          }
+      }
+
+      {:ok, stored, _pre, commit, _post} = Step.run(timed, :wake, env(now: @now + 5_000))
+
+      assert stored.status == :timed_out
+      refute Enum.any?(stored.tasks, &(&1.status == :in_progress))
+      assert commit.limits == %{}
+    end
+
     test "at the limit neither starts and the commit checks nothing" do
       {:ok, stored, [], commit, _post} =
         Step.run(
