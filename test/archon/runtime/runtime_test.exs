@@ -105,6 +105,55 @@ defmodule Archon.Runtime.RuntimeTest do
                  "The Task archon_missing defined as a sub-workflow has no workflow definition available "}}
     end
 
+    # MetadataMapperService#populateTaskDefinitions walks WorkflowDef#collectTasks, which takes
+    # the decision cases, the default case, the fork branches and the loop body too. The
+    # containers are minimal: only the population of the definition runs before the refusal.
+    test "a nested SUB_WORKFLOW without a registered definition is refused" do
+      sub = %WorkflowTask{
+        name: "sub",
+        task_reference_name: "sub_ref",
+        type: "SUB_WORKFLOW",
+        sub_workflow_param: %Archon.Domain.SubWorkflowParams{name: "archon_missing"}
+      }
+
+      containers = [
+        %WorkflowTask{
+          name: "switch",
+          task_reference_name: "switch_ref",
+          type: "SWITCH",
+          decision_cases: %{"a" => [sub]}
+        },
+        %WorkflowTask{
+          name: "switch",
+          task_reference_name: "switch_ref",
+          type: "SWITCH",
+          default_case: [sub]
+        },
+        %WorkflowTask{
+          name: "fork",
+          task_reference_name: "fork_ref",
+          type: "FORK_JOIN",
+          fork_tasks: [[sub]]
+        },
+        %WorkflowTask{
+          name: "loop",
+          task_reference_name: "loop_ref",
+          type: "DO_WHILE",
+          loop_over: [sub]
+        }
+      ]
+
+      for container <- containers do
+        definition = %WorkflowDef{name: "archon_parent", tasks: [container]}
+
+        assert Runtime.start_workflow(%{definition: definition, input: %{}}) ==
+                 {:error,
+                  {:terminate,
+                   "The Task archon_missing defined as a sub-workflow has no workflow definition available "}},
+               container.type
+      end
+    end
+
     test "a SUB_WORKFLOW start runs after the answer and its result is saved" do
       definition = %WorkflowDef{
         name: "archon_parent",
