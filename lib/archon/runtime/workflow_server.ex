@@ -96,6 +96,9 @@ defmodule Archon.Runtime.WorkflowServer do
   `:none`, so the store knows when to activate a workflow without a process. The immediate
   `:wake` after the decide iteration limit is not saved, and the `:recover` deadline of an
   isolated exception is saved by a commit of only `{:before, deadline}`, whose failure is logged.
+  `due/2`, sent by `Archon.Runtime.Recovery` to a process it activated ahead of the stored time,
+  pulls a later `:wake` timer of a running workflow back to that time and saves it the same way,
+  unless the activation's recovery check ran at or after it or a `:recover` timer is set.
 
   ## Exception isolation
 
@@ -136,6 +139,7 @@ defmodule Archon.Runtime.WorkflowServer do
     :runner,
     :blocker,
     :outbox_delay,
+    recovered_at: 0,
     kick?: false,
     ack: []
   ]
@@ -160,6 +164,7 @@ defmodule Archon.Runtime.WorkflowServer do
             | nil,
           blocker: pid() | nil,
           outbox_delay: pos_integer() | nil,
+          recovered_at: integer(),
           kick?: boolean(),
           ack: [Archon.Runtime.Store.outbox_id()]
         }
@@ -335,7 +340,7 @@ defmodule Archon.Runtime.WorkflowServer do
   @impl GenServer
   def handle_continue(:recover, state) do
     terminal? = terminal?(state.workflow)
-    {_reply, state} = handle_event(:recover, state)
+    {_reply, state} = handle_event(:recover, %{state | recovered_at: Runtime.now()})
     state = check_outbox(state)
     if terminal?, do: idle(state), else: settle(state)
   end
@@ -431,6 +436,8 @@ defmodule Archon.Runtime.WorkflowServer do
   def handle_info({:due, at}, %__MODULE__{workflow: %Workflow{status: :running}} = state)
       when is_integer(at) do
     case state.timer do
+      # The recovery check already ran at or after that time.
+      _timer when at <= state.recovered_at -> noreply(state)
       %{message: :recover} -> noreply(state)
       %{at: current} when current <= at -> noreply(state)
       _later -> noreply(set_timer(state, :wake, at, save_before(state, at)))

@@ -192,6 +192,20 @@ defmodule Archon.Runtime.WakerTest do
              end)
     end
 
+    test "a stored time already past is not pulled again after the recovery check" do
+      id = start_simple(%{"x" => 1})
+      at = stored_wake(id)
+      stop_process(id)
+      RuntimeHooks.advance(at + 10_000 - Runtime.now())
+      capture_commits(id)
+
+      Waker.run()
+      assert eventually(fn -> WorkflowServer.whereis(id) end)
+      assert %{message: :wake, at: next} = timer(id)
+      assert next > Runtime.now()
+      refute_receive {:commit, %Commit{workflow: nil, wake: {:before, ^at}}}
+    end
+
     test "reads every keyset page and leaves paused and running processes alone" do
       put_settings(activation_page_size: 2)
       ids = for x <- 1..5, do: start_simple(%{"x" => x})
