@@ -87,7 +87,7 @@ OpenAPI 스냅샷(`priv/contract/openapi.json`)에 없다.
 - **`resumeSubworkflowTasks` 하강.** `Lifecycle.last_failed/3`은 읽은 자식의 `parentWorkflowId`·`parentWorkflowTaskId`가 지금
   워크플로우와 태스크일 때만 내려간다. 맞지 않으면 upstream `NotFoundException` 경우처럼 그 위 워크플로우를 재시도한다.
 - **자식 → 부모 알림은 바꾸지 않는다.** `child_revived`·`child_changed`의 주소(부모 ID와 부모 태스크 ID)는 자식 자신의
-  `parentWorkflowId`·`parentWorkflowTaskId`에서 오므로 worker가 바꿀 수 없다. 부모가 그 태스크의 자식을 읽는 일은 위 `Env.child/2`를
+  `parentWorkflowId`·`parentWorkflowTaskId`에서 오므로 worker가 바꿀 수 없다. 부모가 그 태스크의 자식을 읽는 일은 위 `Env.child/3`를
   거친다.
 - **시작의 소유자 확인과 자기 자신 가드는 그대로다.** `start_workflow_idempotent/1`의 소유자 확인(upstream
   `validateIdempotentWorkflowOwnership`), `SubWorkflows.start_child/1`의 "자기 자신을 시작" 절, `terminate_child/4`·`retry_child/2`의
