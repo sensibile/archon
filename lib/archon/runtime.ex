@@ -41,6 +41,14 @@ defmodule Archon.Runtime do
     * `:idle_timeout` - how long a process whose workflow is terminal waits for a request before
       it ends, 5 s.
     * `:hibernate_after` - idle time after which a running workflow's process hibernates, 15 s.
+    * `:evict_after` - with an idle running workflow's next evaluation further than this, its
+      process ends after `hibernate_after` instead of hibernating (ADR 0021, decision 6); `nil`
+      is off. By default off with the memory store and 60 s with the Postgres one. A process is
+      never ended with its next evaluation within `:activation_margin`.
+    * `:waker_interval` - how often `Archon.Runtime.Waker` activates the due workflows, 1 s.
+    * `:activation_margin` - how far ahead a stored re-evaluation time is due for activation,
+      5 s; longer than `:waker_interval`.
+    * `:activation_page_size` - the keyset page of `Archon.Runtime.Recovery`, 100.
     * `:settings` - `Archon.Runtime.Step.Env` settings (`workflow_offset_timeout_ms`, ...).
     * `:hook` - for tests only: called with `(point, workflow_id, data)` at the points
       `Archon.Runtime.WorkflowServer` documents, so a test can fail or kill the process there.

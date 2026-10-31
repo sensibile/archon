@@ -9,6 +9,7 @@
 - 갱신: 2026-10-31 조각 4d가 결정 4의 빈 Commit 판정을 새 필드 다섯 모두로 넓히고(`wake` 포함), 결정 5에 같은 단계 안의 개수 반영과 검사 밖 경로를, 결정 3에 큐 Effect를 더는 `Effects`가 실행하지 않음과 혼합 거절의 형태를 적었다.
 - 갱신: 2026-10-31 조각 4f가 결정 2에 `Store.Postgres`의 쓰기 전 검사(태스크 `seq`·상태, JSON으로 바꿀 수 없는 값, 페이지 커서)와 poll 데이터를, 결정 3에 `commit/2`의 `{:error, :fenced}`와 공용 검사 `Commit.check!/2`를, 결정 4에 outbox 항목의 저장 모양을, 결정 5에 한도 잠금 키와 잠금 순서(이름 순이 아니라 키 순)를 적었다.
 - 갱신: 2026-10-31 조각 4e가 결정 4에 실행기의 구현 세부(모듈, 결과 값, 재시도 지연 설정, 시험 훅, `notify_parent` 항목의 자식, 조상 처리)를, 결정 10의 L2에 부모의 되살림 요청(`child_revived`)도 `revivedParentEndCount`를 찍는다는 것을 적었다.
+- 갱신: 2026-10-31 조각 4g가 결정 6에 메모리 백엔드의 `Recovery`(실행 중 워크플로우 전체), 한 단계의 타이머 Effect 여럿을 합치는 규칙, 결정 루프 halt의 즉시 `:wake` 저장, 예외 격리 기한 저장의 범위(`RUNNING`), 유휴 종료의 구현(GenServer timeout, 저장된 `:wake` 타이머만)과 설정 이름을 적었다.
 
 ## 맥락
 
@@ -322,9 +323,37 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
   (poll, 갱신, 자식 알림)은 활성화로, 기한은 Waker로 다시 띄운다. 메모리 백엔드에서는 `evict_after`를 끄고 지금처럼
   hibernate한다(설정 기본값이 백엔드별로 다르다).
 - **기대 효과.** 재평가 후보가 없으면 `computePostpone`이 30초를 주므로 짧은 태스크만 있는 워크플로우는 대개 살아 있다.
-  덜어지는 것은 긴 WAIT, 긴 응답 타임아웃의 워커 태스크, 하위 워크플로우를 기다리는 부모처럼 다음 재평가가 먼 워크플로우와,
-  재시작 때 한꺼번에 띄우던 비용이다.
+  덜어지는 것은 긴 WAIT, 긴 응답·poll 타임아웃의 워커 태스크처럼 다음 재평가가 먼 워크플로우와, 재시작 때 한꺼번에 띄우던
+  비용이다. 하위 워크플로우를 기다리는 부모, 기한 없는 WAIT, HUMAN은 `computePostpone`이 offset(30초)을 주므로 기본
+  `evict_after`(60초)에서는 내려가지 않는다(조각 4g에서 바로잡음).
 - `running_workflow_ids/0`은 관리·시험용으로 남긴다.
+- **구현 세부(조각 4g).**
+  - **타이머 Effect 합치기.** `WorkflowServer`는 post의 타이머 Effect를 순서대로 접어 `Commit.wake` 하나로 만든다: `{:wake_at, ms}`는
+    앞의 것을 버리고 `{:at, ms}`, `{:wake_before, ms}`는 앞이 `{:at, a}`면 `{:at, min(a, ms)}`, `{:before, b}`면
+    `{:before, min(b, ms)}`, `:none`이면 `{:at, ms}`, `:keep`이면 `{:before, ms}`, `:cancel_wake`는 `:none`이다. 저장소가 Effect를 하나씩
+    적용한 결과와 같다. Effect는 post에 남아 프로세스 타이머에도 그대로 적용된다.
+  - **저장하지 않는 즉시 `:wake`.** 저장하지 않는 것은 `WorkflowServer`가 반복 상한에서 직접 거는 즉시 타이머뿐이다. `Step`의 결정
+    루프가 멈출 때(halt) 내는 `{:wake_at, now}`는 같은 Commit이 워크플로우를 저장하므로 쓰기가 늘지 않아 그대로 저장한다. 노드가
+    그 사이 죽으면 다음 활성화가 곧바로 이어 간다.
+  - **예외 격리 기한.** `{:before, 기한}`만 담은 Commit은 워크플로우가 `RUNNING`일 때만 쓴다(`due_workflow_ids`가 `RUNNING`만 보고,
+    `PAUSED`는 재개 요청이 활성화한다). 시험 훅 `:commit`을 거치며, 실패는 경고로 기록한다.
+  - **`Recovery`의 두 선택.** `Recovery.run(:due)`는 위의 선택 활성화이고 `Waker`가 주기마다 부른다. 메모리 백엔드의 시작은
+    `Recovery.run(:all)`(`running_workflow_ids/0` 전체, `PAUSED` 포함, 그리고 outbox 워크플로우)이다. 메모리 백엔드는 VM 재시작 때
+    남는 것이 없어 선택 활성화로 아낄 것이 없고, `rest_for_one`에서 큐만 다시 뜨면 저장소는 남은 채 큐 메시지를 잃는데 그 메시지를
+    다시 넣는 것은 활성화된 프로세스의 복구 검사뿐이기 때문이다. 둘 다 이미 프로세스가 있는 워크플로우는 건드리지 않고, 볼 때
+    프로세스가 없던 워크플로우의 수를 돌려준다. 페이지 크기는 설정 `activation_page_size`(기본 100)다.
+  - **`Waker`.** `GenServer`이고 설정 `waker_interval`(기본 1초)마다 `Recovery.run(:due)`를 부른다. 한 회차가 실패하면(저장소 장애)
+    기록하고 다음 회차를 건다. 활성화 여유는 설정 `activation_margin`(기본 5초)이다.
+    메모리 백엔드에서도 돈다. 유휴 종료가 꺼져 있어 할 일은 드물지만(재시작 한도를 넘어 내려간 프로세스, outbox가 남은 워크플로우),
+    한 회차가 `Store.Memory` 프로세스 안에서 워크플로우 수만큼 훑는 비용은 메모리 백엔드가 개발·시험용이라 받아들인다.
+  - **유휴 종료.** 설정 `evict_after`가 있으면 곧 끝나지 않는 프로세스(`ending?`가 아님)의 응답에 `hibernate_after` timeout을
+    붙이고, timeout이 오면 종료 조건을 본 뒤 맞지 않으면 그때 hibernate한다(timeout이 있으면 `hibernate_after` 옵션은 쓰이지
+    않는다). 종료 조건은 워크플로우가 `RUNNING`, 실행기 없음(`runner`·`kick?`·되먹임 `ack`가 모두 비어 있음), 타이머가 Commit과 함께
+    저장된 `:wake` 타이머(저장된 `wake_at`이 그 시각보다 늦지 않음)이고 그 시각이 지금부터 `evict_after`와 `activation_margin` 가운데
+    큰 값보다 뒤인 것이다(Waker가 방금 띄운 프로세스는 다음 시각이 여유 안에 있으므로, `evict_after`를 여유보다 작게 설정해도
+    종료와 활성화가 되풀이되지 않는다). 예외 격리의
+    `:recover` 타이머, 반복 상한의 즉시 타이머, 타이머가 없는 프로세스는 내리지 않는다. 기본값은 설정이 없을 때 저장소로 정한다
+    (`Store.Postgres`면 60초, 그 밖에는 끔). 메모리 백엔드를 켠 시험은 설정을 바꿔 돈다.
 
 ### 7. 노드는 하나이고 시작 때 DB 락으로 지킨다
 
@@ -421,7 +450,7 @@ Archon.Runtime.Supervisor (rest_for_one)
 | 4d | 결정 3·5와 L5의 런타임: `WorkflowServer`가 큐 Effect를 `Commit.queue`로 옮김(시작 실패 정리 포함), `Step`이 `Commit.limits`를 채움, 한도 오류 재실행, `env` 실패 분류, 백엔드 혼합 거절(메모리 백엔드로) | 기존 런타임 시험 전부, 동시 poll 한도 시험, 큐 push 실패가 Commit 실패가 되는 시험, L5 재현 시험 | 4b | `lib/archon/runtime/{workflow_server,supervisor}.ex`, `lib/archon/runtime/step/{tasks,async,state}.ex`, `lib/archon/runtime/sub_workflows.ex`(시작 오류 분류만), `test/archon/runtime/{workflow_server,tasks,sub_workflow}_test.exs` |
 | 4e | 결정 4와 L1·L2·L6: outbox로 옮김, 실행기(하나, Registry 울타리, 순서, 재시도 지연, 결과 분류, 되먹임), outbox가 빌 때까지 끝나지 않기, `TaskSupervisor`와 조상 취소 이전, 소유 ID 명시 인자, `call`로 바꾼 부모 알림, `Env.outbox_pending?`와 복구 검사, `endCount`·`revivedParentEndCount` 찍기와 `revived_after?/2` | 기존 런타임 시험 전부, outbox 크래시 시험(Commit 뒤·ack 전), 실행기 순서·재시도 시험, 실행기가 도는 중 소유 프로세스를 죽였을 때 실행기가 겹치지 않는 시험, ack 전 죽은 자식 종료 항목이 그 사이 재시작된 자식을 종료하지 않는 시험, L1·L2·L6 재현 시험 | 4a, 4d | `lib/archon/runtime/{workflow_server,effects,sub_workflows,supervisor}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/step/{effect,event,env,recover,lifecycle,terminate,state}.ex`, `test/archon/runtime/{workflow_server,lifecycle,sub_workflow,recovery}_test.exs`, `test/archon/runtime/outbox_test.exs` |
 | 4f | 결정 3·5의 `Store.Postgres`: 아홉 필드를 한 트랜잭션으로, 한도 advisory lock, 일관된 읽기, outbox·due 콜백 | 저장소 계약 시험(Postgres), 실패 Commit의 전체 되돌림, 동시 Commit 한도, 쓰기마다 펜싱 도우미 호출 | 4a, 4b, 4c | `lib/archon/runtime/store/postgres.ex`, `test/archon/runtime/store_postgres_test.exs` |
-| 4g | 결정 6: `Commit.wake` 기록(예외 격리 기한의 최선 노력 저장 포함), `Recovery` 선택 활성화, `Archon.Runtime.Waker`, 유휴 프로세스 종료(메모리 백엔드로, `evict_after`를 켠 시험) | 지연 활성화 시험(시계 주입), 키셋 페이지, 기존 `recovery_test.exs` | 4e | `lib/archon/runtime/{workflow_server,recovery,waker,supervisor}.ex`, `config/config.exs`, `test/archon/runtime/{recovery,waker}_test.exs` |
+| 4g | 결정 6: `Commit.wake` 기록(예외 격리 기한의 최선 노력 저장 포함), `Recovery` 선택 활성화, `Archon.Runtime.Waker`, 유휴 프로세스 종료(메모리 백엔드로, `evict_after`를 켠 시험) | 지연 활성화 시험(시계 주입), 키셋 페이지, 기존 `recovery_test.exs` | 4e | `lib/archon/runtime/{workflow_server,recovery,waker,supervisor}.ex`, `lib/archon/runtime.ex`(설정 문서), `config/config.exs`, `test/archon/runtime/{recovery,waker}_test.exs` |
 | 4h | 결정 7·9의 통합: `NodeLock`(epoch 발급 포함), Postgres 백엔드 트리 연결, `ARCHON_BACKEND=postgres` 런타임 시험과 CI 단계(메모리 구현을 직접 부르는 런타임 시험을 설정된 백엔드로 바꿈), 내구성 시험, L11 | 런타임 시험 전부를 두 백엔드에서, 두 번째 노드 거절, 락 잃음 감지, epoch가 오른 뒤 이전 노드의 쓰기가 `:fenced`로 거절됨(배타 잠금을 쥔 채 epoch를 올리는 동안 기다리던 이전 노드의 쓰기 포함), Supervisor 재시작 내구성 시험 | 4f, 4g | `lib/archon/runtime/postgres/node_lock.ex`, `lib/archon/runtime/supervisor.ex`, `config/test.exs`, `test/test_helper.exs`(`public` 스키마 비우기), `.github/workflows/ci.yml`, `test/archon/runtime/{durability,node_lock}_test.exs`, `test/archon/runtime/{runtime,tasks,workflow_server,recovery}_test.exs`(`Queue.Memory`·`Store.Memory`를 직접 부르는 곳과 고정 ID) |
 
 - **병렬로 진행할 수 있는 묶음.**
