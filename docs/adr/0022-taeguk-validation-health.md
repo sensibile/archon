@@ -16,8 +16,8 @@ archon CI는 push와 PR 때만 돈다. 변경이 없는 날의 `main`은 검증�
 게이트 없음)을 승인했다. 스킬의 "Where it runs" 절에 따라, 설치 프로젝트에서는 그 프로젝트가 BOSS 승인(예약과 보고
 위치)을 기록한 경우에만 돈다. archon에는 스킬이 이미 설치돼 있지만 승인 기록이 없었다.
 
-2026-11-01 태극 세션에서 BOSS가 "archon 도 검증 건강도 작업 추가해"라고 했다. 같은 날 archon 세션에서 Postgres
-스위트를 실행마다 일회용 컨테이너로 돌리는 방식을 골랐다.
+2026-11-01 태극 세션에서 BOSS가 "archon 도 검증 건강도 작업 추가해"라고 했다. 같은 날 archon 세션에서 BOSS가
+Postgres 스위트를 실행마다 일회용 컨테이너(CI와 같은 이미지)로 돌리는 방식을 골랐다.
 
 ## 결정
 
@@ -30,10 +30,13 @@ archon CI는 push와 PR 때만 돈다. 변경이 없는 날의 `main`은 검증�
    - 보고 위치: main checkout의 `.taeguk/validation-health/<날짜>.md`. Git에서 무시한다.
 2. **스위트는 AGENTS.md 검증 명령과 CI가 도는 단계를 따른다.** `mix deps.unlock --check-unused`, `mix hex.audit`,
    Postgres를 요구하는 `mix test`와 `ARCHON_BACKEND=postgres mix test`를 포함한다. 설치된 `taeguk-*` 스킬은
-   skill-creator 검증기로 확인한다. 목록은 운영 문서에 있다. sanitizer 빌드(`c-sanitize` job)는 Linux CI 전용이라
+   skill-creator 검증기로 확인한다. 목록은 운영 문서에 있다. 태극 #31은 의존성·보안 점검을 hoplites 역할로 보고
+   뺐지만, archon은 AGENTS.md 검증에 `mix deps.audit`이 있어 audit을 넣는다. audit FAIL은 코드가 그대로여도 새 권고로
+   생길 수 있으므로 권고 ID를 보고에 남긴다. sanitizer 빌드(`c-sanitize` job)는 Linux CI 전용이라
    로컬에서는 NOT_APPLICABLE이고, 결정 4의 주간 CI가 본다.
 3. **Postgres 스위트는 실행마다 일회용 컨테이너에서 돌린다.** CI `services.postgres`와 같은 이미지를 docker로
-   `127.0.0.1`의 임의 포트에 띄우고, 일회용 비밀번호를 만들어 `DATABASE_URL`에 쓴다. 끝나면 컨테이너를 지운다.
+   `127.0.0.1`의 임의 포트에 띄우고, 일회용 비밀번호를 만들어 `DATABASE_URL`에 쓴다. 준비는 컨테이너 안에서 TCP
+   기준으로 확인한다. 실패 스위트의 재실행까지 같은 컨테이너를 쓰고, 실패나 중단 때도 끝나면 지운다.
    다른 세션의 컨테이너나 기존 데이터베이스를 쓰지 않는다. docker가 없거나 이미지를 받지 못하거나 서버가 준비되지
    않으면 Postgres 스위트는 NOT_RUN이고 원인을 기록한다. 서버를 설치하거나 docker 설정을 바꾸지 않는다.
 4. **CI에 주간 schedule을 둔다.** `.github/workflows/ci.yml`이 매주 월요일 08:27(KST, cron `27 23 * * 0`)에
@@ -59,4 +62,8 @@ archon CI는 push와 PR 때만 돈다. 변경이 없는 날의 `main`은 검증�
   실행이나 스위트가 NOT_RUN으로 보고된다.
 - 주간 CI schedule은 기본 브랜치의 workflow로 돈다. 공개 저장소에서 60일 동안 활동이 없으면 GitHub가 예약
   실행을 끈다. 필수 체크(`test`, `credo`, `dialyzer`, `audit`)는 PR에서 그대로 돈다.
+- 주간 실행은 `main` push와 같은 concurrency group(`ci-refs/heads/main`)을 쓴다. 진행 중인 실행은 취소되지 않지만,
+  대기 중인 실행은 다음 실행으로 대체될 수 있다. 대체돼도 `main`의 같은 커밋이나 더 새 커밋이 검증되므로 그대로 둔다.
+- 08:41 실행이 길어지면 09:01 데일리 정리와 겹칠 수 있다. 보고에 시작·종료 시각을 남겨 CPU 경합에 따른 간헐 실패를
+  가려 본다.
 - 이 ADR은 구현 PR이 머지된 뒤 다음 PR에서 승인으로 바꾼다.
