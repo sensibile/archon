@@ -25,6 +25,12 @@ defmodule Archon.Runtime.WorkflowServer do
   a result that goes back to the step (a `SUB_WORKFLOW` start, a failed failure-workflow start)
   is run as the next event within the same message, up to the decide iteration limit.
 
+  The queue effects of `post` are not run: they go into the commit's `queue`, their delays added
+  to the event's `Env.now`, so the store writes them with the workflow (ADR 0021, decision 3). A
+  commit the store refuses with `{:error, {:limit, name}}` (the step's `Commit.limits`, ADR 0021,
+  decision 5) runs the same event again with `in_progress[name]` at the limit, which counts
+  toward the decide iteration limit.
+
   The `Env` is filled from the store, the queue and the metadata for each event (`env/2`):
   `task_defs` for the definition's tasks that have no embedded definition,
   `latest_workflow_versions` for `SUB_WORKFLOW` tasks without a version, `poll_data` for the
@@ -67,14 +73,16 @@ defmodule Archon.Runtime.WorkflowServer do
 
   An exception or exit in the step or an effect is caught: the process keeps the last stored
   workflow, logs, answers `{:error, reason}` and runs `:recover` after
-  `workflow_offset_timeout_ms` (ADR 0018, decision 1). A `pre` effect that fails leaves nothing
-  committed. A workflow that the failed step already made terminal is not tried again: the
+  `workflow_offset_timeout_ms` (ADR 0018, decision 1). The reason is tagged with where it
+  happened: `{:env, _}` (reading the env), `{:pre_effect, _}`, `{:commit, _}` (also a queue
+  operation that failed with the commit) or `{:post_effect, _}`; an exception in the step itself
+  is untagged. A `pre` effect that fails leaves nothing committed. A workflow that the failed step already made terminal is not tried again: the
   process ends, as a terminal workflow's process does, and what its effects left undone is the
   Phase 4 recovery's (ADR 0018, 결과).
 
-  For tests, the `hook` configuration is called with `(point, workflow_id, data)` at `:step`
-  (before the step, with the event), `:effect` (before each effect), `:commit` (before the
-  commit) and `:committed` (after it).
+  For tests, the `hook` configuration is called with `(point, workflow_id, data)` at `:env`
+  (before the env is read, with the event), `:step` (before the step, with the event), `:effect`
+  (before each effect), `:commit` (before the commit) and `:committed` (after it).
   """
 
   use GenServer, restart: :transient
@@ -381,7 +389,7 @@ defmodule Archon.Runtime.WorkflowServer do
   end
 
   # The reason given to the caller: the exception without its stack, which is logged.
-  defp reply_reason({tag, reason}) when tag in [:pre_effect, :post_effect, :commit],
+  defp reply_reason({tag, reason}) when tag in [:env, :pre_effect, :post_effect, :commit],
     do: {tag, reply_reason(reason)}
 
   defp reply_reason({%{__exception__: true} = exception, stack}) when is_list(stack),
@@ -395,21 +403,76 @@ defmodule Archon.Runtime.WorkflowServer do
   # returned.
 
   defp cycle(%__MODULE__{} = state, event, defer?, budget) do
-    with {:ok, env} <- guard(fn -> env(state.workflow, event) end),
-         {:ok, {reply, stored, pre, commit, post}} <-
-           guard(fn ->
-             hook(state, :step, event)
-             Step.run(state.workflow, event, env)
-           end),
-         :ok <- run_pre(state, pre),
-         {:ok, state} <- commit(state, commit, stored),
-         {:ok, state, deferred, budget} <- run_post(state, post, defer?, budget - 1) do
-      {:ok, reply, state, deferred, budget}
-    else
-      {:error, reason} -> {:error, reason, state}
-      {:error, reason, state} -> {:error, reason, state}
+    # A store that fails while the env is read is down, not wrong: {:env, _} is transient for a
+    # child start (ADR 0021, L5).
+    case guard(fn ->
+           hook(state, :env, event)
+           env(state.workflow, event)
+         end) do
+      {:ok, env} -> attempt(state, event, env, defer?, budget)
+      {:error, reason} -> {:error, {:env, reason}, state}
     end
   end
+
+  defp attempt(state, event, env, defer?, budget) do
+    case guard(fn ->
+           hook(state, :step, event)
+           Step.run(state.workflow, event, env)
+         end) do
+      {:ok, {reply, stored, pre, commit, post}} ->
+        {commit, post} = take_queue(commit, post, env.now)
+
+        case apply_step(state, {pre, commit, stored, post}, defer?, budget) do
+          {:ok, state, deferred, budget} ->
+            {:ok, reply, state, deferred, budget}
+
+          # ADR 0021, decision 5: another workflow took the last slot since the env was read;
+          # the same event runs again seeing the limit reached.
+          {:error, {:commit, {:limit, name}}, state}
+          when budget > 1 and is_map_key(commit.limits, name) ->
+            in_progress = Map.put(env.in_progress, name, Map.fetch!(commit.limits, name))
+            attempt(state, event, %{env | in_progress: in_progress}, defer?, budget - 1)
+
+          {:error, reason, state} ->
+            {:error, reason, state}
+        end
+
+      {:error, reason} ->
+        {:error, reason, state}
+    end
+  end
+
+  defp apply_step(state, {pre, commit, stored, post}, defer?, budget) do
+    with :ok <- run_pre(state, pre),
+         {:ok, state} <- commit(state, commit, stored) do
+      run_post(state, post, defer?, budget - 1)
+    else
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  # ADR 0021, decision 3: the queue effects are written with the commit, their delays turned
+  # into delivery times from the event's clock.
+  defp take_queue(%Commit{} = commit, post, now) do
+    {ops, post} = Enum.split_with(post, &queue_effect?/1)
+
+    ops =
+      Enum.map(ops, fn
+        {:queue_push, queue, id, priority, delay} ->
+          {:push, queue, id, priority, now + delay}
+
+        {:queue_remove, queue, id} ->
+          {:remove, queue, id}
+
+        {:queue_postpone, queue, id, priority, delay} ->
+          {:postpone, queue, id, priority, now + delay}
+      end)
+
+    {%{commit | queue: commit.queue ++ ops}, post}
+  end
+
+  defp queue_effect?(effect),
+    do: is_tuple(effect) and elem(effect, 0) in [:queue_push, :queue_remove, :queue_postpone]
 
   defp run_pre(state, effects) do
     Enum.reduce_while(effects, :ok, fn effect, :ok ->
@@ -433,7 +496,7 @@ defmodule Archon.Runtime.WorkflowServer do
 
       case result do
         {:ok, :ok} ->
-          state = %{state | workflow: stored, journal: journal_commit(state.journal)}
+          state = %{state | workflow: stored, journal: journal_commit(state.journal, commit)}
           hook(state, :committed, stored)
           {:ok, state}
 
@@ -446,8 +509,20 @@ defmodule Archon.Runtime.WorkflowServer do
     end
   end
 
-  defp empty?(%Commit{create: nil, workflow: nil, upsert_tasks: [], delete_task_ids: []}),
-    do: true
+  # A commit of only the fields ADR 0021 adds is not empty (decision 4).
+  defp empty?(%Commit{
+         create: nil,
+         workflow: nil,
+         upsert_tasks: [],
+         delete_task_ids: [],
+         outbox_ack: [],
+         outbox: [],
+         wake: :keep,
+         limits: limits,
+         queue: []
+       })
+       when map_size(limits) == 0,
+       do: true
 
   defp empty?(%Commit{}), do: false
 
@@ -521,19 +596,10 @@ defmodule Archon.Runtime.WorkflowServer do
   defp post_effect(state, effect) do
     case run_effect(state, effect) do
       :ok ->
-        {:ok, journal_push(state, effect)}
+        {:ok, state}
 
       {:event, event} ->
         {:event, event, state}
-
-      # upstream scheduleTask logs a failed addTaskToQueue and goes on; the recovery check
-      # pushes the task again (ADR 0018, decisions 1 and 2).
-      {:error, reason} when elem(effect, 0) == :queue_push ->
-        Logger.warning(
-          "workflow #{state.id} could not queue #{inspect(effect)}: #{inspect(reason)}"
-        )
-
-        {:ok, state}
 
       {:error, reason} ->
         {:error, reason, state}
@@ -559,14 +625,13 @@ defmodule Archon.Runtime.WorkflowServer do
     end
   end
 
-  # The queue messages a start pushed, removed again if the start fails.
-  defp journal_push(%__MODULE__{journal: %{} = journal} = state, {:queue_push, queue, id, _, _}),
-    do: %{state | journal: %{journal | pushed: [{queue, id} | journal.pushed]}}
+  # The queue messages a start's commits pushed, removed again if the start fails.
+  defp journal_commit(nil, _commit), do: nil
 
-  defp journal_push(state, _effect), do: state
-
-  defp journal_commit(nil), do: nil
-  defp journal_commit(journal), do: %{journal | committed?: true}
+  defp journal_commit(journal, %Commit{queue: ops}) do
+    pushed = for {:push, queue, id, _priority, _at} <- ops, do: {queue, id}
+    %{journal | committed?: true, pushed: Enum.reverse(pushed, journal.pushed)}
+  end
 
   # startWorkflow's cleanup (ExecutionDAOFacade#removeWorkflow): the workflow and its tasks,
   # then the queue messages this process pushed.

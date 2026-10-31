@@ -141,12 +141,22 @@ defmodule Archon.Runtime.StepTasksTest do
 
       assert post == [{:queue_postpone, "simpleTask", "simple-task-id", 3, 60_000}]
 
-      assert {%Task{status: :in_progress}, _stored, [], _commit, _post} =
+      # Under the limit the store checks it again with the commit (ADR 0021, decision 5).
+      assert {%Task{status: :in_progress}, _stored, [], %{limits: %{"simpleTask" => 2}}, _post} =
                Step.run(
                  workflow([task]),
                  {:poll, task.task_id, "w1"},
                  env(in_progress: %{"simpleTask" => 1})
                )
+    end
+
+    test "a task without a limit asks for no check" do
+      task = simple(status: :scheduled)
+
+      assert {%Task{status: :in_progress}, _stored, [], %{limits: limits}, _post} =
+               Step.run(workflow([task]), {:poll, task.task_id, "w1"}, env())
+
+      assert limits == %{}
     end
   end
 

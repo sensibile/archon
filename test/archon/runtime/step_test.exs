@@ -726,4 +726,53 @@ defmodule Archon.Runtime.StepTest do
              ] = post
     end
   end
+
+  describe "the concurrent execution limit (ADR 0021, decision 5)" do
+    # Two SCHEDULED WAITs of one limited definition (as retries leave them), due on a :wake.
+    defp limited_waits do
+      wait = fn ref ->
+        system("WAIT", ref,
+          name: "limited_wait",
+          input_parameters: %{"duration" => "10 seconds"},
+          task_definition: %TaskDef{system_def("limited_wait") | concurrent_exec_limit: 1}
+        )
+      end
+
+      fork = system("FORK_JOIN", "fork", fork_tasks: [[wait.("w1")], [wait.("w2")]])
+      {stored, _post} = start([fork, system("JOIN", "join", join_on: ["w1", "w2"])])
+
+      tasks =
+        Enum.map(stored.tasks, fn
+          %Task{task_type: "WAIT"} = task ->
+            %{task | status: :scheduled, poll_count: 0, callback_after_seconds: 0}
+
+          task ->
+            task
+        end)
+
+      %{stored | tasks: tasks}
+    end
+
+    test "two tasks of one definition share the free slot and the commit carries the limit" do
+      {:ok, stored, [], commit, _post} =
+        Step.run(limited_waits(), :wake, env(now: @now + 1_000))
+
+      assert commit.limits == %{"limited_wait" => 1}
+      assert task(stored, "w1").status == :in_progress
+      assert task(stored, "w2").status == :scheduled
+    end
+
+    test "at the limit neither starts and the commit checks nothing" do
+      {:ok, stored, [], commit, _post} =
+        Step.run(
+          limited_waits(),
+          :wake,
+          env(now: @now + 1_000, in_progress: %{"limited_wait" => 1})
+        )
+
+      assert commit.limits == %{}
+      assert task(stored, "w1").status == :scheduled
+      assert task(stored, "w2").status == :scheduled
+    end
+  end
 end

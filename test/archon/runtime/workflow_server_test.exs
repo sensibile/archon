@@ -14,6 +14,7 @@ defmodule Archon.Runtime.WorkflowServerTest do
   @moduletag :capture_log
 
   alias Archon.Domain.{Task, TaskResult}
+  alias Archon.Runtime.Commit
   alias Archon.Runtime.Queue.Memory, as: Queue
 
   defp complete(id, ref) do
@@ -224,7 +225,7 @@ defmodule Archon.Runtime.WorkflowServerTest do
 
       RuntimeHooks.install(
         hook: fn
-          :effect, ^id, {:queue_remove, _queue, _id} -> raise "remove failed"
+          :effect, ^id, {:wake_at, _at} -> raise "timer failed"
           _point, _id, _data -> :ok
         end
       )
@@ -232,12 +233,14 @@ defmodule Archon.Runtime.WorkflowServerTest do
       result = %TaskResult{workflow_instance_id: id, task_id: a.task_id, status: :completed}
       assert {:error, {:post_effect, %RuntimeError{}}} = WorkflowServer.update(result)
       assert task(id, "task_a_ref").status == :completed
+      # the queue push was written with the commit (ADR 0021, decision 3)
+      b = task(id, "task_b_ref")
+      assert Queue.contains?("archon_task_b", b.task_id)
       assert_receive {:timer_set, ^pid, recover, 30_000}
 
       RuntimeHooks.install(hook: fn _point, _id, _data -> :ok end)
       send(pid, recover)
-      b = eventually(fn -> task(id, "task_b_ref") end)
-      eventually(fn -> Queue.contains?("archon_task_b", b.task_id) end)
+      assert_receive {:timer_set, ^pid, _wake, 30_000}
     end
 
     test "a start that fails after its commit leaves nothing behind" do
@@ -246,7 +249,7 @@ defmodule Archon.Runtime.WorkflowServerTest do
 
       RuntimeHooks.install(
         hook: fn
-          :effect, ^id, {:queue_push, queue, task_id, _priority, _delay} ->
+          :commit, ^id, %Commit{queue: [{:push, queue, task_id, _priority, _at}]} ->
             send(test, {:pushed, queue, task_id})
 
           :effect, ^id, {:wake_at, _at} ->
@@ -262,16 +265,81 @@ defmodule Archon.Runtime.WorkflowServerTest do
 
       assert_receive {:pushed, "archon_task_a", task_id}
       assert Runtime.get_workflow(id) == {:error, :not_found}
+      # nothing is left to remove a second time
+      assert Queue.remove("archon_task_a", task_id) == :ok
       refute Queue.contains?("archon_task_a", task_id)
       await_down(id)
     end
 
-    test "a queue push that fails does not fail the start" do
-      id = "ws-push-fails"
+    # ADR 0021, decision 3: the push is part of the commit, so a queue that is down fails it.
+    test "a queue push that fails fails the start and leaves nothing behind" do
+      id = "ws-push-fails-" <> Runtime.new_id()
+      test = self()
+      queue = Process.whereis(Queue)
+      on_exit(fn -> Process.whereis(Queue) || Process.register(queue, Queue) end)
 
       RuntimeHooks.install(
         hook: fn
-          :effect, ^id, {:queue_push, _queue, _task, _priority, _delay} -> raise "queue down"
+          :commit, ^id, %Commit{queue: [{:push, _queue, task_id, _priority, _at}]} ->
+            send(test, {:pushing, task_id})
+            Process.unregister(Queue)
+
+          _point, _id, _data ->
+            :ok
+        end
+      )
+
+      assert {:error, {:commit, {:exit, {:noproc, _call}}}} =
+               Runtime.start_workflow(%{name: "archon_simple", workflow_id: id, input: %{}})
+
+      Process.register(queue, Queue)
+      assert_receive {:pushing, task_id}
+      assert Runtime.get_workflow(id) == {:error, :not_found}
+      refute Queue.contains?("archon_task_a", task_id)
+      await_down(id)
+    end
+
+    test "a queue operation that fails fails the commit; the recovery check repairs it" do
+      id = start_simple(%{"x" => 1})
+      pid = WorkflowServer.whereis(id)
+      assert_receive {:timer_set, ^pid, _wake, 30_000}
+      a = task(id, "task_a_ref")
+      assert %Task{} = WorkflowServer.poll(id, a.task_id, "w")
+      queue = Process.whereis(Queue)
+      on_exit(fn -> Process.whereis(Queue) || Process.register(queue, Queue) end)
+
+      RuntimeHooks.install(
+        hook: fn
+          :commit, ^id, %Commit{queue: [_ | _]} -> Process.unregister(Queue)
+          _point, _id, _data -> :ok
+        end
+      )
+
+      result = %TaskResult{workflow_instance_id: id, task_id: a.task_id, status: :completed}
+      assert {:error, {:commit, {:exit, _reason}}} = WorkflowServer.update(result)
+      Process.register(queue, Queue)
+      assert task(id, "task_a_ref").status == :in_progress
+      assert task(id, "task_b_ref") == nil
+      assert_receive {:timer_set, ^pid, recover, 30_000}
+
+      RuntimeHooks.install(hook: fn _point, _id, _data -> :ok end)
+      assert %Task{status: :completed} = WorkflowServer.update(result)
+      b = task(id, "task_b_ref")
+      assert Queue.contains?("archon_task_b", b.task_id)
+      send(pid, recover)
+      assert_receive {:timer_set, ^pid, _wake, 30_000}
+    end
+  end
+
+  describe "the commit's queue operations (ADR 0021, decision 3)" do
+    test "carry the delivery time from the event's clock" do
+      RuntimeHooks.install(clock: 4_000_000, timer: self())
+      id = "ws-queue-" <> Runtime.new_id()
+      test = self()
+
+      RuntimeHooks.install(
+        hook: fn
+          :commit, ^id, %Commit{} = commit -> send(test, {:commit, commit})
           _point, _id, _data -> :ok
         end
       )
@@ -279,7 +347,17 @@ defmodule Archon.Runtime.WorkflowServerTest do
       assert {:ok, ^id} =
                Runtime.start_workflow(%{name: "archon_simple", workflow_id: id, input: %{}})
 
-      refute Queue.contains?("archon_task_a", task(id, "task_a_ref").task_id)
+      assert_receive {:commit, %Commit{create: %{}, queue: [push]}}
+      task_id = task(id, "task_a_ref").task_id
+      assert push == {:push, "archon_task_a", task_id, 0, 4_000_000}
+      assert Queue.contains?("archon_task_a", task_id)
+
+      # a poll of a terminal task commits only the queue removal
+      assert Runtime.terminate_workflow(id, "done") == :ok
+      assert_receive {:commit, %Commit{workflow: %{status: :terminated}}}
+      assert WorkflowServer.poll(id, task_id, "w") == nil
+      assert_receive {:commit, %Commit{workflow: nil, upsert_tasks: [], queue: queue}}
+      assert queue == [{:remove, "archon_task_a", task_id}]
     end
   end
 

@@ -27,8 +27,10 @@ defmodule Archon.Runtime.Step.State do
   #   * `due` - asynchronous system tasks to evaluate next; `terminated_refs` - reference names
   #     of tasks a save made terminal, which the `JOIN`s waiting on them are evaluated after.
   #   * `pull` - the earliest `:wake` asked by an event that did not decide.
+  #   * `limits` - the concurrent execution limits the commit asks the store to check
+  #     (ADR 0021, decision 5).
 
-  alias Archon.Domain.{Task, Workflow}
+  alias Archon.Domain.{Task, TaskDef, Workflow}
   alias Archon.Runtime.Commit
   alias Archon.Runtime.Step.{Effect, Env}
 
@@ -38,6 +40,7 @@ defmodule Archon.Runtime.Step.State do
     :stored,
     :wf,
     :pull,
+    limits: %{},
     created?: false,
     upserts: %{},
     order: [],
@@ -59,6 +62,7 @@ defmodule Archon.Runtime.Step.State do
           stored: Workflow.t() | nil,
           wf: Workflow.t() | nil,
           pull: integer() | nil,
+          limits: %{optional(String.t()) => pos_integer()},
           created?: boolean(),
           upserts: %{optional(String.t() | nil) => Task.t() | map()},
           order: [String.t() | nil],
@@ -178,13 +182,40 @@ defmodule Archon.Runtime.Step.State do
   def pull(%__MODULE__{pull: nil} = state, ms), do: %{state | pull: ms}
   def pull(%__MODULE__{pull: pull} = state, ms), do: %{state | pull: min(pull, ms)}
 
+  @doc """
+  A task the step made `IN_PROGRESS` under its definition's `concurrentExecLimit`: the commit
+  asks the store to check the limit (ADR 0021, decision 5), and the task counts in
+  `env.in_progress` for the rest of the step, so two tasks of one definition do not both take
+  the last slot. A task without a limit is left alone.
+  """
+  @spec limit(t(), Task.t()) :: t()
+  def limit(%__MODULE__{env: env} = state, %Task{status: :in_progress} = task) do
+    case Task.task_definition(task) do
+      %TaskDef{concurrent_exec_limit: limit} when is_integer(limit) and limit > 0 ->
+        name = Task.task_def_name(task)
+        in_progress = Map.update(env.in_progress, name, 1, &(&1 + 1))
+
+        %{
+          state
+          | env: %{env | in_progress: in_progress},
+            limits: Map.put(state.limits, name, limit)
+        }
+
+      _none ->
+        state
+    end
+  end
+
+  def limit(state, %Task{}), do: state
+
   @doc "Marks tasks to evaluate as asynchronous system tasks."
   @spec due(t(), [String.t()]) :: t()
   def due(state, ids), do: %{state | due: Enum.into(ids, state.due)}
 
   @doc "The commit the step collected."
   @spec commit(t()) :: Commit.t()
-  def commit(%__MODULE__{created?: true, stored: stored}), do: %Commit{create: stored}
+  def commit(%__MODULE__{created?: true, stored: stored} = state),
+    do: %Commit{create: stored, limits: state.limits}
 
   def commit(%__MODULE__{} = state) do
     %Commit{
@@ -194,7 +225,8 @@ defmodule Archon.Runtime.Step.State do
         |> Enum.reverse()
         |> Enum.filter(&Map.has_key?(state.upserts, &1))
         |> Enum.map(&Map.fetch!(state.upserts, &1)),
-      delete_task_ids: state.deletes
+      delete_task_ids: state.deletes,
+      limits: state.limits
     }
   end
 

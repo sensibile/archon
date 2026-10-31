@@ -17,7 +17,8 @@ defmodule Archon.Runtime.Step.Tasks do
     * `poll/3` - upstream `ExecutionService#poll` for one task taken from its queue: a task
       that is gone or terminal is removed from the queue, one over its definition's concurrent
       execution limit is put back for `task_execution_postpone_ms`, and otherwise it becomes
-      `IN_PROGRESS` for the worker. Recording the poll data and acking the message stay with the
+      `IN_PROGRESS` for the worker, its limit checked again by the store with the commit
+      (ADR 0021, decision 5). Recording the poll data and acking the message stay with the
       caller, which polled the whole batch.
     * `update/2` - upstream `WorkflowExecutorOps#updateTask` up to the decide, which
       `lazy_evaluate?/2` (`isLazyEvaluateWorkflow`) may skip.
@@ -61,7 +62,7 @@ defmodule Archon.Runtime.Step.Tasks do
                 poll_count: task.poll_count + 1
             }
 
-            state = State.save_task(state, task)
+            state = state |> State.save_task(task) |> State.limit(task)
             {State.task(state, task_id), adjust_wake(state, task)}
         end
     end

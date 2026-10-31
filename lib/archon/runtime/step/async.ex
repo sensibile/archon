@@ -148,12 +148,21 @@ defmodule Archon.Runtime.Step.Async do
 
       true ->
         task = %{task | start_time: now}
-        start(State.save_task(state, task), task, async_complete?)
+        {state, decide?} = start(State.save_task(state, task), task, async_complete?)
+        {limit_started(state, task.task_id), decide?}
     end
   end
 
   defp run(state, task, async_complete?),
     do: dispose(state, execute(state, task), async_complete?)
+
+  # A started task left IN_PROGRESS holds a slot of its definition's limit (ADR 0021, decision 5).
+  defp limit_started(state, task_id) do
+    case State.task(state, task_id) do
+      %Task{} = task -> State.limit(state, task)
+      nil -> state
+    end
+  end
 
   # WorkflowSystemTask#start: only SUB_WORKFLOW has one among the asynchronous system tasks. Its
   # result comes back as {:sub_workflow_started, ...}.
