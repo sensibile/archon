@@ -246,7 +246,10 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
 - **같은 단계 안의 개수(조각 4d).** `Step`은 한도 아래에서 태스크를 `IN_PROGRESS`로 바꿀 때마다 그 단계의
   `Env.in_progress[name]`를 1 올린다(`Step.State.limit/2`). 그러지 않으면 한 `:wake`에서 같은 정의의 태스크 둘이 마지막
   한 자리를 함께 보고 둘 다 시작해 Commit이 거절되고, 재실행은 둘 다 미루므로 다음 `:wake`에서도 같은 일이 되풀이된다.
-  `Commit.limits`에는 Commit 뒤 `IN_PROGRESS`로 남는 태스크의 정의만 넣는다.
+  `Commit.limits`에는 Commit 뒤 `IN_PROGRESS`로 남는 태스크의 정의만 넣는다(같은 단계에서 시작한 뒤 끝난 태스크는 빠진다).
+  한도 재실행은 그 이름의 태스크를 그 단계에서 하나도 시작하지 않는다(한도 3에서 다른 워크플로우가 한 자리를 가져가도
+  남은 두 자리를 쓰지 않고 다음 기회로 미룬다). 재실행은 `pre` Effect를 다시 실행하므로 `pre`는 멱등이어야 하고(지금은 자식
+  종료뿐이다), 재실행 판정은 그 시도의 Commit 거절만 본다(되먹임 이벤트의 거절은 그대로 오류다).
 - **검사 밖 경로.** 한도는 `Step`이 확인하는 두 곳(워커 poll, `SCHEDULED` 비동기 시스템 태스크의 시작)에만 건다. 매퍼가
   처음부터 `IN_PROGRESS`로 만드는 태스크(`WAIT`, `JOIN`)와, 자식 시작 결과(`{:sub_workflow_started, ...}`)로
   `IN_PROGRESS`가 되는 `SUB_WORKFLOW`는 검사하지 않는다. 앞의 것은 upstream도 검사하지 않고, 뒤의 것은 자식이 이미

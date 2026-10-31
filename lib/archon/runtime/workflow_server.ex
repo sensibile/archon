@@ -422,18 +422,20 @@ defmodule Archon.Runtime.WorkflowServer do
       {:ok, {reply, stored, pre, commit, post}} ->
         {commit, post} = take_queue(commit, post, env.now)
 
-        case apply_step(state, {pre, commit, stored, post}, defer?, budget) do
-          {:ok, state, deferred, budget} ->
-            {:ok, reply, state, deferred, budget}
+        case commit_step(state, pre, commit, stored) do
+          {:ok, state} ->
+            post_step_result(reply, run_post(state, post, defer?, budget - 1))
 
           # ADR 0021, decision 5: another workflow took the last slot since the env was read;
-          # the same event runs again seeing the limit reached.
-          {:error, {:commit, {:limit, name}}, state}
+          # the same event runs again seeing the limit reached. Only this attempt's own commit
+          # counts, not a fed-back event's. The pre effects run again, so they must stay
+          # idempotent (a child termination is).
+          {:error, {:commit, {:limit, name}}}
           when budget > 1 and is_map_key(commit.limits, name) ->
             in_progress = Map.put(env.in_progress, name, Map.fetch!(commit.limits, name))
             attempt(state, event, %{env | in_progress: in_progress}, defer?, budget - 1)
 
-          {:error, reason, state} ->
+          {:error, reason} ->
             {:error, reason, state}
         end
 
@@ -442,14 +444,14 @@ defmodule Archon.Runtime.WorkflowServer do
     end
   end
 
-  defp apply_step(state, {pre, commit, stored, post}, defer?, budget) do
-    with :ok <- run_pre(state, pre),
-         {:ok, state} <- commit(state, commit, stored) do
-      run_post(state, post, defer?, budget - 1)
-    else
-      {:error, reason} -> {:error, reason, state}
-    end
+  defp commit_step(state, pre, commit, stored) do
+    with :ok <- run_pre(state, pre), do: commit(state, commit, stored)
   end
+
+  defp post_step_result(reply, {:ok, state, deferred, budget}),
+    do: {:ok, reply, state, deferred, budget}
+
+  defp post_step_result(_reply, {:error, reason, state}), do: {:error, reason, state}
 
   # ADR 0021, decision 3: the queue effects are written with the commit, their delays turned
   # into delivery times from the event's clock.

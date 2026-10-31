@@ -215,19 +215,34 @@ defmodule Archon.Runtime.Step.State do
   @doc "The commit the step collected."
   @spec commit(t()) :: Commit.t()
   def commit(%__MODULE__{created?: true, stored: stored} = state),
-    do: %Commit{create: stored, limits: state.limits}
+    do: %Commit{create: stored, limits: held_limits(state.limits, stored.tasks)}
 
   def commit(%__MODULE__{} = state) do
+    upserts =
+      state.order
+      |> Enum.reverse()
+      |> Enum.filter(&Map.has_key?(state.upserts, &1))
+      |> Enum.map(&Map.fetch!(state.upserts, &1))
+
     %Commit{
       workflow: if(state.workflow_dirty?, do: state.stored),
-      upsert_tasks:
-        state.order
-        |> Enum.reverse()
-        |> Enum.filter(&Map.has_key?(state.upserts, &1))
-        |> Enum.map(&Map.fetch!(state.upserts, &1)),
+      upsert_tasks: upserts,
       delete_task_ids: state.deletes,
-      limits: state.limits
+      limits: held_limits(state.limits, upserts)
     }
+  end
+
+  # The limits of the definitions a saved task still holds a slot of: a task the step started
+  # and then ended (its workflow failed, say) asks for no check.
+  defp held_limits(limits, _tasks) when map_size(limits) == 0, do: limits
+
+  defp held_limits(limits, tasks) do
+    held =
+      for %Task{status: :in_progress} = task <- tasks,
+          into: MapSet.new(),
+          do: Task.task_def_name(task)
+
+    Map.filter(limits, fn {name, _limit} -> MapSet.member?(held, name) end)
   end
 
   # Saves a task: in memory, in the stored workflow and in the commit.

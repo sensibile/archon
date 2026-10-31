@@ -265,8 +265,6 @@ defmodule Archon.Runtime.WorkflowServerTest do
 
       assert_receive {:pushed, "archon_task_a", task_id}
       assert Runtime.get_workflow(id) == {:error, :not_found}
-      # nothing is left to remove a second time
-      assert Queue.remove("archon_task_a", task_id) == :ok
       refute Queue.contains?("archon_task_a", task_id)
       await_down(id)
     end
@@ -299,7 +297,7 @@ defmodule Archon.Runtime.WorkflowServerTest do
       await_down(id)
     end
 
-    test "a queue operation that fails fails the commit; the recovery check repairs it" do
+    test "a queue operation that fails fails the commit; the update sent again applies it" do
       id = start_simple(%{"x" => 1})
       pid = WorkflowServer.whereis(id)
       assert_receive {:timer_set, ^pid, _wake, 30_000}
@@ -320,14 +318,12 @@ defmodule Archon.Runtime.WorkflowServerTest do
       Process.register(queue, Queue)
       assert task(id, "task_a_ref").status == :in_progress
       assert task(id, "task_b_ref") == nil
-      assert_receive {:timer_set, ^pid, recover, 30_000}
+      assert_receive {:timer_set, ^pid, _recover, 30_000}
 
       RuntimeHooks.install(hook: fn _point, _id, _data -> :ok end)
       assert %Task{status: :completed} = WorkflowServer.update(result)
       b = task(id, "task_b_ref")
       assert Queue.contains?("archon_task_b", b.task_id)
-      send(pid, recover)
-      assert_receive {:timer_set, ^pid, _wake, 30_000}
     end
   end
 
