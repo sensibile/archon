@@ -34,8 +34,10 @@ defmodule Archon.Runtime.Outbox do
     * The business errors `{:error, :conflict}` and `{:error, {kind, message}}` with `kind` one of
       `:conflict`, `:not_found` and `:invalid_state` (ADR 0018, decision 9) - logged and acked.
     * A failure workflow that could not start for a business reason (`{:error, message}`) - the
-      runner stops and returns `{:feedback, id, {:failure_workflow_started, {:error, message}}}`;
-      the process runs that event and deletes the entry in its commit (`Commit.outbox_ack`).
+      runner stops and returns
+      `{:feedback, id, {:failure_workflow_started, {:error, message}}, failure_workflow_id}`; the
+      process runs that event and deletes the entry in its commit (`Commit.outbox_ack`), or only
+      deletes it when the output no longer names that failure workflow (a later run's).
     * Anything else (a call timeout, an exit, an exception, an isolated failure
       `{:error, {:env | :pre_effect | :commit | :post_effect, _}}`, a store failure) - the runner
       stops and returns `{:retry, reason}`; later entries wait for it.
@@ -61,7 +63,7 @@ defmodule Archon.Runtime.Outbox do
           :done
           | :owner_down
           | {:retry, term()}
-          | {:feedback, Store.outbox_id(), Event.t()}
+          | {:feedback, Store.outbox_id(), Event.t(), String.t()}
           | {:already_registered, pid()}
 
   @doc "Starts the runner of the calling workflow process's `workflow_id`."
@@ -99,7 +101,8 @@ defmodule Archon.Runtime.Outbox do
           drain(id, ref, rest)
 
         {:feedback, event} ->
-          {:feedback, entry, event}
+          {:start_failure_workflow, %{workflow_id: failure_id}} = effect
+          {:feedback, entry, event, failure_id}
 
         {:retry, reason} ->
           {:retry, reason}

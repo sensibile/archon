@@ -863,14 +863,14 @@ defmodule Archon.Runtime.WorkflowServer do
     delay_outbox(%{state | blocker: nil})
   end
 
-  defp outbox_result(state, {:feedback, entry, event}) do
-    {reply, state} = handle_event(event, %{state | ack: [entry], blocker: nil})
-    state = %{state | ack: []}
+  # An entry left from an earlier run (the workflow was retried or restarted and ended again
+  # with another failure workflow) must not write over the current output; it is only deleted.
+  defp outbox_result(state, {:feedback, entry, event, failure_id}) do
+    state = %{state | blocker: nil}
 
-    case reply do
-      :ok -> %{state | kick?: true}
-      {:error, _reason} -> delay_outbox(state)
-    end
+    if Map.get(state.workflow.output, "conductor.failure_workflow") == failure_id,
+      do: feed_back_failure(state, entry, event),
+      else: drop_entry(state, entry)
   end
 
   # The runner of an earlier process still runs: wait for it to end, and when the registry
@@ -880,6 +880,27 @@ defmodule Archon.Runtime.WorkflowServer do
 
   defp outbox_result(state, {:already_registered, pid}),
     do: %{state | runner: {:blocked, Process.monitor(pid), pid}, blocker: pid}
+
+  defp feed_back_failure(state, entry, event) do
+    {reply, state} = handle_event(event, %{state | ack: [entry]})
+    state = %{state | ack: []}
+
+    case reply do
+      :ok -> %{state | kick?: true}
+      {:error, _reason} -> delay_outbox(state)
+    end
+  end
+
+  defp drop_entry(state, entry) do
+    case guard(fn -> Runtime.store().ack_outbox(state.id, [entry]) end) do
+      {:ok, :ok} ->
+        %{state | kick?: true}
+
+      {:error, reason} ->
+        Logger.error("workflow #{state.id} could not ack its outbox: #{inspect(reason)}")
+        delay_outbox(state)
+    end
+  end
 
   defp delay_outbox(state) do
     delay =

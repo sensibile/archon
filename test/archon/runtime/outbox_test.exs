@@ -108,11 +108,8 @@ defmodule Archon.Runtime.OutboxTest do
 
   # Entries committed while the workflow has no process, then run by its activation.
   defp activate_with(id, entries) do
-    :ok =
-      DynamicSupervisor.terminate_child(
-        Archon.Runtime.WorkflowSupervisor,
-        WorkflowServer.whereis(id)
-      )
+    with pid when is_pid(pid) <- WorkflowServer.whereis(id),
+         do: :ok = DynamicSupervisor.terminate_child(Archon.Runtime.WorkflowSupervisor, pid)
 
     :ok = Runtime.store().commit(id, %Commit{outbox: entries})
     {:ok, pid} = WorkflowServer.activate(id)
@@ -344,6 +341,23 @@ defmodule Archon.Runtime.OutboxTest do
              end)
 
       assert eventually(fn -> pending(id) == [] end)
+    end
+
+    test "a refusal left from an earlier run is deleted without touching the output" do
+      id = start("outbox_with_failure")
+      assert %Task{status: :failed} = finish(id, :failed)
+      current = eventually(fn -> workflow(id).output["conductor.failure_workflow"] end)
+      assert eventually(fn -> pending(id) == [] end)
+
+      stale = %{
+        workflow_id: Runtime.new_id(),
+        name: "archon_outbox_no_such_wf",
+        input: %{}
+      }
+
+      activate_with(id, [{:start_failure_workflow, stale}])
+      assert eventually(fn -> pending(id) == [] end)
+      assert workflow(id).output["conductor.failure_workflow"] == current
     end
 
     test "a refusal that arrives after a retry leaves the new run's output alone" do
