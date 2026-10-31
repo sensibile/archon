@@ -139,9 +139,12 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   | 그 밖 | `Throwable` | 500 | false |
 
 - **`validationErrors`의 원소**는 upstream `ValidationError`(`path`, `message`, `invalidValue`)다. `validate/2`의 오류 목록은
-  `{경로, 문구}`뿐이므로, `ArchonWeb.Errors`는 오류 목록과 함께 검증한 입력(디코딩한 JSON)을 받아 경로로 값을 찾고 upstream
-  `ValidationExceptionMapper.getViolationInvalidValue`의 규칙대로 넣는다: 문자열·숫자·불리언은 문자열로(`""`도 그대로), 객체·배열·
-  `null`은 `null`. 예: `update-v2`에 `taskId: ""`면 `invalidValue: ""`. 경로 문법과 값의 문자열 표기(Java `toString`)는 픽스처로 맞춘다.
+  `{경로, 문구}`뿐이므로, `ArchonWeb.Errors`는 오류 목록과 함께 `validate/2`가 검사한 디코딩된 struct를 받아 경로로 값을 찾는다.
+  JSON 원문이 아니라 struct에서 찾는 것은 upstream이 Jackson 변환 뒤의 Java 필드 값을 쓰기 때문이다(예: `int` 필드의 JSON `null`은
+  0, 정수 필드의 `1.5`는 1). 표기는 upstream `ValidationExceptionMapper.getViolationInvalidValue`를 따른다: `java.lang` 값(문자열, 정수,
+  실수, 불리언)은 Java `toString` 표기의 문자열(`""`도 그대로, 정수 필드는 정수로), enum·struct·리스트·맵·`nil`은 `null`. 예:
+  `update-v2`에 `taskId: ""`면 `invalidValue: ""`. upstream `path`의 메서드·인자 접두사(예: `updateTask.taskResult.`)는 픽스처로 확인해
+  붙이고, 값은 접두사 전의 경로로 찾는다. 경계 사례(primitive 필드의 `null`, 정수 필드의 실수)는 5a 보강 픽스처에 하나 이상 넣는다.
 - 문구가 없는 오류(`:not_found`, `:conflict`)는 컨트롤러가 upstream 서비스·실행기의 문구를 붙인다. 예: 조회
   `"No such workflow found by id: <id>"`(픽스처), 정의 `"No such workflow found by name: %s, version: %d"`, 태스크 정의
   `"No such taskType found by name: %s"`, 등록 충돌 `"Workflow with %s already exists!"`(`key()`는 `name.version`). 문구는
@@ -187,14 +190,17 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 
 ### 6. 골든 픽스처 기반 계약 시험
 
-- **재생 시험.** `test/support/archon_web/contract_case.ex`의 재생 도우미가 픽스처 시나리오를 캡처 순서대로 `Phoenix.ConnTest`로
-  보낸다. 캡처한 ID(경로와 body의 UUID)는 Archon이 실제로 만든 ID로 바꿔 끼운다. 대응표는 캡처한 UUID가 응답에 처음 나올 때
-  그 자리의 실제 값으로 한 번만 정하고, 그 뒤 요청에는 대응값을 넣는다. 응답 비교는 기대 body의 캡처 UUID를 대응값으로 바꾼 뒤 한다.
-  그래서 이미 대응이 정해진 ID(예: 갱신한 태스크의 taskId, 시작한 workflowId를 담은 태스크의 `workflowInstanceId`)가 다른 UUID로
-  나오면 실패한다. 시각 필드는 `Archon.Contract.normalize/1`처럼 가리되 UUID는 가리지 않는다(재생 도우미가 시각만 가리는 비교를 둔다. 대응표에 없는
-  새 UUID만 처음 나온 자리에서 대응을 정한다). 이렇게 상태 코드,
-  `Content-Type`, body를 비교한다. JSON 스키마 검사(`priv/contract`)도
-  함께 한다. 이 시험은 두 백엔드(ADR 0021 결정 9의 `ARCHON_BACKEND`)에서 돈다.
+- **재생 시험.** `test/support/archon_web/contract_case.ex`의 재생 도우미가 픽스처 시나리오를 `Phoenix.ConnTest`로 보낸다.
+  - 순서: 픽스처 파일에는 순서가 없고, 캡처 스크립트는 저장하지 않는 대기(`wait_status`)와 되풀이(`poll_until`, batch poll 반복)를
+    한다. 그래서 재생 도우미가 시나리오 목록(픽스처 이름의 순서와 그 사이의 대기·되풀이)을 코드로 가진다. 목록 안의 순서
+    (batch poll 결과 등)는 Archon도 같은 순서를 내는지 함께 확인하는 것이다.
+  - ID 대응표: 캡처한 UUID가 응답에 처음 나오면 그 자리의 실제 값으로 대응을 정한다. 대응은 일대일이다. 새 캡처 UUID가 이미 다른
+    캡처 UUID의 대응값으로 정해질 실제 값에 닿으면 실패한다. 응답보다 요청에 먼저 나오는 캡처 UUID(예: `workflow_get_not_found`의
+    `00000000-...`)는 바꾸지 않고 그 자신으로 대응을 정한다. 요청에는 대응값을 넣는다.
+  - 비교: 기대 body의 캡처 UUID를 대응값으로 바꾸고, 시각 필드만 `Archon.Contract.normalize/1`처럼 가린 뒤(UUID는 가리지 않는다.
+    재생 도우미가 시각만 가리는 비교를 둔다) 상태 코드, `Content-Type`, body를 비교한다. 그래서 이미 대응이 정해진 ID가 다른 UUID로
+    나오거나 서로 다른 ID가 같은 값으로 나오면 실패한다.
+  - JSON 스키마 검사(`priv/contract`)도 함께 한다. 이 시험은 두 백엔드(ADR 0021 결정 9의 `ARCHON_BACKEND`)에서 돈다.
 - **픽스처 보강.** 지금 픽스처가 다루지 않는 MVP 응답은 upstream 서버에서 캡처해 더한다(손으로 만들지 않는다, ADR 0001).
   조각 5a가 `scripts/contract/capture_fixtures.sh`에 시나리오를 더하고 한 번에 다시 캡처한다. 5c·5d·5e는 스크립트·픽스처·
   `test/archon/contract_test.exs`를 고치지 않는다. 그 조각에서 빠진 픽스처를 찾으면 기록해 두고, 마지막 조각 5f가 한 번에 더해
@@ -209,6 +215,7 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   - `GET /api/tasks/poll/batch/{tasktype}` 빈 큐(200 `[]`), `update-v2`가 다음 태스크를 돌려주는 경우, 없는 태스크 갱신·조회, `update-v2`의 검증 실패
   - 없는 경로 404, 위 매개변수 경로와 겹치는 Later 경로 표본, MVP 경로의 다른 메서드(upstream 405, Archon은 404로 차이 기록),
     JSON이 아닌 body, 숫자 쿼리에 문자
+  - `invalidValue` 경계: 검증 실패 원소의 문자열 값, primitive 필드의 `null`, 정수 필드의 실수
 - 다시 캡처한 기존 픽스처가 `normalize/1` 기준으로 바뀌면 그 차이를 PR에서 검토한다(`priv/contract/README.md` 절차).
 - 시나리오 시험 밖의 단위 시험은 컨트롤러마다 오류 변환과 쿼리 기본값을 본다.
 
