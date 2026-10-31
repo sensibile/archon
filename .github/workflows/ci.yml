@@ -13,6 +13,19 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Postgres tests (ADR 0021, decision 9) fail instead of being skipped when the service is down.
+    services:
+      postgres:
+        image: postgres:18.4
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: ecto://postgres:postgres@localhost:5432/archon_test
+      ARCHON_REQUIRE_POSTGRES: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-elixir

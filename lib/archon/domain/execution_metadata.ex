@@ -36,6 +36,10 @@ defmodule Archon.Domain.ExecutionMetadata do
 
   defstruct Codec.defaults(@fields)
 
+  @doc false
+  @spec __fields__() :: [Codec.field()]
+  def __fields__, do: @fields
+
   @type t :: %__MODULE__{
           server_send_time: integer() | nil,
           client_receive_time: integer() | nil,

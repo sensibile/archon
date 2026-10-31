@@ -12,3 +12,6 @@ config :archon, Archon.Runtime,
   timer: {Archon.RuntimeHooks, :send_after, []},
   hook: {Archon.RuntimeHooks, :hook, []},
   idle_timeout: 200
+
+# Postgres tests share one database without the Ecto sandbox (ADR 0021, decision 9).
+config :archon, Archon.Repo, pool_size: 10, log: false

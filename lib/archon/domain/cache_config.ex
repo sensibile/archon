@@ -19,6 +19,10 @@ defmodule Archon.Domain.CacheConfig do
 
   defstruct Codec.defaults(@fields)
 
+  @doc false
+  @spec __fields__() :: [Codec.field()]
+  def __fields__, do: @fields
+
   @type t :: %__MODULE__{key: String.t() | nil, ttl_in_second: integer()}
 
   @doc "Decodes upstream JSON."

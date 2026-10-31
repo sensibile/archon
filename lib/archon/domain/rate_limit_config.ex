@@ -22,6 +22,10 @@ defmodule Archon.Domain.RateLimitConfig do
 
   defstruct Codec.defaults(@fields)
 
+  @doc false
+  @spec __fields__() :: [Codec.field()]
+  def __fields__, do: @fields
+
   @type t :: %__MODULE__{
           rate_limit_key: String.t() | nil,
           concurrent_exec_limit: integer(),

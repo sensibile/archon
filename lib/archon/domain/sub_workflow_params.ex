@@ -38,6 +38,10 @@ defmodule Archon.Domain.SubWorkflowParams do
 
   defstruct Codec.defaults(@fields)
 
+  @doc false
+  @spec __fields__() :: [Codec.field()]
+  def __fields__, do: @fields
+
   @type t :: %__MODULE__{
           name: String.t() | nil,
           version: integer() | nil,
@@ -70,11 +74,12 @@ defmodule Archon.Domain.SubWorkflowParams do
   def version(%__MODULE__{version: version}), do: version
 
   @doc false
-  @spec decode_custom(:workflow_definition, Codec.json(), Codec.path()) ::
+  @spec decode_custom(:workflow_definition, Codec.json(), Codec.path(), Codec.opts()) ::
           Codec.result(WorkflowDef.t() | String.t())
-  def decode_custom(:workflow_definition, value, path) when is_binary(value) do
-    # SubWorkflowParams#setWorkflowDefinition
-    if String.starts_with?(value, "${") and String.ends_with?(value, "}") do
+  def decode_custom(:workflow_definition, value, path, codec_opts) when is_binary(value) do
+    # SubWorkflowParams#setWorkflowDefinition; the storage encoding keeps what was stored.
+    if Keyword.get(codec_opts, :internal, false) or
+         (String.starts_with?(value, "${") and String.ends_with?(value, "}")) do
       {:ok, value}
     else
       {:error,
@@ -84,10 +89,10 @@ defmodule Archon.Domain.SubWorkflowParams do
     end
   end
 
-  def decode_custom(:workflow_definition, value, path) when is_map(value),
-    do: WorkflowDef.from_json(value, path)
+  def decode_custom(:workflow_definition, value, path, codec_opts) when is_map(value),
+    do: Codec.cast({:struct, WorkflowDef}, value, path, codec_opts)
 
-  def decode_custom(:workflow_definition, _value, path) do
+  def decode_custom(:workflow_definition, _value, path, _codec_opts) do
     {:error,
      [
        {Codec.format_path(path),
@@ -96,9 +101,11 @@ defmodule Archon.Domain.SubWorkflowParams do
   end
 
   @doc false
-  @spec encode_custom(:workflow_definition, WorkflowDef.t() | String.t()) :: Codec.json()
-  def encode_custom(:workflow_definition, %WorkflowDef{} = definition),
-    do: WorkflowDef.to_json(definition)
+  @spec encode_custom(:workflow_definition, WorkflowDef.t() | String.t(), Codec.opts()) ::
+          Codec.json()
+  def encode_custom(:workflow_definition, %WorkflowDef{} = definition, codec_opts),
+    do: Codec.encode_value({:struct, WorkflowDef}, definition, codec_opts)
 
-  def encode_custom(:workflow_definition, expression) when is_binary(expression), do: expression
+  def encode_custom(:workflow_definition, expression, _codec_opts) when is_binary(expression),
+    do: expression
 end
