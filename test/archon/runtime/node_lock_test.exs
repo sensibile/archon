@@ -57,13 +57,16 @@ defmodule Archon.Runtime.Postgres.NodeLockTest do
   defp options(instance, opts),
     do: Keyword.merge([name: nil, instance: instance, lock_key: @key, check_interval: 50], opts)
 
-  # The server process holding the advisory lock `key`, or nil.
+  # The server process holding the advisory lock `key` in this database (advisory locks are per
+  # database; other test databases on the server hold the same keys), or nil.
   defp holder(key) do
     %{rows: rows} =
       Repo.query!(
         """
         SELECT pid FROM pg_locks
-        WHERE locktype = 'advisory' AND granted AND objsubid = 1
+        WHERE locktype = 'advisory'
+          AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+          AND granted AND objsubid = 1
           AND classid::bigint = ($1::bigint >> 32) AND objid::bigint = ($1::bigint & 4294967295)
         """,
         [key]
@@ -81,7 +84,9 @@ defmodule Archon.Runtime.Postgres.NodeLockTest do
       Repo.query!(
         """
         SELECT count(*) FROM pg_locks
-        WHERE locktype = 'advisory' AND NOT granted AND mode = $2 AND objsubid = 1
+        WHERE locktype = 'advisory'
+          AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+          AND NOT granted AND mode = $2 AND objsubid = 1
           AND classid::bigint = ($1::bigint >> 32) AND objid::bigint = ($1::bigint & 4294967295)
         """,
         [Postgres.fence_key(), mode]
