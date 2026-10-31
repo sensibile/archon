@@ -322,6 +322,9 @@ defmodule Archon.Runtime.WorkflowServer do
     settle(state)
   end
 
+  # The outbox runner starts once the caller has its answer (ADR 0021, decision 4).
+  def handle_continue(:outbox, state), do: settle(state)
+
   def handle_continue(:wake, state) do
     {_reply, state} = handle_event(:wake, state)
     settle(state)
@@ -790,6 +793,9 @@ defmodule Archon.Runtime.WorkflowServer do
   # A process whose workflow ended stops once its mailbox is empty (a zero timeout fires only
   # then), so a message already waiting, such as a child asking it to revive, is still handled.
   # It does not stop while its outbox runner works (ADR 0021, decision 4).
+  defp reply_and_settle(reply, %__MODULE__{kick?: true, runner: nil} = state),
+    do: {:reply, reply, state, {:continue, :outbox}}
+
   defp reply_and_settle(reply, state) do
     state = kick(state)
 
@@ -807,7 +813,11 @@ defmodule Archon.Runtime.WorkflowServer do
   end
 
   defp idle(state), do: {:noreply, kick(state), idle_timeout()}
-  defp idle(state, reply), do: {:reply, reply, kick(state), idle_timeout()}
+
+  defp idle(%__MODULE__{kick?: true, runner: nil} = state, reply),
+    do: {:reply, reply, state, {:continue, :outbox}}
+
+  defp idle(state, reply), do: {:reply, reply, state, idle_timeout()}
 
   defp stop(state, reason), do: {:stop, :normal, {:error, reason}, state}
 
@@ -905,7 +915,7 @@ defmodule Archon.Runtime.WorkflowServer do
   defp delay_outbox(state) do
     delay =
       case state.outbox_delay do
-        nil -> Runtime.setting(:outbox_retry_ms, 1_000)
+        nil -> min(Runtime.setting(:outbox_retry_ms, 1_000), offset_timeout())
         delay -> min(delay * 2, offset_timeout())
       end
 
