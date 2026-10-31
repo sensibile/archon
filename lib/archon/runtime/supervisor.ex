@@ -11,10 +11,11 @@ defmodule Archon.Runtime.Supervisor do
       ├── Archon.Runtime.Registry            (workflow ID → process, {:outbox, ID} → runner)
       ├── Archon.Runtime.TaskSupervisor      (outbox runners and ancestor cancels, ADR 0021)
       ├── Archon.Runtime.WorkflowSupervisor  (a DynamicSupervisor of Archon.Runtime.WorkflowServer)
-      └── Archon.Runtime.Recovery            (activates the running workflows once)
+      ├── Archon.Runtime.Recovery            (activates the workflows to run, once)
+      └── Archon.Runtime.Waker               (activates the due workflows periodically)
 
   When the store or the queue restarts, the registry and every workflow process restart after
-  it and `Archon.Runtime.Recovery` activates the running workflows again. When the task
+  it and `Archon.Runtime.Recovery` activates the workflows to run again (ADR 0021, decision 6). When the task
   supervisor restarts, the workflow processes restart after it and run the outbox entries left
   when they are activated again (ADR 0021, decision 8).
 
@@ -58,7 +59,8 @@ defmodule Archon.Runtime.Supervisor do
       {Registry, keys: :unique, name: Archon.Runtime.Registry},
       {Task.Supervisor, name: Archon.Runtime.TaskSupervisor},
       {DynamicSupervisor, name: Archon.Runtime.WorkflowSupervisor, strategy: :one_for_one},
-      Archon.Runtime.Recovery
+      Archon.Runtime.Recovery,
+      Archon.Runtime.Waker
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)

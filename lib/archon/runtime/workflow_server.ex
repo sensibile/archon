@@ -67,6 +67,11 @@ defmodule Archon.Runtime.WorkflowServer do
       terminal, its outbox runner is done and no other message is waiting. Activated with a
       terminal workflow, it waits `idle_timeout` for the request that activated it. A running
       workflow's process hibernates after `hibernate_after`.
+    * With `evict_after` set (ADR 0021, decision 6; the Postgres store's default, 60 s), a
+      running workflow's process that got no message for `hibernate_after` ends normally
+      instead of hibernating when its `:wake` timer, saved with a commit, is more than
+      `evict_after` away and its outbox is empty. The next request activates it again and
+      `Archon.Runtime.Waker` does before the timer is due.
 
   ## Outbox
 
@@ -85,6 +90,12 @@ defmodule Archon.Runtime.WorkflowServer do
   (ADR 0018, decision 6), through the configured `timer` function, and cancelled by
   `:cancel_wake` when the workflow is paused (decision 9). Sending `:wake` or
   `:recover` to the process runs that event at once.
+
+  The step's timer effects also go into the commit's `wake` (ADR 0021, decision 6):
+  `{:wake_at, ms}` is `{:at, ms}`, `{:wake_before, ms}` is `{:before, ms}` and `:cancel_wake` is
+  `:none`, so the store knows when to activate a workflow without a process. The immediate
+  `:wake` after the decide iteration limit is not saved, and the `:recover` deadline of an
+  isolated exception is saved by a commit of only `{:before, deadline}`, whose failure is logged.
 
   ## Exception isolation
 
@@ -133,7 +144,14 @@ defmodule Archon.Runtime.WorkflowServer do
           id: String.t(),
           workflow: Workflow.t() | nil,
           timer:
-            %{token: reference(), ref: term(), at: integer(), message: :wake | :recover} | nil,
+            %{
+              token: reference(),
+              ref: term(),
+              at: integer(),
+              message: :wake | :recover,
+              saved?: boolean()
+            }
+            | nil,
           journal: %{committed?: boolean(), pushed: [{String.t(), String.t()}]} | nil,
           runner:
             {:running, Elixir.Task.t()}
@@ -152,7 +170,7 @@ defmodule Archon.Runtime.WorkflowServer do
   def start_link({id, mode}) when is_binary(id) and mode in [:new, :existing] do
     GenServer.start_link(__MODULE__, {id, mode},
       name: {:via, Registry, {@registry, id}},
-      hibernate_after: Runtime.setting(:hibernate_after, 15_000)
+      hibernate_after: hibernate_after()
     )
   end
 
@@ -421,9 +439,11 @@ defmodule Archon.Runtime.WorkflowServer do
     do: settle(%{state | runner: nil, kick?: true})
 
   def handle_info(:timeout, state) do
-    if ending?(state),
-      do: {:stop, :normal, state},
-      else: {:noreply, state}
+    cond do
+      ending?(state) or evict?(state) -> {:stop, :normal, state}
+      evict_after() -> {:noreply, state, :hibernate}
+      true -> {:noreply, state}
+    end
   end
 
   def handle_info(message, state) do
@@ -475,7 +495,12 @@ defmodule Archon.Runtime.WorkflowServer do
       {:ok, {reply, stored, pre, commit, post}} ->
         {commit, post} = take_queue(commit, post, env.now)
         {commit, post} = take_outbox(commit, post)
-        commit = %{commit | outbox_ack: commit.outbox_ack ++ state.ack}
+
+        commit = %{
+          commit
+          | outbox_ack: commit.outbox_ack ++ state.ack,
+            wake: take_wake(commit, post)
+        }
 
         case commit_step(state, pre, commit, stored) do
           {:ok, state} ->
@@ -544,6 +569,18 @@ defmodule Archon.Runtime.WorkflowServer do
 
     {%{commit | outbox: commit.outbox ++ entries}, post}
   end
+
+  # ADR 0021, decision 6: the timer effects stay in post for the process timer and are saved as
+  # the workflow's re-evaluation time, combined in their order as the store would apply them.
+  defp take_wake(%Commit{wake: wake}, post), do: Enum.reduce(post, wake, &wake/2)
+
+  defp wake({:wake_at, at}, _wake), do: {:at, at}
+  defp wake({:wake_before, at}, {:at, current}), do: {:at, min(current, at)}
+  defp wake({:wake_before, at}, {:before, current}), do: {:before, min(current, at)}
+  defp wake({:wake_before, at}, :none), do: {:at, at}
+  defp wake({:wake_before, at}, :keep), do: {:before, at}
+  defp wake(:cancel_wake, _wake), do: :none
+  defp wake(_effect, wake), do: wake
 
   defp outbox_effect?(effect) do
     is_tuple(effect) and
@@ -649,7 +686,7 @@ defmodule Archon.Runtime.WorkflowServer do
         "are left to the recovery check"
     )
 
-    {:ok, set_timer(state, :wake, Runtime.now()), budget}
+    {:ok, set_timer(state, :wake, Runtime.now(), false), budget}
   end
 
   defp feed_back(state, [event | events], budget) do
@@ -660,12 +697,12 @@ defmodule Archon.Runtime.WorkflowServer do
   end
 
   defp post_effect(state, {:wake_at, at} = effect),
-    do: timer_effect(state, effect, &set_timer(&1, :wake, at))
+    do: timer_effect(state, effect, &set_timer(&1, :wake, at, true))
 
   defp post_effect(state, {:wake_before, at} = effect) do
     timer_effect(state, effect, fn
       %__MODULE__{timer: %{at: current}} = state when current <= at -> state
-      state -> set_timer(state, :wake, at)
+      state -> set_timer(state, :wake, at, true)
     end)
   end
 
@@ -762,12 +799,36 @@ defmodule Archon.Runtime.WorkflowServer do
         _unread -> state
       end
 
-    set_timer(state, :recover, Runtime.now() + offset_timeout())
+    at = Runtime.now() + offset_timeout()
+    save_recover(state, at)
+    set_timer(state, :recover, at, false)
   end
+
+  # ADR 0021, decision 6: best effort, so a restart before the deadline still activates the
+  # workflow by then; when the store is down, by its stored time.
+  defp save_recover(%__MODULE__{workflow: %Workflow{status: :running}} = state, at) do
+    commit = %Commit{wake: {:before, at}}
+
+    case guard(fn ->
+           hook(state, :commit, commit)
+           Runtime.store().commit(state.id, commit)
+         end) do
+      {:ok, :ok} ->
+        :ok
+
+      failed ->
+        Logger.warning(
+          "workflow #{state.id} could not save its recovery time: #{inspect(failed)}"
+        )
+    end
+  end
+
+  defp save_recover(_state, _at), do: :ok
 
   ## Timer
 
-  defp set_timer(state, message, at) do
+  # `saved?`: the store's re-evaluation time is not later than `at` (a timer effect of a commit).
+  defp set_timer(state, message, at, saved?) do
     cancel_timer(state.timer)
     token = make_ref()
     delay = max(at - Runtime.now(), 0)
@@ -779,7 +840,7 @@ defmodule Archon.Runtime.WorkflowServer do
         delay
       ])
 
-    %{state | timer: %{token: token, ref: ref, at: at, message: message}}
+    %{state | timer: %{token: token, ref: ref, at: at, message: message, saved?: saved?}}
   end
 
   defp cancel_timer(%{ref: ref}) when is_reference(ref), do: Process.cancel_timer(ref)
@@ -801,7 +862,7 @@ defmodule Archon.Runtime.WorkflowServer do
 
     if ending?(state),
       do: {:reply, reply, state, 0},
-      else: {:reply, reply, state}
+      else: {:reply, reply, state, rest()}
   end
 
   defp settle(state) do
@@ -824,11 +885,41 @@ defmodule Archon.Runtime.WorkflowServer do
   defp noreply(state) do
     if ending?(state),
       do: {:noreply, state, idle_timeout()},
-      else: {:noreply, state}
+      else: {:noreply, state, rest()}
   end
 
   defp ending?(state),
     do: (state.workflow == nil or terminal?(state.workflow)) and state.runner == nil
+
+  # With evict_after, an idle process checks after hibernate_after whether it can end instead of
+  # hibernating (ADR 0021, decision 6).
+  defp rest, do: if(evict_after(), do: hibernate_after(), else: :infinity)
+
+  # A running workflow whose next evaluation, saved in the store, is far enough for the waker to
+  # activate it again, and whose outbox is empty (ADR 0021, decision 4).
+  defp evict?(%__MODULE__{
+         workflow: %Workflow{status: :running},
+         runner: nil,
+         kick?: false,
+         ack: [],
+         timer: %{message: :wake, saved?: true, at: at}
+       }) do
+    case evict_after() do
+      nil -> false
+      after_ms -> at - Runtime.now() > after_ms
+    end
+  end
+
+  defp evict?(_state), do: false
+
+  defp evict_after do
+    case Runtime.setting(:evict_after, :backend) do
+      :backend -> if Runtime.store() == Archon.Runtime.Store.Postgres, do: 60_000
+      after_ms -> after_ms
+    end
+  end
+
+  defp hibernate_after, do: Runtime.setting(:hibernate_after, 15_000)
 
   ## Outbox
 
