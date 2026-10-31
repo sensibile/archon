@@ -11,7 +11,9 @@ defmodule Archon.Repo.Migrations.CreateRuntimeTables do
 
   def up do
     create table(:workflow, primary_key: false) do
-      add :workflow_id, :text, primary_key: true
+      # Byte order ("B" < "a"): the keyset pages of outbox_workflow_ids and due_workflow_ids
+      # order by workflow ID and use the indexes below (ADR 0021, decisions 2 and 3).
+      add :workflow_id, :text, primary_key: true, collation: "C"
       add :status, :text, null: false
       add :parent_workflow_id, :text
       add :wake_at, :bigint
@@ -28,7 +30,8 @@ defmodule Archon.Repo.Migrations.CreateRuntimeTables do
 
       add :workflow_id,
           references(:workflow, column: :workflow_id, type: :text, on_delete: :delete_all),
-          null: false
+          null: false,
+          collation: "C"
 
       add :seq, :integer, null: false
       add :status, :text, null: false
@@ -44,7 +47,8 @@ defmodule Archon.Repo.Migrations.CreateRuntimeTables do
 
       add :workflow_id,
           references(:workflow, column: :workflow_id, type: :text, on_delete: :delete_all),
-          null: false
+          null: false,
+          collation: "C"
 
       add :effect, :text, null: false
       add :inserted_at, :bigint, null: false

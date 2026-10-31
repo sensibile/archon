@@ -1,7 +1,7 @@
 # ADR 0021: Phase 4 PostgreSQL 영속성과 큐 설계
 
 - 상태: 제안
-- 날짜: 2026-10-30 (2026-10-31 조각 4a 갱신: 결정 1의 개발용 마이그레이션 alias, 결정 2의 저장 인코딩 세부와 색인 열의 NUL)
+- 날짜: 2026-10-30 (2026-10-31 조각 4a 갱신: 결정 1의 개발용 마이그레이션 alias, 결정 2의 저장 인코딩 세부, 색인 열의 NUL, 워크플로우 ID 열의 `COLLATE "C"`)
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(DB 라이브러리, 큐·Effect 원자성, 여러 노드, 지연 활성화)는 2026-10-30 BOSS가 이 문서의 추천안으로 정했다.
 
@@ -95,6 +95,9 @@ behaviour moduledoc: 계약 시험이 시계를 주입하므로 DB `now()`를 �
   된다. 키 순서·숫자 표기도 바꾼다. 저장 형식은 질의 대상이 아니므로 바이트 그대로 두는 `text`를 쓴다. `json_data`의
   NUL은 JSON 이스케이프(`\u0000`)로 들어가지만, 색인 열(`workflow_id`, `task_def_name`, 큐 이름 등)은 그대로의 `text`라
   NUL을 받지 않는다. upstream 표의 같은 열도 같다.
+- **워크플로우 ID 열은 `COLLATE "C"`(조각 4a·4b).** `workflow.workflow_id`와 이를 가리키는 `task.workflow_id`·
+  `outbox.workflow_id`는 바이트 순으로 비교한다. `outbox_workflow_ids`·`due_workflow_ids`의 키셋 순서를 계약 시험이 바이트
+  순으로 고정하고, 질의마다 `COLLATE "C"`를 붙이면 색인을 쓰지 못하기 때문이다.
 - **`:erlang.term_to_binary`가 아닌 이유.** struct 모양이 바뀐 뒤 예전 행을 읽으면 빠진 필드가 조용히 생기고, DB에서
   내용을 볼 수 없다.
 - upstream의 `workflow_to_task`, `workflow_pending`, `task_in_progress`, `task_scheduled`, `workflow_def_to_workflow`,

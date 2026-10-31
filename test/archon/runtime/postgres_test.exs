@@ -59,6 +59,17 @@ defmodule Archon.Runtime.PostgresTest do
       end
     end
 
+    test "workflow ID columns compare in byte order" do
+      %{rows: rows} =
+        Repo.query!(
+          "SELECT table_name, collation_name FROM information_schema.columns " <>
+            "WHERE table_schema = $1 AND column_name = 'workflow_id' ORDER BY 1",
+          [Postgres.contract_prefix()]
+        )
+
+      assert rows == [["outbox", "C"], ["task", "C"], ["workflow", "C"]]
+    end
+
     test "both test schemas are migrated" do
       assert "node_lease" in tables(Postgres.runtime_prefix())
       assert "node_lease" in tables(Postgres.contract_prefix())
