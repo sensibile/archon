@@ -1,10 +1,10 @@
-# ADR 0022: Phase 5 REST 설계 (MVP 엔드포인트)
+# ADR 0023: Phase 5 REST 설계 (MVP 엔드포인트)
 
 - 상태: 제안
 - 날짜: 2026-11-01
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(웹 계층, worker 입력 신뢰와 인증, 스키마 검증, MVP 범위)는 2026-11-01 BOSS가 이 문서와
-  [ADR 0023](0023-worker-input-trust-and-auth.md)의 추천안으로 정했다.
+  [ADR 0024](0024-worker-input-trust-and-auth.md)의 추천안으로 정했다.
 
 ## 맥락
 
@@ -50,7 +50,7 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   `null`을 구분하는 코덱 규칙(ADR 0002)을 지키고, 배열 body(`POST /api/metadata/taskdefs`)를 `_json` 같은 감싼 키 없이 받기
   위해서다.
 - `Archon.Application`은 런타임 다음에 `ArchonWeb.Endpoint`를 띄운다. 기본 주소는 `127.0.0.1:8080`(upstream 기본 포트)이고,
-  다른 주소는 설정으로만 연다(ADR 0023 결정 4). 시험 설정은 `server: false`이고 `Phoenix.ConnTest`로 부른다.
+  다른 주소는 설정으로만 연다(ADR 0024 결정 4). 시험 설정은 `server: false`이고 `Phoenix.ConnTest`로 부른다.
 - 대안은 아래 "대안" 절.
 
 ### 2. 라우팅과 MVP 경로
@@ -103,7 +103,7 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   구현과 계약 시험).
 - 컨트롤러는 런타임 API와 `Archon.Metadata`만 부른다. 저장소·큐·`WorkflowServer`를 직접 부르지 않는다. ADR 0018 결정 7은
   REST가 부를 API를 `Archon.Runtime`·`Archon.Runtime.Tasks`로 정했으나 정의 등록 API가 없었으므로, 이 결정이 그 경계에
-  `Archon.Metadata`를 더한다(아래 결과 절의 "일부 0022가 대체"). 백엔드는 런타임
+  `Archon.Metadata`를 더한다(아래 결과 절의 "일부 0023이 대체"). 백엔드는 런타임
   설정이 정하고 REST는 모른다(ADR 0021 결과 절).
 - MVP 범위는 ADR 0001의 19개 그대로다. 생명주기 REST(pause, resume, retry, restart)는 런타임 API(`Archon.Runtime.Lifecycle`)가
   있지만 Later로 두고 Phase 5 뒤에 픽스처를 캡처해 연다(BOSS 결정).
@@ -208,19 +208,19 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 
 | 조각 | 범위 | 시험·정답 기준 | 선행 | 건드리는 파일·모듈 |
 |---|---|---|---|---|
-| 5a | 결정 1·4·6의 기반: 의존성, Endpoint·Router(MVP 19개 경로 전부), `Health` 컨트롤러, `ArchonWeb.Errors`, `ErrorResponse` 모델, MVP가 아닌 요청의 404와 Later 리터럴 경로, 설정(주소·포트, ADR 0023 결정 4), 재생 도우미, 픽스처 보강 캡처. 나머지 세 컨트롤러는 모든 액션이 없는 경로와 같은 404로 답하는 골격만 둔다 | `/health` 픽스처, 오류 변환 단위 시험, 없는 경로 픽스처, 기존 픽스처 재캡처 비교 | 없음 | `mix.exs`, `mix.lock`, `config/{config,test,runtime}.exs`, `lib/archon/application.ex`, `test/test_helper.exs`·`test/support/postgres_case.ex`(시험에서 런타임 뒤에 Endpoint 띄우기), `lib/archon_web.ex`, `lib/archon_web/{endpoint,router,errors}.ex`, `lib/archon_web/controllers/{health,metadata,workflow,task}_controller.ex`(골격), `lib/archon/domain/error_response.ex`, `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`(추가), `test/fixtures/contract/README.md`, `test/archon/contract_test.exs`(새 픽스처 등록), `test/support/archon_web/contract_case.ex`, `test/archon_web/{health,errors,router}_test.exs` |
-| 5b | [ADR 0023](0023-worker-input-trust-and-auth.md) 결정 1~3: SUB_WORKFLOW `subWorkflowId` 고정, 자식 소유권 확인, 조상 우회 코드 제거, ADR 0023 `승인`과 ADR 0018 목록 상태 | ADR 0023 결정 5의 시험, 기존 런타임 시험 전부(두 백엔드) | 없음 | ADR 0023 결정 5의 파일, `docs/adr/{0023,README}.md` |
+| 5a | 결정 1·4·6의 기반: 의존성, Endpoint·Router(MVP 19개 경로 전부), `Health` 컨트롤러, `ArchonWeb.Errors`, `ErrorResponse` 모델, MVP가 아닌 요청의 404와 Later 리터럴 경로, 설정(주소·포트, ADR 0024 결정 4), 재생 도우미, 픽스처 보강 캡처. 나머지 세 컨트롤러는 모든 액션이 없는 경로와 같은 404로 답하는 골격만 둔다 | `/health` 픽스처, 오류 변환 단위 시험, 없는 경로 픽스처, 기존 픽스처 재캡처 비교 | 없음 | `mix.exs`, `mix.lock`, `config/{config,test,runtime}.exs`, `lib/archon/application.ex`, `test/test_helper.exs`·`test/support/postgres_case.ex`(시험에서 런타임 뒤에 Endpoint 띄우기), `lib/archon_web.ex`, `lib/archon_web/{endpoint,router,errors}.ex`, `lib/archon_web/controllers/{health,metadata,workflow,task}_controller.ex`(골격), `lib/archon/domain/error_response.ex`, `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`(추가), `test/fixtures/contract/README.md`, `test/archon/contract_test.exs`(새 픽스처 등록), `test/support/archon_web/contract_case.ex`, `test/archon_web/{health,errors,router}_test.exs` |
+| 5b | [ADR 0024](0024-worker-input-trust-and-auth.md) 결정 1~3: SUB_WORKFLOW `subWorkflowId` 고정, 자식 소유권 확인, 조상 우회 코드 제거, ADR 0024 `승인`과 ADR 0018 목록 상태 | ADR 0024 결정 5의 시험, 기존 런타임 시험 전부(두 백엔드) | 없음 | ADR 0024 결정 5의 파일, `docs/adr/{0024,README}.md` |
 | 5c | 결정 2·5의 정의: `Archon.Metadata` 서비스, `get_all_task_defs/0` 콜백(메모리·Postgres·계약), `BulkResponse` 모델, 스키마 판정 함수와 시작 경로의 거절, `Metadata` 컨트롤러 일곱 액션 | `metadata_*` 픽스처 재생, 스키마 거절 시험(박힌 정의, 시작의 인라인 정의, 식으로 정한 하위 워크플로우 정의), 저장소 계약 시험 | 5a | `lib/archon/metadata.ex`, `lib/archon/domain/{workflow_def,task_def}.ex`(판정 함수), `lib/archon/runtime.ex`(`new_workflow`의 거절), `test/archon/runtime/runtime_test.exs`, `lib/archon/runtime/metadata.ex`, `lib/archon/runtime/metadata/{memory,postgres}.ex`, `test/support/runtime/metadata_contract.ex`, `test/archon/runtime/{metadata,metadata_postgres}_test.exs`, `lib/archon/domain/bulk_response.ex`, `lib/archon_web/controllers/metadata_controller.ex`, `test/archon/metadata_test.exs`, `test/archon_web/metadata_controller_test.exs` |
-| 5d | 결정 2·3의 워크플로우: `StartWorkflowRequest`·`WorkflowStatus` 모델, 시작 두 가지(시작 맵은 요청 필드로만 만들고 부모 필드를 넣지 않음, ADR 0023 결정 4), 조회, 상태 요약, 종료 | `workflow_*` 픽스처 재생, 시작 맵에 부모 필드가 없는 시험 | 5a, 5c | `lib/archon/domain/{start_workflow_request,workflow_status}.ex`, `lib/archon_web/controllers/workflow_controller.ex`, `test/archon/domain/{start_workflow_request,workflow_status}_test.exs`, `test/archon_web/workflow_controller_test.exs` |
+| 5d | 결정 2·3의 워크플로우: `StartWorkflowRequest`·`WorkflowStatus` 모델, 시작 두 가지(시작 맵은 요청 필드로만 만들고 부모 필드를 넣지 않음, ADR 0024 결정 4), 조회, 상태 요약, 종료 | `workflow_*` 픽스처 재생, 시작 맵에 부모 필드가 없는 시험 | 5a, 5c | `lib/archon/domain/{start_workflow_request,workflow_status}.ex`, `lib/archon_web/controllers/workflow_controller.ex`, `test/archon/domain/{start_workflow_request,workflow_status}_test.exs`, `test/archon_web/workflow_controller_test.exs` |
 | 5e | 결정 2의 태스크: poll, batch poll, 갱신, `update-v2`, 조회 | `task_*` 픽스처 재생, 검증 실패 400 | 5a, **5b** | `lib/archon_web/controllers/task_controller.ex`, `test/archon_web/task_controller_test.exs` |
-| 5f | 통합: 전체 시나리오 재생(픽스처 전부, 두 백엔드), Later·Unsupported 경로 404 표본, 실제 HTTP로 띄운 엔드포인트의 연기 시험, README 호환성 절(ADR 0001 결과 절의 Unsupported 목록 링크, 인증 없음과 주소 기본값), ADR 0022 `승인`과 ADR 0018 목록 상태 | `mix test` 전부(두 백엔드), CI | 5c, 5d, 5e | `test/archon_web/contract_replay_test.exs`, `test/archon_web/server_test.exs`, 빠진 픽스처가 있으면 `scripts/contract/capture_fixtures.sh`·`test/fixtures/contract/*`·`test/archon/contract_test.exs`, `README.md`, `docs/adr/{0022,0023,README}.md`, `docs/adr/0003-porting-strategy.md`(비고) |
+| 5f | 통합: 전체 시나리오 재생(픽스처 전부, 두 백엔드), Later·Unsupported 경로 404 표본, 실제 HTTP로 띄운 엔드포인트의 연기 시험, README 호환성 절(ADR 0001 결과 절의 Unsupported 목록 링크, 인증 없음과 주소 기본값), ADR 0023 `승인`과 ADR 0018 목록 상태 | `mix test` 전부(두 백엔드), CI | 5c, 5d, 5e | `test/archon_web/contract_replay_test.exs`, `test/archon_web/server_test.exs`, 빠진 픽스처가 있으면 `scripts/contract/capture_fixtures.sh`·`test/fixtures/contract/*`·`test/archon/contract_test.exs`, `README.md`, `docs/adr/{0023,README}.md`, `docs/adr/0003-porting-strategy.md`(비고) |
 
 - **병렬로 진행할 수 있는 묶음.**
   - 1차: 5a와 5b. 5a는 웹·설정·픽스처, 5b는 런타임 파일만 고친다.
   - 2차: 5c(5a 뒤)와 5e(5a·5b 뒤). 서로 파일이 겹치지 않는다.
   - 3차: 5d(5c 뒤). 시작의 인라인 정의 거절이 5c의 `runtime.ex` 변경에 기대기 때문이다.
   - 마지막: 5f.
-- **태스크 갱신 REST는 5b 뒤에만 연다.** ADR 0021 결과 절의 출시 조건이다. ADR 0023은 이 ADR과 함께 머지되어 조각보다
+- **태스크 갱신 REST는 5b 뒤에만 연다.** ADR 0021 결과 절의 출시 조건이다. ADR 0024는 이 ADR과 함께 머지되어 조각보다
   먼저 있고, 5e는 5b의 구현이 머지된 뒤 시작한다.
 - 라우터와 컨트롤러 골격은 5a가 모두 만든다. 그래서 5c·5d·5e는 `router.ex`를 고치지 않고 자기 컨트롤러 파일 하나를 채운다.
   픽스처는 5a와 5f만 더한다(결정 6).
@@ -234,8 +234,8 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   시작·태스크 갱신할 때 400을 준다.
 - **MVP 경로의 다른 메서드도 405가 아니라 404다**(결정 2).
 - **Later 경로는 없는 경로처럼 404다**(ADR 0001). upstream은 그 경로를 처리한다.
-- **기본 주소가 `127.0.0.1`이다**(ADR 0023 결정 4). upstream Spring Boot는 모든 주소에서 듣는다.
-- **SUB_WORKFLOW 태스크 갱신의 `subWorkflowId`를 반영하지 않는다**(ADR 0023 결정 1).
+- **기본 주소가 `127.0.0.1`이다**(ADR 0024 결정 4). upstream Spring Boot는 모든 주소에서 듣는다.
+- **SUB_WORKFLOW 태스크 갱신의 `subWorkflowId`를 반영하지 않는다**(ADR 0024 결정 1).
 - JSON 객체 키 순서 등 코덱 차이는 ADR 0002의 목록 그대로다.
 
 ## 대안
@@ -260,8 +260,8 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 - 이 ADR은 결정만 담는다. 구현은 결정 7의 조각 5a~5f로 하며, 마지막 조각이 머지되면 `승인`으로 바꾼다.
 - 정의 등록 REST를 열기 전에 스키마 검증을 정하라는 ADR 0018 결과 절의 조건은 결정 5로 채운다. 그 절은 검증기 채택을 요구했으나
   이 ADR은 거절로 대신한다. 또 ADR 0018 결정 7의 REST 호출 경계에 `Archon.Metadata`를 더한다(결정 2). 그래서 `승인`으로 바꿀 때
-  ADR 0018의 목록 상태에 "일부 0022가 대체"(결과 절의 스키마 검증, 결정 7의 호출 경계)를 적는다.
-- ADR 0021 결과 절의 Phase 5 출시 조건(L7·L8)은 [ADR 0023](0023-worker-input-trust-and-auth.md)과 조각 5b가 채운다. 5e는 5b 뒤다.
-- 아직 범위 밖: 생명주기·검색·이벤트 등 Later 경로, 인증(ADR 0023 결정 4), 스키마 검증기와 `/api/schema`, 여러 노드(ADR 0021
+  ADR 0018의 목록 상태에 "일부 0023이 대체"(결과 절의 스키마 검증, 결정 7의 호출 경계)를 적는다.
+- ADR 0021 결과 절의 Phase 5 출시 조건(L7·L8)은 [ADR 0024](0024-worker-input-trust-and-auth.md)과 조각 5b가 채운다. 5e는 5b 뒤다.
+- 아직 범위 밖: 생명주기·검색·이벤트 등 Later 경로, 인증(ADR 0024 결정 4), 스키마 검증기와 `/api/schema`, 여러 노드(ADR 0021
   결정 7), 배포 절차(release 설정과 마이그레이션 실행 시점), ADR 0021 결정 6에 남은 이른 활성화의 `timeoutSeconds` 밀림(메모리
   백엔드의 `:all` 활성화와 프로세스 크래시 재시작 뒤).

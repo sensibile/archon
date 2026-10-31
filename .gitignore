@@ -29,9 +29,10 @@ archon-*.tar
 # Python bytecode from the Codex review gate script tests.
 __pycache__/
 
-# Taeguk worker run reports (daily cleanup, test gap) stay local.
+# Taeguk worker run reports (daily cleanup, test gap, validation health) stay local.
 /.taeguk/daily-cleanup/
 /.taeguk/test-gap/
+/.taeguk/validation-health/
 
 # The script evaluator binary built by elixir_make (ADR 0015).
 /priv/archon_js
