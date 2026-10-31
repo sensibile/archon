@@ -26,7 +26,8 @@ defmodule Archon.Runtime.Store do
       Deleting a task ID the workflow does not have is ignored. Callers must pass a commit whose
       workflows and tasks belong to `workflow_id`. A commit that would leave more `IN_PROGRESS`
       tasks of a name than its `limits` entry is `{:error, {:limit, name}}`, naming the first such
-      name in binary order. A refused commit changes nothing, queues included.
+      name in binary order. A Postgres store whose node lost the database refuses with
+      `{:error, :fenced}` (ADR 0021, decision 7). A refused commit changes nothing, queues included.
       The queue operations go to the queue of the same backend (`Archon.Runtime.Queue`).
     * `c:get_workflow/2` - the workflow, with its tasks ordered by `seq` when `include_tasks?`
       (upstream `getWorkflow(id, true)`), otherwise with `tasks: []`.
@@ -72,7 +73,7 @@ defmodule Archon.Runtime.Store do
   @type due_key :: {wake_key :: integer(), workflow_id :: String.t()}
 
   @callback commit(workflow_id :: String.t(), Commit.t()) ::
-              :ok | {:error, :conflict | :not_found | {:limit, String.t()}}
+              :ok | {:error, :conflict | :not_found | :fenced | {:limit, String.t()}}
   @callback get_workflow(id :: String.t(), include_tasks? :: boolean()) ::
               {:ok, Workflow.t()} | {:error, :not_found}
   @callback get_task(task_id :: String.t()) ::
