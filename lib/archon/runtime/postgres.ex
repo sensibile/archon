@@ -147,6 +147,7 @@ defmodule Archon.Runtime.Postgres do
     case transaction(instance, fun) do
       {:ok, value} -> value
       {:error, :fenced} -> raise __MODULE__.FencedError
+      {:error, reason} -> raise ArgumentError, "transaction!/2 got a rollback: #{inspect(reason)}"
     end
   end
 

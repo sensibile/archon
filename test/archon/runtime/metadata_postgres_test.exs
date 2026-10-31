@@ -58,10 +58,15 @@ defmodule Archon.Runtime.MetadataPostgresTest do
       assert_raise ArgumentError, ~r/NUL/, fn ->
         PgMetadata.update_workflow_def(server, %WorkflowDef{name: "w\u0000", version: 1})
       end
+
+      assert_raise ArgumentError, ~r/UTF-8/, fn ->
+        PgMetadata.update_task_def(server, %TaskDef{name: <<0xFF>>})
+      end
     end
 
     test "is not found", %{server: server} do
       assert PgMetadata.get_task_def(server, "t\u0000") == {:error, :not_found}
+      assert PgMetadata.get_task_def(server, <<0xFF>>) == {:error, :not_found}
       assert PgMetadata.get_workflow_def(server, "w\u0000", 1) == {:error, :not_found}
       assert PgMetadata.get_latest_workflow_def(server, "w\u0000") == {:error, :not_found}
     end

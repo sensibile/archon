@@ -40,9 +40,9 @@ defmodule Archon.Runtime.Queue.Postgres do
   decision 7). `apply_ops/2` is for `Archon.Runtime.Store.Postgres`: it applies a commit's queue
   operations in the caller's transaction, which has already passed the fence.
 
-  Queue names and message IDs are index columns of plain `text`, which cannot hold NUL (as in
-  upstream). Adding a message with NUL in either raises `ArgumentError`; the other operations
-  treat such a message as absent.
+  Queue names and message IDs are index columns of plain `text`, which cannot hold NUL or invalid
+  UTF-8 (as in upstream). Adding a message with either in its queue name or ID raises
+  `ArgumentError`; the other operations treat such a message as absent.
   """
 
   @behaviour Archon.Runtime.Queue
@@ -78,6 +78,9 @@ defmodule Archon.Runtime.Queue.Postgres do
 
     Enum.each(ops, &apply_op(instance, &1))
   end
+
+  def apply_ops(%Postgres{}, ops),
+    do: raise(ArgumentError, "invalid queue operations #{inspect(ops)}")
 
   @impl Queue
   @spec pop(Postgres.t(), String.t(), integer(), integer()) :: [String.t()]
@@ -243,13 +246,13 @@ defmodule Archon.Runtime.Queue.Postgres do
   defp check_storable!(queue, id) do
     unless storable?(queue) and storable?(id) do
       raise ArgumentError,
-            "a queue name or message ID cannot contain NUL: #{inspect({queue, id})}"
+            "a queue name or message ID must be UTF-8 without NUL: #{inspect({queue, id})}"
     end
 
     :ok
   end
 
-  defp storable?(name), do: not String.contains?(name, <<0>>)
+  defp storable?(name), do: String.valid?(name) and not String.contains?(name, <<0>>)
 
   defp query!(%Postgres{repo: repo}, sql, params), do: repo.query!(sql, params)
 

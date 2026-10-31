@@ -26,8 +26,9 @@ defmodule Archon.Runtime.Metadata.Postgres do
 
   Writes run in `Archon.Runtime.Postgres.transaction!/2` and raise
   `Archon.Runtime.Postgres.FencedError` when the node epoch is stale (ADR 0021, decision 7).
-  Names are index columns of plain `text`, which cannot hold NUL (as in upstream): writing a
-  definition whose name has NUL raises `ArgumentError`, and reading one is `{:error, :not_found}`.
+  Names are index columns of plain `text`, which cannot hold NUL or invalid UTF-8 (as in
+  upstream): writing a definition with such a name raises `ArgumentError`, and reading one is
+  `{:error, :not_found}`.
   """
 
   @behaviour Archon.Runtime.Metadata
@@ -163,10 +164,10 @@ defmodule Archon.Runtime.Metadata.Postgres do
 
   defp check_storable!(name) do
     unless storable?(name),
-      do: raise(ArgumentError, "a definition name cannot contain NUL: #{inspect(name)}")
+      do: raise(ArgumentError, "a definition name must be UTF-8 without NUL: #{inspect(name)}")
   end
 
-  defp storable?(name), do: not String.contains?(name, <<0>>)
+  defp storable?(name), do: String.valid?(name) and not String.contains?(name, <<0>>)
 
   defp query!(%Postgres{repo: repo}, sql, params), do: repo.query!(sql, params)
 

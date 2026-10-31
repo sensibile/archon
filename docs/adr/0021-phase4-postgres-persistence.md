@@ -5,7 +5,7 @@
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(DB 라이브러리, 큐·Effect 원자성, 여러 노드, 지연 활성화)는 2026-10-30 BOSS가 이 문서의 추천안으로 정했다.
 - 갱신: 2026-10-31 조각 4b가 결정 3의 메모리 큐 적용 방식(`Queue.Memory.apply_ops/2`, 보일 시각 그대로)을 고치고, 결정 2·3에 워크플로우 ID의 바이트 순(`COLLATE "C"`)을 적었다.
-- 갱신: 2026-10-31 조각 4c가 결정 2에 색인 열 NUL의 처리(추가는 `ArgumentError`, 조회·삭제는 없는 것으로 봄)를, 결정 7에 오류 반환이 없는 콜백의 펜싱 실패(`FencedError`)를 적었다.
+- 갱신: 2026-10-31 조각 4c가 결정 2에 색인 열 NUL·잘못된 UTF-8의 처리(추가는 `ArgumentError`, 조회·삭제는 없는 것으로 봄)를, 결정 7에 오류 반환이 없는 콜백의 펜싱 실패(`FencedError`)를 적었다.
 
 ## 맥락
 
@@ -100,9 +100,10 @@ behaviour moduledoc: 계약 시험이 시계를 주입하므로 DB `now()`를 �
   된다. 키 순서·숫자 표기도 바꾼다. 저장 형식은 질의 대상이 아니므로 바이트 그대로 두는 `text`를 쓴다. `json_data`의
   NUL은 JSON 이스케이프(`\u0000`)로 들어가지만, 색인 열(`workflow_id`, `task_def_name`, 큐 이름 등)은 그대로의 `text`라
   NUL을 받지 않는다. upstream 표의 같은 열도 같다.
-  Postgres 구현은 NUL이 든 이름·ID를 DB에 보내지 않는다. 행을 더하는 연산(큐 push·postpone과 `Commit.queue`의 그 연산,
+  Postgres 구현은 NUL이나 잘못된 UTF-8이 든 이름·ID를 DB에 보내지 않는다. 행을 더하는 연산(큐 push·postpone과 `Commit.queue`의 그 연산,
   정의 저장)은 `ArgumentError`를 내고, 찾거나 지우는 연산(pop, ack, remove, `contains?`, `size`, 정의 조회)은 그런 행이 없는
-  것으로 답한다(조각 4c). 메모리 구현은 NUL을 받으므로 이 입력에서만 두 백엔드가 다르다.
+  것으로 답한다(조각 4c). 메모리 구현은 이런 값을 받으므로 이 입력에서 두 백엔드가 다르다. `int4` 열(우선순위, 버전) 범위를 넘는 정수는
+  upstream(`int`)처럼 받지 않는다(인코딩 오류).
 - **`:erlang.term_to_binary`가 아닌 이유.** struct 모양이 바뀐 뒤 예전 행을 읽으면 빠진 필드가 조용히 생기고, DB에서
   내용을 볼 수 없다.
 - upstream의 `workflow_to_task`, `workflow_pending`, `task_in_progress`, `task_scheduled`, `workflow_def_to_workflow`,

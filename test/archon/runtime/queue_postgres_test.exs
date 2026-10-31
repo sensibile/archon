@@ -110,6 +110,12 @@ defmodule Archon.Runtime.QueuePostgresTest do
       assert PgQueue.pop(server, "ops", 5, 0) == ["old"]
     end
 
+    test "refuses a list that is not one", %{server: server} do
+      assert_raise ArgumentError, fn ->
+        Repo.transaction(fn -> PgQueue.apply_ops(server, {:push, "ops", "a", 0, 0}) end)
+      end
+    end
+
     test "refuses to run outside a transaction", %{server: server} do
       assert_raise ArgumentError, ~r/inside the commit's transaction/, fn ->
         PgQueue.apply_ops(server, [{:push, "ops", "a", 0, 0}])
@@ -198,9 +204,9 @@ defmodule Archon.Runtime.QueuePostgresTest do
     end
   end
 
-  describe "NUL in a queue name or message ID" do
+  describe "NUL or invalid UTF-8 in a queue name or message ID" do
     test "cannot be added", %{server: server} do
-      for {queue, id} <- [{"q\u0000", "a"}, {"q", "a\u0000"}] do
+      for {queue, id} <- [{"q\u0000", "a"}, {"q", "a\u0000"}, {<<0xFF>>, "a"}, {"q", <<0xFF>>}] do
         assert_raise ArgumentError, ~r/NUL/, fn -> PgQueue.push(server, queue, id, 0, 0) end
         assert_raise ArgumentError, ~r/NUL/, fn -> PgQueue.postpone(server, queue, id, 0, 0) end
 
@@ -215,6 +221,8 @@ defmodule Archon.Runtime.QueuePostgresTest do
 
       refute PgQueue.contains?(server, "q", "a\u0000")
       refute PgQueue.contains?(server, "q\u0000", "a")
+      refute PgQueue.contains?(server, "q", <<0xFF>>)
+      assert PgQueue.size(server, <<0xFF>>) == 0
       assert PgQueue.size(server, "q\u0000") == 0
       refute PgQueue.ack(server, "q", "a\u0000")
       assert PgQueue.remove(server, "q\u0000", "a") == :ok
