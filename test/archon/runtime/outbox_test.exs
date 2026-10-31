@@ -309,6 +309,46 @@ defmodule Archon.Runtime.OutboxTest do
       assert workflow(id).end_count == 1
     end
 
+    test "a feedback commit that fails keeps the entry, which runs again" do
+      {:ok, definition} = Runtime.metadata().get_workflow_def("outbox_with_failure", 1)
+
+      :ok =
+        Runtime.metadata().update_workflow_def(%{
+          definition
+          | name: "outbox_refused_again",
+            failure_workflow: "archon_outbox_no_such_wf"
+        })
+
+      first? = once()
+
+      RuntimeHooks.install(
+        hook: fn
+          :commit, _id, %Commit{outbox_ack: [_ | _]} ->
+            if first?.(), do: raise("store down")
+
+          _point, _id, _data ->
+            :ok
+        end
+      )
+
+      id = start("outbox_refused_again")
+      assert %Task{status: :failed} = finish(id, :failed)
+
+      assert eventually(fn ->
+               workflow(id).output["conductor.failure_workflow"] =~ "failed to start"
+             end)
+
+      assert eventually(fn -> pending(id) == [] end)
+    end
+
+    test "a refusal that arrives after a retry leaves the new run's output alone" do
+      wf = %Workflow{workflow_id: "w", status: :running, output: %{"a" => 1}, tasks: []}
+      env = Archon.Runtime.Step.Env.new(now: 1)
+
+      assert {:ok, ^wf, [], %Commit{workflow: nil}, []} =
+               Archon.Runtime.Step.run(wf, {:failure_workflow_started, {:error, "gone"}}, env)
+    end
+
     test "a start that failed in the store is tried again" do
       first? = once()
 
@@ -397,6 +437,20 @@ defmodule Archon.Runtime.OutboxTest do
   end
 
   describe "a child that ran again after its parent ended (L2)" do
+    test "a revived parent records its own parent's endCount" do
+      grandparent = start("outbox_grandparent")
+      parent = child_of(grandparent)
+      child = child_of(parent)
+      assert %Task{status: :failed} = finish(child, :failed)
+      assert %Workflow{end_count: 1} = await_status(grandparent, :failed)
+
+      assert :ok = Runtime.Lifecycle.retry(child)
+      assert await_status(grandparent, :running)
+      assert workflow(child).revived_parent_end_count == 1
+      assert workflow(parent).revived_parent_end_count == 1
+      assert workflow(grandparent).revived_parent_end_count == 0
+    end
+
     # The parent terminated by request, its child with it before the commit.
     defp terminated_parent do
       {parent, child} = parent_and_child()

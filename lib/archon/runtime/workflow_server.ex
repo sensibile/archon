@@ -855,7 +855,7 @@ defmodule Archon.Runtime.WorkflowServer do
   defp outbox_result(state, :done),
     do: check_outbox(%{state | outbox_delay: nil, blocker: nil})
 
-  # The process ended before the runner did; it is alive again, so only a restart reads it.
+  # Only returned once the owner is gone, so not seen by a live process; read the outbox again.
   defp outbox_result(state, :owner_down), do: %{state | kick?: true}
 
   defp outbox_result(state, {:retry, reason}) do

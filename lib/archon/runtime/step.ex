@@ -140,8 +140,13 @@ defmodule Archon.Runtime.Step do
     end
   end
 
-  defp handle({:failure_workflow_started, {:error, reason}}, state),
-    do: {:ok, Terminate.failure_workflow_failed(state, reason)}
+  # A workflow retried or restarted since the start was refused keeps its new run's output
+  # (the outbox may report it later, ADR 0021, decision 4).
+  defp handle({:failure_workflow_started, {:error, reason}}, %State{wf: wf} = state) do
+    if Workflow.terminal?(wf.status),
+      do: {:ok, Terminate.failure_workflow_failed(state, reason)},
+      else: {:ok, state}
+  end
 
   defp handle({:terminate, reason}, state), do: Terminate.by_request(state, reason)
 

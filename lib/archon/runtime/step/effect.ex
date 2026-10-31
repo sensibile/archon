@@ -21,21 +21,24 @@ defmodule Archon.Runtime.Step.Effect do
       it is `{:terminate_sub_workflow, workflow_id, reason, parent_end_count}`, with the parent's
       `endCount` once the commit is applied (ADR 0021, decision 4).
     * `{:notify_parent, parent_workflow_id, parent_task_id, workflow}` - calls the parent with
-      `{:child_changed, parent_task_id, workflow}`. `workflow` is the stored child.
+      `{:child_changed, parent_task_id, workflow}`. `workflow` is the stored child; the outbox
+      entry holds `nil` and the runner reads the child when it runs.
     * `{:start_failure_workflow, start}` - starts the failure workflow. A refusal goes back as
       `{:failure_workflow_started, {:error, reason}}`.
     * `{:revive_parent, parent_workflow_id, parent_task_id}` - calls the parent with
       `{:child_revived, parent_task_id}` (upstream `updateAndPushParents`).
     * `{:retry_sub_workflow, workflow_id}` - sends `{:retry, false}` to a child that failed, from
       a parent that revives.
-
-  `Archon.Runtime.WorkflowServer` saves the `post` effects on other workflows (all of the above
-  but `:start_sub_workflow`) in the commit's outbox, which `Archon.Runtime.Outbox` runs.
     * `:cancel_wake` - cancels the `:wake` timer (a paused workflow).
     * `{:wake_at, ms}` - sets the `:wake` timer to the epoch time `ms`, replacing the current
       one. `ms` equal to `now` asks for the next `:wake` at once.
     * `{:wake_before, ms}` - moves the `:wake` timer to `ms` only when it is set later than that
       (an event that did not decide).
+
+  `Archon.Runtime.WorkflowServer` saves the `post` effects on other workflows
+  (`:terminate_sub_workflow`, `:notify_parent`, `:start_failure_workflow`, `:revive_parent`,
+  `:retry_sub_workflow`) in the commit's outbox, which `Archon.Runtime.Outbox` runs (ADR 0021,
+  decision 4).
   """
 
   alias Archon.Domain.{Workflow, WorkflowDef}

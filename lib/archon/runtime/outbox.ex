@@ -75,7 +75,11 @@ defmodule Archon.Runtime.Outbox do
     case Registry.register(@registry, {:outbox, workflow_id}, nil) do
       {:ok, _owner} ->
         ref = Process.monitor(owner)
-        drain(workflow_id, ref, Runtime.store().pending_outbox(workflow_id))
+        result = drain(workflow_id, ref, Runtime.store().pending_outbox(workflow_id))
+        # The registry drops an ended process asynchronously; the owner's next runner must not
+        # find the key still taken.
+        Registry.unregister(@registry, {:outbox, workflow_id})
+        result
 
       {:error, {:already_registered, pid}} ->
         {:already_registered, pid}

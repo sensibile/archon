@@ -125,6 +125,11 @@ defmodule Archon.Runtime.SubWorkflows do
       Keyword.get(opts, :in_process, false) and ancestor?(owner_id, child_id, []) ->
         cancel_later(child_id, reason)
 
+      # The end count is about the owner as a parent; an ancestor named as a child (L7, L8) has
+      # another parent, so its check is skipped.
+      end_count != nil and ancestor?(owner_id, child_id, []) ->
+        cancel(child_id, reason, nil)
+
       true ->
         cancel(child_id, reason, end_count)
     end
