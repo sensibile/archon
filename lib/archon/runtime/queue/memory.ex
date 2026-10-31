@@ -7,7 +7,8 @@
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: an in-memory GenServer (ADR 0018, decision 3); a waiting pop is a deferred
 # reply woken by pushes and visibility timers instead of a 100 ms polling loop, and the unack
-# timeout counts from the pop instead of the original delivery time.
+# timeout counts from the pop instead of the original delivery time; `apply_ops/2` applies the
+# queue operations of a store commit at once (ADR 0021, decision 3).
 
 defmodule Archon.Runtime.Queue.Memory do
   @moduledoc """
@@ -20,6 +21,9 @@ defmodule Archon.Runtime.Queue.Memory do
   each pop, which is enough for development and tests. Data is lost when the
   process stops. Each function takes an optional first argument, the server (this module's name by
   default); the arities without it are the behaviour callbacks.
+
+  `apply_ops/2` applies the queue operations of an `Archon.Runtime.Commit` in one message, with
+  their delivery times as given; `Archon.Runtime.Store.Memory` calls it.
 
   A popped message that is not acked becomes visible again `:unack_timeout` after the pop.
   Upstream `SqliteQueueDAO` makes it visible 60 seconds after its original delivery time, checked
@@ -38,7 +42,7 @@ defmodule Archon.Runtime.Queue.Memory do
 
   use GenServer
 
-  alias Archon.Runtime.Queue
+  alias Archon.Runtime.{Commit, Queue}
 
   @unack_timeout 60_000
   @call_margin 5_000
@@ -55,6 +59,33 @@ defmodule Archon.Runtime.Queue.Memory do
       when is_binary(queue) and is_binary(id) and is_integer(priority) and is_integer(delay_ms) do
     GenServer.call(server, {:push, queue, id, priority, delay_ms})
   end
+
+  @doc """
+  Applies `t:Archon.Runtime.Commit.queue_op/0`s in order, all in one message. `deliver_on` is a
+  time of this server's clock; each operation means the callback of the same name with the delay
+  that ends at `deliver_on`.
+  """
+  @spec apply_ops(GenServer.server(), [Commit.queue_op()]) :: :ok
+  def apply_ops(server \\ __MODULE__, ops) when is_list(ops) do
+    check_ops!(ops)
+    GenServer.call(server, {:apply_ops, ops})
+  end
+
+  @doc false
+  @spec check_ops!([Commit.queue_op()]) :: :ok
+  def check_ops!(ops) when is_list(ops), do: Enum.each(ops, &check_op!/1)
+  def check_ops!(ops), do: raise(ArgumentError, "invalid queue operations #{inspect(ops)}")
+
+  defp check_op!({:push, queue, id, priority, at})
+       when is_binary(queue) and is_binary(id) and is_integer(priority) and is_integer(at),
+       do: :ok
+
+  defp check_op!({:postpone, queue, id, priority, at})
+       when is_binary(queue) and is_binary(id) and is_integer(priority) and is_integer(at),
+       do: :ok
+
+  defp check_op!({:remove, queue, id}) when is_binary(queue) and is_binary(id), do: :ok
+  defp check_op!(op), do: raise(ArgumentError, "invalid queue operation #{inspect(op)}")
 
   @impl Queue
   @spec pop(GenServer.server(), String.t(), integer(), integer()) :: [String.t()]
@@ -109,23 +140,19 @@ defmodule Archon.Runtime.Queue.Memory do
 
   @impl GenServer
   def handle_call({:push, queue, id, priority, delay_ms}, _from, state) do
-    at = state.clock.() + delay_ms
-
-    state =
-      case state.queues do
-        %{^queue => %{^id => message}} ->
-          put_message(state, queue, id, %{message | deliver_at: at, visible_at: at})
-
-        %{} ->
-          insert(state, queue, id, priority, at)
-      end
-
+    state = push_at(state, queue, id, priority, state.clock.() + delay_ms)
     {:reply, :ok, state |> serve(queue) |> schedule_tick()}
   end
 
   def handle_call({:postpone, queue, id, priority, delay_ms}, _from, state) do
-    state = state |> delete(queue, id) |> insert(queue, id, priority, state.clock.() + delay_ms)
+    state = postpone_at(state, queue, id, priority, state.clock.() + delay_ms)
     {:reply, :ok, state |> serve(queue) |> schedule_tick()}
+  end
+
+  def handle_call({:apply_ops, ops}, _from, state) do
+    state = Enum.reduce(ops, state, &apply_op/2)
+    queues = for op <- ops, uniq: true, do: elem(op, 1)
+    {:reply, :ok, queues |> Enum.reduce(state, &serve(&2, &1)) |> schedule_tick()}
   end
 
   def handle_call({:pop, _queue, count, _timeout_ms}, _from, state) when count <= 0 do
@@ -197,6 +224,27 @@ defmodule Archon.Runtime.Queue.Memory do
       nil -> {:noreply, state}
     end
   end
+
+  defp apply_op({:push, queue, id, priority, at}, state),
+    do: push_at(state, queue, id, priority, at)
+
+  defp apply_op({:postpone, queue, id, priority, at}, state),
+    do: postpone_at(state, queue, id, priority, at)
+
+  defp apply_op({:remove, queue, id}, state), do: delete(state, queue, id)
+
+  defp push_at(state, queue, id, priority, at) do
+    case state.queues do
+      %{^queue => %{^id => message}} ->
+        put_message(state, queue, id, %{message | deliver_at: at, visible_at: at})
+
+      %{} ->
+        insert(state, queue, id, priority, at)
+    end
+  end
+
+  defp postpone_at(state, queue, id, priority, at),
+    do: state |> delete(queue, id) |> insert(queue, id, priority, at)
 
   defp insert(state, queue, id, priority, at) do
     message = %{priority: priority, deliver_at: at, visible_at: at, seq: state.seq}

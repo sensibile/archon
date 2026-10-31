@@ -8,7 +8,8 @@
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: ported to ExUnit as a shared contract for every `Archon.Runtime.Store`
 # implementation (ADR 0018, decision 10); writes go through `Archon.Runtime.Commit`, and cases for
-# atomicity, task order and internal fields were added.
+# atomicity, task order and internal fields were added, and the queue operations, outbox,
+# re-evaluation times and limits of a commit (ADR 0021, decisions 3 to 6).
 
 defmodule Archon.Runtime.StoreContract do
   @moduledoc """
@@ -19,20 +20,35 @@ defmodule Archon.Runtime.StoreContract do
         use Archon.Runtime.StoreContract
 
         setup do
-          %{impl: MyStore, server: ...}
+          %{impl: MyStore, server: ..., queue_impl: MyQueue, queue: ..., now: ..., advance: ...}
         end
       end
 
-  The setup gives `:impl`, the module under test, and `:server`, an empty instance. Every
-  callback is called as `impl.fun(server, args...)`.
+  The setup gives:
+
+    * `:impl` - the module under test, and `:server`, an empty instance. Every callback is called
+      as `impl.fun(server, args...)`.
+    * `:queue_impl` and `:queue` - the `Archon.Runtime.Queue` the store applies a commit's queue
+      operations to, empty, called the same way.
+    * `:now` - a zero-arity function returning the queue's clock in epoch milliseconds, and
+      `:advance` - a function moving that clock forward by some milliseconds. The cases only pop
+      with a zero timeout, so the clock may stand still.
+
+  Workflow IDs are compared in binary order (`"B" < "a"`), so a Postgres store orders them with
+  `COLLATE "C"`.
   """
 
   defmacro __using__(_opts) do
     quote do
       unquote(helpers())
+      unquote(commit_helpers())
       unquote(workflow_cases())
       unquote(task_cases())
       unquote(other_cases())
+      unquote(queue_cases())
+      unquote(outbox_cases())
+      unquote(wake_cases())
+      unquote(limit_cases())
     end
   end
 
@@ -79,6 +95,26 @@ defmodule Archon.Runtime.StoreContract do
 
       defp create(ctx, %Workflow{} = workflow),
         do: s(ctx, :commit, [workflow.workflow_id, %Commit{create: workflow}])
+    end
+  end
+
+  defp commit_helpers do
+    quote do
+      alias Archon.Runtime.Commit
+
+      defp q(ctx, fun, args), do: apply(ctx.queue_impl, fun, [ctx.queue | args])
+
+      defp commit(ctx, workflow_id, fields),
+        do: s(ctx, :commit, [workflow_id, struct!(Commit, fields)])
+
+      defp outbox_effects(ctx, workflow_id),
+        do: Enum.map(s(ctx, :pending_outbox, [workflow_id]), &elem(&1, 1))
+
+      defp outbox_ids(ctx, workflow_id),
+        do: Enum.map(s(ctx, :pending_outbox, [workflow_id]), &elem(&1, 0))
+
+      defp due(ctx, before_ms, cursor \\ nil, limit \\ 100),
+        do: s(ctx, :due_workflow_ids, [before_ms, cursor, limit])
     end
   end
 
@@ -408,6 +444,356 @@ defmodule Archon.Runtime.StoreContract do
 
           assert {:ok, %{worker_id: "workerId2", last_poll_time: 30}} =
                    s(ctx, :get_poll_data, ["taskDef", nil])
+        end
+      end
+    end
+  end
+
+  defp queue_cases do
+    quote do
+      describe "Store contract: queue operations" do
+        # ADR 0021, decision 3: deliver_on is a time of the queue's clock, not a delay.
+        test "a commit applies its queue operations in order with their delivery times", ctx do
+          now = ctx.now.()
+
+          assert commit(ctx, "wf1",
+                   create: workflow("wf1"),
+                   queue: [
+                     {:push, "q", "a", 0, now},
+                     {:push, "q", "b", 0, now + 1_000},
+                     {:push, "q", "c", 0, now},
+                     {:remove, "q", "c"},
+                     {:remove, "q", "d"},
+                     {:push, "q", "d", 0, now}
+                   ]
+                 ) == :ok
+
+          assert q(ctx, :size, ["q"]) == 3
+          refute q(ctx, :contains?, ["q", "c"])
+          assert Enum.sort(q(ctx, :pop, ["q", 10, 0])) == ["a", "d"]
+
+          ctx.advance.(999)
+          assert q(ctx, :pop, ["q", 10, 0]) == []
+          ctx.advance.(1)
+          assert q(ctx, :pop, ["q", 10, 0]) == ["b"]
+        end
+
+        test "remove and postpone in a commit act on existing messages", ctx do
+          create(ctx, workflow("wf1"))
+          now = ctx.now.()
+
+          commit(ctx, "wf1", queue: [{:push, "q", "a", 0, now}, {:push, "q", "b", 0, now}])
+          assert q(ctx, :contains?, ["q", "a"])
+
+          assert commit(ctx, "wf1",
+                   queue: [{:remove, "q", "a"}, {:postpone, "q", "b", 5, now + 500}]
+                 ) == :ok
+
+          refute q(ctx, :contains?, ["q", "a"])
+          assert q(ctx, :contains?, ["q", "b"])
+          assert q(ctx, :pop, ["q", 10, 0]) == []
+          ctx.advance.(500)
+          assert q(ctx, :pop, ["q", 10, 0]) == ["b"]
+        end
+
+        test "a refused commit applies no queue operation", ctx do
+          create(ctx, workflow("wf1"))
+          push = [queue: [{:push, "q", "x", 0, ctx.now.()}]]
+
+          assert commit(ctx, "wf1", [create: workflow("wf1")] ++ push) == {:error, :conflict}
+          assert commit(ctx, "nope", [workflow: workflow("nope")] ++ push) == {:error, :not_found}
+
+          create(ctx, workflow("wf2", tasks: [task("wf2", 1)]))
+
+          stolen = task("wf1", 1, task_id: "wf2_t1")
+          assert commit(ctx, "wf1", [upsert_tasks: [stolen]] ++ push) == {:error, :conflict}
+          refute q(ctx, :contains?, ["q", "x"])
+          assert q(ctx, :size, ["q"]) == 0
+        end
+      end
+    end
+  end
+
+  defp outbox_cases do
+    quote do
+      describe "Store contract: outbox" do
+        test "entries come back in the order added, with growing IDs", ctx do
+          assert commit(ctx, "wf1",
+                   create: workflow("wf1"),
+                   outbox: [{:retry_sub_workflow, "c1"}, {:revive_parent, "p", "pt"}]
+                 ) == :ok
+
+          create(ctx, workflow("wf2"))
+          commit(ctx, "wf2", outbox: [{:retry_sub_workflow, "x"}])
+          commit(ctx, "wf1", outbox: [{:terminate_sub_workflow, "c2", "why"}])
+
+          assert outbox_effects(ctx, "wf1") == [
+                   {:retry_sub_workflow, "c1"},
+                   {:revive_parent, "p", "pt"},
+                   {:terminate_sub_workflow, "c2", "why"}
+                 ]
+
+          ids = outbox_ids(ctx, "wf1")
+          assert Enum.all?(ids, &(is_integer(&1) and &1 > 0))
+          assert ids == Enum.sort(ids) and ids == Enum.uniq(ids)
+          [wf2_id] = outbox_ids(ctx, "wf2")
+          assert wf2_id > Enum.at(ids, 1) and wf2_id < Enum.at(ids, 2)
+
+          assert s(ctx, :pending_outbox, ["nope"]) == []
+        end
+
+        test "ack_outbox deletes only the workflow's own entries", ctx do
+          create(ctx, workflow("wf1"))
+          create(ctx, workflow("wf2"))
+          commit(ctx, "wf1", outbox: [{:retry_sub_workflow, "a"}, {:retry_sub_workflow, "b"}])
+          commit(ctx, "wf2", outbox: [{:retry_sub_workflow, "c"}])
+          [a, b] = outbox_ids(ctx, "wf1")
+          [c] = outbox_ids(ctx, "wf2")
+
+          assert s(ctx, :ack_outbox, ["wf1", [a, c, c + 1_000]]) == :ok
+          assert outbox_ids(ctx, "wf1") == [b]
+          assert outbox_ids(ctx, "wf2") == [c]
+
+          assert s(ctx, :ack_outbox, ["wf1", [a]]) == :ok
+          assert s(ctx, :ack_outbox, ["nope", [b]]) == :ok
+          assert outbox_ids(ctx, "wf1") == [b]
+        end
+
+        # ADR 0021, decision 4: the commit that writes the failure workflow's output deletes its entry.
+        test "outbox_ack in a commit deletes entries with the change, and new ones stay", ctx do
+          create(ctx, workflow("wf1"))
+          create(ctx, workflow("wf2"))
+          commit(ctx, "wf1", outbox: [{:retry_sub_workflow, "a"}, {:retry_sub_workflow, "b"}])
+          commit(ctx, "wf2", outbox: [{:retry_sub_workflow, "c"}])
+          [a, b] = outbox_ids(ctx, "wf1")
+          [c] = outbox_ids(ctx, "wf2")
+
+          assert commit(ctx, "wf1",
+                   workflow: workflow("wf1", output: %{"done" => true}),
+                   outbox_ack: [a, c],
+                   outbox: [{:retry_sub_workflow, "d"}]
+                 ) == :ok
+
+          assert {:ok, %Workflow{output: %{"done" => true}}} =
+                   s(ctx, :get_workflow, ["wf1", false])
+
+          assert [{^b, _}, {d, {:retry_sub_workflow, "d"}}] = s(ctx, :pending_outbox, ["wf1"])
+          assert d > c
+          assert outbox_ids(ctx, "wf2") == [c]
+        end
+
+        test "a refused commit adds and deletes no entry", ctx do
+          create(ctx, workflow("wf1"))
+          commit(ctx, "wf1", outbox: [{:retry_sub_workflow, "a"}])
+          [a] = outbox_ids(ctx, "wf1")
+          fields = [outbox_ack: [a], outbox: [{:retry_sub_workflow, "b"}]]
+
+          assert commit(ctx, "wf1", [create: workflow("wf1")] ++ fields) == {:error, :conflict}
+          assert commit(ctx, "nope", fields) == {:error, :not_found}
+          assert outbox_ids(ctx, "wf1") == [a]
+          assert s(ctx, :pending_outbox, ["nope"]) == []
+          assert s(ctx, :outbox_workflow_ids, [nil, 10]) == ["wf1"]
+        end
+
+        test "outbox_workflow_ids pages the workflows with entries in binary order", ctx do
+          for id <- ~w(b B a c) do
+            create(ctx, workflow(id))
+            commit(ctx, id, outbox: [{:retry_sub_workflow, "x"}])
+          end
+
+          create(ctx, workflow("empty"))
+
+          assert s(ctx, :outbox_workflow_ids, [nil, 10]) == ~w(B a b c)
+          assert s(ctx, :outbox_workflow_ids, [nil, 2]) == ~w(B a)
+          assert s(ctx, :outbox_workflow_ids, ["a", 2]) == ~w(b c)
+          assert s(ctx, :outbox_workflow_ids, ["aa", 10]) == ~w(b c)
+          assert s(ctx, :outbox_workflow_ids, ["c", 10]) == []
+          assert s(ctx, :outbox_workflow_ids, [nil, 0]) == []
+
+          [id] = outbox_ids(ctx, "b")
+          s(ctx, :ack_outbox, ["b", [id]])
+          assert s(ctx, :outbox_workflow_ids, [nil, 10]) == ~w(B a c)
+        end
+
+        test "remove_workflow deletes its outbox", ctx do
+          create(ctx, workflow("wf1"))
+          commit(ctx, "wf1", outbox: [{:retry_sub_workflow, "a"}])
+          assert s(ctx, :remove_workflow, ["wf1"]) == :ok
+          assert s(ctx, :pending_outbox, ["wf1"]) == []
+          assert s(ctx, :outbox_workflow_ids, [nil, 10]) == []
+
+          create(ctx, workflow("wf1"))
+          assert s(ctx, :pending_outbox, ["wf1"]) == []
+        end
+      end
+    end
+  end
+
+  defp wake_cases do
+    quote do
+      describe "Store contract: re-evaluation times" do
+        test "wake sets, keeps, moves earlier and clears the time", ctx do
+          create(ctx, workflow("wf1"))
+          assert due(ctx, 0) == [{0, "wf1"}]
+
+          commit(ctx, "wf1", wake: {:at, 100})
+          assert due(ctx, 99) == []
+          assert due(ctx, 100) == [{100, "wf1"}]
+
+          commit(ctx, "wf1", wake: {:before, 150})
+          assert due(ctx, 1_000) == [{100, "wf1"}]
+          commit(ctx, "wf1", wake: {:before, 50})
+          assert due(ctx, 1_000) == [{50, "wf1"}]
+
+          commit(ctx, "wf1", workflow: workflow("wf1", output: %{"x" => 1}))
+          assert due(ctx, 1_000) == [{50, "wf1"}]
+
+          commit(ctx, "wf1", wake: {:at, 500})
+          assert due(ctx, 1_000) == [{500, "wf1"}]
+
+          commit(ctx, "wf1", wake: :none)
+          assert due(ctx, 0) == [{0, "wf1"}]
+
+          commit(ctx, "wf1", wake: {:before, 70})
+          assert due(ctx, 1_000) == [{70, "wf1"}]
+        end
+
+        test "a create can set the time, and a refused commit does not change it", ctx do
+          assert commit(ctx, "wf1", create: workflow("wf1"), wake: {:at, 100}) == :ok
+          assert due(ctx, 1_000) == [{100, "wf1"}]
+
+          assert commit(ctx, "wf1", create: workflow("wf1"), wake: {:at, 5}) ==
+                   {:error, :conflict}
+
+          assert commit(ctx, "nope", wake: {:at, 5}) == {:error, :not_found}
+          assert due(ctx, 1_000) == [{100, "wf1"}]
+        end
+
+        test "only RUNNING workflows are due", ctx do
+          for {id, status} <- [a: :running, b: :paused, c: :completed, d: :failed] do
+            create(ctx, workflow(Atom.to_string(id), status: status))
+          end
+
+          assert due(ctx, 0) == [{0, "a"}]
+
+          commit(ctx, "a", workflow: workflow("a", status: :paused), wake: :none)
+          commit(ctx, "b", workflow: workflow("b", status: :running))
+          assert due(ctx, 0) == [{0, "b"}]
+        end
+
+        test "due_workflow_ids pages by time, then ID in binary order", ctx do
+          for {id, at} <- [{"a", 20}, {"B", 20}, {"c", 10}, {"d", nil}, {"e", 30}, {"f", 31}] do
+            commit(ctx, id, create: workflow(id), wake: if(at, do: {:at, at}, else: :keep))
+          end
+
+          all = [{0, "d"}, {10, "c"}, {20, "B"}, {20, "a"}, {30, "e"}]
+          assert due(ctx, 30) == all
+          assert due(ctx, 30, nil, 2) == Enum.take(all, 2)
+          assert due(ctx, 30, {10, "c"}, 2) == [{20, "B"}, {20, "a"}]
+          assert due(ctx, 30, {20, "B"}, 10) == [{20, "a"}, {30, "e"}]
+          assert due(ctx, 30, {20, "Z"}, 10) == [{20, "a"}, {30, "e"}]
+          assert due(ctx, 30, {30, "e"}, 10) == []
+          assert due(ctx, 30, nil, 0) == []
+
+          s(ctx, :remove_workflow, ["c"])
+          assert due(ctx, 15) == [{0, "d"}]
+        end
+      end
+    end
+  end
+
+  defp limit_cases do
+    quote do
+      describe "Store contract: concurrent execution limits" do
+        defp in_progress(workflow_id, n, name),
+          do: task(workflow_id, n, task_def_name: name, status: :in_progress)
+
+        # ADR 0021, decision 5: the count after the change, over every workflow.
+        test "a commit within its limits is applied", ctx do
+          create(ctx, workflow("wf1", tasks: [in_progress("wf1", 1, "lim")]))
+          create(ctx, workflow("wf2", tasks: [task("wf2", 1, task_def_name: "lim")]))
+
+          assert commit(ctx, "wf2",
+                   upsert_tasks: [in_progress("wf2", 1, "lim")],
+                   limits: %{"lim" => 2, "other" => 1}
+                 ) == :ok
+
+          assert s(ctx, :in_progress_count, ["lim"]) == 2
+
+          # A task leaving IN_PROGRESS in the same commit makes room.
+          assert commit(ctx, "wf2",
+                   upsert_tasks: [
+                     task("wf2", 1, task_def_name: "lim", status: :completed),
+                     in_progress("wf2", 2, "lim")
+                   ],
+                   limits: %{"lim" => 2}
+                 ) == :ok
+        end
+
+        test "a commit over a limit is refused and changes nothing", ctx do
+          create(ctx, workflow("wf1", tasks: [in_progress("wf1", 1, "lim")]))
+          create(ctx, workflow("wf2", tasks: [task("wf2", 1, task_def_name: "lim")]))
+          commit(ctx, "wf2", outbox: [{:retry_sub_workflow, "a"}], wake: {:at, 100})
+          [a] = outbox_ids(ctx, "wf2")
+          {:ok, before} = s(ctx, :get_workflow, ["wf2", true])
+
+          over = [
+            workflow: workflow("wf2", status: :completed),
+            upsert_tasks: [in_progress("wf2", 1, "lim")],
+            outbox_ack: [a],
+            outbox: [{:retry_sub_workflow, "b"}],
+            wake: {:at, 5},
+            queue: [{:push, "q", "x", 0, ctx.now.()}],
+            limits: %{"lim" => 1}
+          ]
+
+          assert commit(ctx, "wf2", over) == {:error, {:limit, "lim"}}
+          assert s(ctx, :get_workflow, ["wf2", true]) == {:ok, before}
+          assert outbox_ids(ctx, "wf2") == [a]
+          assert due(ctx, 1_000) == [{0, "wf1"}, {100, "wf2"}]
+          refute q(ctx, :contains?, ["q", "x"])
+          assert s(ctx, :in_progress_count, ["lim"]) == 1
+        end
+
+        test "a create is checked too, and the first name over its limit is named", ctx do
+          create(
+            ctx,
+            workflow("wf1", tasks: [in_progress("wf1", 1, "b"), in_progress("wf1", 2, "c")])
+          )
+
+          new =
+            workflow("wf2",
+              tasks: [
+                in_progress("wf2", 1, "b"),
+                in_progress("wf2", 2, "c"),
+                in_progress("wf2", 3, "a")
+              ]
+            )
+
+          assert commit(ctx, "wf2", create: new, limits: %{"c" => 1, "b" => 1, "a" => 1}) ==
+                   {:error, {:limit, "b"}}
+
+          assert s(ctx, :get_workflow, ["wf2", false]) == {:error, :not_found}
+          assert s(ctx, :get_task, ["wf2_t3"]) == {:error, :not_found}
+
+          assert commit(ctx, "wf2", create: new, limits: %{"a" => 1, "b" => 2, "c" => 2}) == :ok
+        end
+
+        # TaskModel#getTaskDefName falls back to the task type.
+        test "limits count tasks by task definition name, falling back to the type", ctx do
+          create(
+            ctx,
+            workflow("wf1",
+              tasks: [
+                task("wf1", 1, task_def_name: nil, task_type: "worker", status: :in_progress)
+              ]
+            )
+          )
+
+          extra = task("wf1", 2, task_def_name: nil, task_type: "worker", status: :in_progress)
+
+          assert commit(ctx, "wf1", upsert_tasks: [extra], limits: %{"worker" => 1}) ==
+                   {:error, {:limit, "worker"}}
         end
       end
     end

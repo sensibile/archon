@@ -7,17 +7,28 @@
 # sqlite-persistence/src/main/java/com/netflix/conductor/sqlite/dao/SqliteExecutionDAO.java and
 # SqlitePollDataDAO.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: an in-memory GenServer holding the structs as they are (ADR 0018,
-# decision 3); a commit is applied in one message, so readers never see half of it.
+# decision 3); a commit is applied in one message, so readers never see half of it, and also holds
+# the outbox, re-evaluation times and limit checks of ADR 0021.
 
 defmodule Archon.Runtime.Store.Memory do
   @moduledoc """
   In-memory `Archon.Runtime.Store` for development and tests (ADR 0018, decision 3).
 
-  One GenServer holds the workflows (without tasks), the tasks and the poll data. Data is lost
-  when the process stops. Each function takes an optional first argument, the server (this module's
-  name by default); the arities without it are the behaviour callbacks.
+  One GenServer holds the workflows (without tasks), the tasks, the outbox, the re-evaluation times
+  and the poll data. Data is lost when the process stops. Each function takes an optional first
+  argument, the server (this module's name by default); the arities without it are the behaviour
+  callbacks.
 
-  Options of `start_link/1`: `:name` (this module by default).
+  A commit's queue operations go to an `Archon.Runtime.Queue.Memory` (`apply_ops/2`) after every
+  other field is checked, since they cannot be undone (ADR 0021, decision 3). If that call exits,
+  the commit is not applied and the caller exits with the same reason; a call that timed out may
+  still have applied the queue operations.
+
+  Options of `start_link/1`:
+
+    * `:name` - this module by default.
+    * `:queue` - the `Archon.Runtime.Queue.Memory` server for queue operations, that module's
+      name by default.
   """
 
   @behaviour Archon.Runtime.Store
@@ -26,18 +37,25 @@ defmodule Archon.Runtime.Store.Memory do
 
   alias Archon.Domain.{Task, Workflow}
   alias Archon.Runtime.{Commit, Store}
+  alias Archon.Runtime.Queue.Memory, as: Queue
+  alias Archon.Runtime.Step.Effect
 
   @doc false
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, :ok, name: Keyword.get(opts, :name, __MODULE__))
+    {name, opts} = Keyword.pop(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @impl Store
   @spec commit(GenServer.server(), String.t(), Commit.t()) ::
-          :ok | {:error, :conflict | :not_found}
+          :ok | {:error, :conflict | :not_found | {:limit, String.t()}}
   def commit(server \\ __MODULE__, workflow_id, %Commit{} = commit) when is_binary(workflow_id) do
     check_commit!(workflow_id, commit)
-    GenServer.call(server, {:commit, workflow_id, commit})
+
+    case GenServer.call(server, {:commit, workflow_id, commit}) do
+      {:exit, reason} -> exit(reason)
+      reply -> reply
+    end
   end
 
   @impl Store
@@ -66,6 +84,38 @@ defmodule Archon.Runtime.Store.Memory do
   @spec in_progress_count(GenServer.server(), String.t()) :: non_neg_integer()
   def in_progress_count(server \\ __MODULE__, task_def_name) do
     GenServer.call(server, {:in_progress_count, task_def_name})
+  end
+
+  @impl Store
+  @spec pending_outbox(GenServer.server(), String.t()) :: [{Store.outbox_id(), Effect.t()}]
+  def pending_outbox(server \\ __MODULE__, workflow_id) when is_binary(workflow_id),
+    do: GenServer.call(server, {:pending_outbox, workflow_id})
+
+  @impl Store
+  @spec ack_outbox(GenServer.server(), String.t(), [Store.outbox_id()]) :: :ok
+  def ack_outbox(server \\ __MODULE__, workflow_id, ids)
+      when is_binary(workflow_id) and is_list(ids),
+      do: GenServer.call(server, {:ack_outbox, workflow_id, ids})
+
+  @impl Store
+  @spec outbox_workflow_ids(GenServer.server(), String.t() | nil, non_neg_integer()) ::
+          [String.t()]
+  def outbox_workflow_ids(server \\ __MODULE__, cursor, limit)
+      when (is_binary(cursor) or is_nil(cursor)) and is_integer(limit) and limit >= 0,
+      do: GenServer.call(server, {:outbox_workflow_ids, cursor, limit})
+
+  @impl Store
+  @spec due_workflow_ids(GenServer.server(), integer(), Store.due_key() | nil, non_neg_integer()) ::
+          [Store.due_key()]
+  def due_workflow_ids(server \\ __MODULE__, before_ms, cursor, limit)
+      when is_integer(before_ms) and is_integer(limit) and limit >= 0 do
+    case cursor do
+      nil -> :ok
+      {key, id} when is_integer(key) and is_binary(id) -> :ok
+      _other -> raise ArgumentError, "invalid cursor #{inspect(cursor)}"
+    end
+
+    GenServer.call(server, {:due_workflow_ids, before_ms, cursor, limit})
   end
 
   @impl Store
@@ -109,6 +159,30 @@ defmodule Archon.Runtime.Store.Memory do
 
     created_tasks = if create, do: create.tasks, else: []
     Enum.each(created_tasks ++ commit.upsert_tasks, &check_task!(workflow_id, &1))
+    check_new_fields!(commit)
+  end
+
+  defp check_new_fields!(%Commit{} = commit) do
+    check_outbox!(commit.outbox, commit.outbox_ack)
+    check_wake!(commit.wake)
+    check_limits!(commit.limits)
+    Queue.check_ops!(commit.queue)
+  end
+
+  defp check_outbox!(outbox, acks) do
+    unless is_list(outbox) and is_list(acks) and Enum.all?(acks, &(is_integer(&1) and &1 > 0)),
+      do: raise(ArgumentError, "invalid outbox #{inspect(outbox)} or acks #{inspect(acks)}")
+  end
+
+  defp check_wake!(wake) when wake in [:keep, :none], do: :ok
+  defp check_wake!({tag, ms}) when tag in [:at, :before] and is_integer(ms), do: :ok
+  defp check_wake!(wake), do: raise(ArgumentError, "invalid wake #{inspect(wake)}")
+
+  defp check_limits!(limits) do
+    valid? = fn {name, limit} -> is_binary(name) and is_integer(limit) and limit > 0 end
+
+    unless is_map(limits) and Enum.all?(limits, valid?),
+      do: raise(ArgumentError, "invalid limits #{inspect(limits)}")
   end
 
   defp check_task!(workflow_id, %Task{} = task) do
@@ -131,16 +205,64 @@ defmodule Archon.Runtime.Store.Memory do
   end
 
   @impl GenServer
-  def init(:ok) do
-    {:ok, %{workflows: %{}, tasks: %{}, task_ids: %{}, poll_data: %{}}}
+  def init(opts) do
+    state = %{
+      queue: Keyword.get(opts, :queue, Queue),
+      workflows: %{},
+      tasks: %{},
+      task_ids: %{},
+      # workflow ID => [{outbox ID, effect}] in ID order
+      outbox: %{},
+      outbox_seq: 0,
+      # workflow ID => epoch ms (no key: not set)
+      wake_at: %{},
+      poll_data: %{}
+    }
+
+    {:ok, state}
   end
 
   @impl GenServer
   def handle_call({:commit, workflow_id, commit}, _from, state) do
-    case apply_commit(state, workflow_id, commit) do
-      {:ok, state} -> {:reply, :ok, state}
+    with {:ok, new_state} <- apply_commit(state, workflow_id, commit),
+         :ok <- apply_queue(state.queue, commit.queue) do
+      {:reply, :ok, new_state}
+    else
       {:error, _reason} = error -> {:reply, error, state}
+      {:exit, _reason} = exit -> {:reply, exit, state}
     end
+  end
+
+  def handle_call({:pending_outbox, workflow_id}, _from, state) do
+    {:reply, Map.get(state.outbox, workflow_id, []), state}
+  end
+
+  def handle_call({:ack_outbox, workflow_id, ids}, _from, state) do
+    {:reply, :ok, ack(state, workflow_id, ids)}
+  end
+
+  def handle_call({:outbox_workflow_ids, cursor, limit}, _from, state) do
+    ids =
+      state.outbox
+      |> Map.keys()
+      |> Enum.filter(&(cursor == nil or &1 > cursor))
+      |> Enum.sort()
+      |> Enum.take(limit)
+
+    {:reply, ids, state}
+  end
+
+  def handle_call({:due_workflow_ids, before_ms, cursor, limit}, _from, state) do
+    # An unset time is due, with the key 0 (COALESCE(wake_at, 0) in the Postgres store).
+    keys =
+      for {id, %Workflow{status: :running}} <- state.workflows,
+          wake_at <- [Map.get(state.wake_at, id)],
+          wake_at == nil or wake_at <= before_ms,
+          key <- [{wake_at || 0, id}],
+          cursor == nil or key > cursor,
+          do: key
+
+    {:reply, keys |> Enum.sort() |> Enum.take(limit), state}
   end
 
   def handle_call({:get_workflow, id, include_tasks?}, _from, state) do
@@ -179,7 +301,9 @@ defmodule Archon.Runtime.Store.Memory do
         state
         | workflows: Map.delete(state.workflows, id),
           tasks: Map.drop(state.tasks, MapSet.to_list(state.task_ids[id])),
-          task_ids: Map.delete(state.task_ids, id)
+          task_ids: Map.delete(state.task_ids, id),
+          outbox: Map.delete(state.outbox, id),
+          wake_at: Map.delete(state.wake_at, id)
       }
 
       {:reply, :ok, state}
@@ -189,12 +313,7 @@ defmodule Archon.Runtime.Store.Memory do
   end
 
   def handle_call({:in_progress_count, task_def_name}, _from, state) do
-    count =
-      Enum.count(state.tasks, fn {_id, task} ->
-        task.status == :in_progress and Task.task_def_name(task) == task_def_name
-      end)
-
-    {:reply, count, state}
+    {:reply, in_progress_count_of(state, task_def_name), state}
   end
 
   def handle_call({:put_poll_data, poll_data}, _from, state) do
@@ -220,9 +339,72 @@ defmodule Archon.Runtime.Store.Memory do
         |> put_workflow(commit.workflow)
         |> put_tasks(workflow_id, commit.upsert_tasks)
         |> delete_tasks(workflow_id, commit.delete_task_ids)
+        |> ack(workflow_id, commit.outbox_ack)
+        |> append_outbox(workflow_id, commit.outbox)
+        |> put_wake(workflow_id, commit.wake)
 
-      {:ok, state}
+      with :ok <- check_limits(state, commit.limits), do: {:ok, state}
     end
+  end
+
+  # The queue cannot be rolled back, so it goes last; an exit is the caller's, not the store's.
+  defp apply_queue(_queue, []), do: :ok
+
+  defp apply_queue(queue, ops) do
+    Queue.apply_ops(queue, ops)
+  catch
+    :exit, reason -> {:exit, reason}
+  end
+
+  defp ack(state, _workflow_id, []), do: state
+
+  defp ack(state, workflow_id, ids) do
+    acked = MapSet.new(ids)
+    entries = Map.get(state.outbox, workflow_id, [])
+
+    case Enum.reject(entries, fn {id, _effect} -> MapSet.member?(acked, id) end) do
+      [] -> %{state | outbox: Map.delete(state.outbox, workflow_id)}
+      left -> %{state | outbox: Map.put(state.outbox, workflow_id, left)}
+    end
+  end
+
+  defp append_outbox(state, _workflow_id, []), do: state
+
+  defp append_outbox(state, workflow_id, effects) do
+    seq = state.outbox_seq
+    entries = Enum.with_index(effects, fn effect, i -> {seq + i + 1, effect} end)
+
+    %{
+      state
+      | outbox: Map.update(state.outbox, workflow_id, entries, &(&1 ++ entries)),
+        outbox_seq: seq + length(effects)
+    }
+  end
+
+  defp put_wake(state, _workflow_id, :keep), do: state
+
+  defp put_wake(state, workflow_id, :none),
+    do: %{state | wake_at: Map.delete(state.wake_at, workflow_id)}
+
+  defp put_wake(state, workflow_id, {:at, ms}),
+    do: %{state | wake_at: Map.put(state.wake_at, workflow_id, ms)}
+
+  defp put_wake(state, workflow_id, {:before, ms}),
+    do: %{state | wake_at: Map.update(state.wake_at, workflow_id, ms, &min(&1, ms))}
+
+  # ADR 0021, decision 5: names in binary order, as the Postgres store takes its locks.
+  defp check_limits(state, limits) do
+    limits
+    |> Enum.sort()
+    |> Enum.find_value(:ok, fn {name, limit} ->
+      if in_progress_count_of(state, name) > limit, do: {:error, {:limit, name}}
+    end)
+  end
+
+  defp in_progress_count_of(state, task_def_name) do
+    Enum.count(state.tasks, fn {_id, task} ->
+      task.status == :in_progress and Task.task_def_name(task) == task_def_name
+    end)
   end
 
   defp apply_create(state, _workflow_id, nil), do: {:ok, state}

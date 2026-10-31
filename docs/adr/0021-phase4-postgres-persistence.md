@@ -4,6 +4,7 @@
 - 날짜: 2026-10-30
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(DB 라이브러리, 큐·Effect 원자성, 여러 노드, 지연 활성화)는 2026-10-30 BOSS가 이 문서의 추천안으로 정했다.
+- 갱신: 2026-10-31 조각 4b가 결정 3의 메모리 큐 적용 방식(`Queue.Memory.apply_ops/2`, 보일 시각 그대로)을 고쳤다.
 
 ## 맥락
 
@@ -115,8 +116,10 @@ ADR 0018 결정 2의 `Commit` 필드 네 개에 다음 다섯을 더한다. 저�
   기록으로 찾음)는 지운 워크플로우의 Commit들이 넣은 `Commit.queue`의 push에서 찾는다.
 - **저장소와 큐는 같은 백엔드여야 한다.** `Store.Postgres`는 `Queue.Postgres`의 쓰기 함수를 같은 트랜잭션 연결로
   부르고, `Store.Memory`는 다른 필드를 모두 검사·적용한 뒤 마지막에 `Queue.Memory`에 순서대로 적용한다(메모리 구현은
-  원래 내구성이 없고, 큐 연산은 되돌리지 않으므로 거절될 수 있는 검사를 먼저 한다). `Queue.Memory`의 push·postpone은
-  지연을 받으므로 `Store.Memory`가 보일 시각에서 같은 시계(`Archon.Runtime.now/0`)의 지금을 빼서 넘긴다. 설정이 둘을 섞으면
+  원래 내구성이 없고, 큐 연산은 되돌리지 않으므로 거절될 수 있는 검사를 먼저 한다). `Store.Memory`는 큐 연산 목록을
+  `Queue.Memory.apply_ops/2`로 한 메시지에 넘기고, `Queue.Memory`는 보일 시각을 그대로 쓴다. 지연으로 바꿔 넘기면 두
+  프로세스가 시계를 따로 읽어 보일 시각이 조금씩 밀리기 때문이다(조각 4b에서 갱신). 그 호출이 exit하면 Commit을 적용하지 않고
+  호출자가 같은 이유로 exit한다. 설정이 둘을 섞으면
   `Archon.Runtime.Supervisor`가 시작을 거절한다.
 - **Store behaviour의 새 콜백.**
 
