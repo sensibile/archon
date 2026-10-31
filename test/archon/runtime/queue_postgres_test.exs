@@ -142,7 +142,7 @@ defmodule Archon.Runtime.QueuePostgresTest do
 
   describe "the write fence" do
     setup %{server: server} do
-      on_exit(&Postgres.clear_epoch/0)
+      keep_epoch()
       Postgres.clear_epoch()
       %{fenced: %{server | fence: :runtime}}
     end

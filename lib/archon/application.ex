@@ -7,10 +7,13 @@ defmodule Archon.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      Archon.Script.Pool,
-      Archon.Runtime.Supervisor
-    ]
+    # Tests start the runtime from test/test_helper.exs, once the database is set up.
+    runtime =
+      if Application.get_env(:archon, :start_runtime, true),
+        do: [Archon.Runtime.Supervisor],
+        else: []
+
+    children = [Archon.Script.Pool | runtime]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

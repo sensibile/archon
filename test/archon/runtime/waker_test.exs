@@ -273,6 +273,7 @@ defmodule Archon.Runtime.WakerTest do
       assert Runtime.store().pending_outbox(id) == []
     end
 
+    @tag backend: :memory
     test "is off with the memory store by default, and on when set" do
       saved = Application.get_env(:archon, Archon.Runtime)
 
@@ -296,6 +297,21 @@ defmodule Archon.Runtime.WakerTest do
 
       put_settings(evict_after: 60_000)
       evicted = start_simple(%{"x" => 2})
+      await_down(evicted)
+    end
+
+    @tag backend: :postgres
+    test "is 60 s with the Postgres store by default" do
+      put_settings(hibernate_after: 20, settings: [workflow_offset_timeout_ms: 600_000])
+
+      Application.put_env(
+        :archon,
+        Archon.Runtime,
+        Keyword.delete(Application.get_env(:archon, Archon.Runtime), :evict_after)
+      )
+
+      evicted = start_simple(%{"x" => 1})
+      assert stored_wake(evicted) - Runtime.now() > 60_000
       await_down(evicted)
     end
 

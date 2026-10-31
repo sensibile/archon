@@ -13,7 +13,6 @@ defmodule Archon.Runtime.RuntimeTest do
 
   alias Archon.Contract
   alias Archon.Domain.{Task, WorkflowDef, WorkflowTask}
-  alias Archon.Runtime.Queue.Memory, as: Queue
 
   import Archon.StepReplay, only: [assert_matches: 2]
 
@@ -24,7 +23,7 @@ defmodule Archon.Runtime.RuntimeTest do
 
       id = start_simple(start["request"]["body"])
       assert Contract.normalize(id) == Contract.normalize(start["response"]["body"])
-      assert Queue.contains?("archon_task_a", task(id, "task_a_ref").task_id)
+      assert Runtime.queue().contains?("archon_task_a", task(id, "task_a_ref").task_id)
 
       terminate = Contract.fixture("workflow_terminate")
       %URI{query: query} = URI.parse(terminate["request"]["path"])
@@ -35,7 +34,7 @@ defmodule Archon.Runtime.RuntimeTest do
 
       {:ok, workflow} = Runtime.get_workflow(id)
       assert_matches(workflow, "workflow_get_terminated")
-      refute Queue.contains?("archon_task_a", task(id, "task_a_ref").task_id)
+      refute Runtime.queue().contains?("archon_task_a", task(id, "task_a_ref").task_id)
       await_down(id)
     end
 
@@ -50,7 +49,7 @@ defmodule Archon.Runtime.RuntimeTest do
       assert %Task{status: :in_progress, task_id: ^task_id} =
                WorkflowServer.poll(id, task_id, "archon-contract")
 
-      assert Queue.ack("archon_task_a", task_id)
+      assert Runtime.queue().ack("archon_task_a", task_id)
 
       {:ok, workflow} = Runtime.get_workflow(id)
       assert_matches(workflow, "workflow_get_running")
@@ -200,12 +199,13 @@ defmodule Archon.Runtime.RuntimeTest do
 
   describe "start_workflow_idempotent/1" do
     test "creates once, decides after answering and returns the stored one again" do
-      input = %{name: "archon_simple", workflow_id: "idem-1", input: %{"x" => 2}}
+      id = "idem-" <> Runtime.new_id()
+      input = %{name: "archon_simple", workflow_id: id, input: %{"x" => 2}}
 
-      assert {:ok, %{workflow_id: "idem-1", tasks: []}} = Runtime.start_workflow_idempotent(input)
-      eventually(fn -> task("idem-1", "task_a_ref") end)
+      assert {:ok, %{workflow_id: ^id, tasks: []}} = Runtime.start_workflow_idempotent(input)
+      eventually(fn -> task(id, "task_a_ref") end)
 
-      assert {:ok, %{workflow_id: "idem-1", tasks: [_task]}} =
+      assert {:ok, %{workflow_id: ^id, tasks: [_task]}} =
                Runtime.start_workflow_idempotent(input)
     end
 
@@ -213,10 +213,12 @@ defmodule Archon.Runtime.RuntimeTest do
       assert Runtime.start_workflow_idempotent(%{name: "archon_simple", input: %{}}) ==
                {:error, {:invalid, "workflowId must be present for idempotent workflow start"}}
 
-      input = %{name: "archon_simple", workflow_id: "idem-2", input: %{}}
+      id = "idem-" <> Runtime.new_id()
+      input = %{name: "archon_simple", workflow_id: id, input: %{}}
       assert {:ok, _created} = Runtime.start_workflow_idempotent(input)
+      message = "Workflow id #{id} already belongs to parent workflow null task null"
 
-      assert {:error, "Workflow id idem-2 already belongs to parent workflow null task null" <> _} =
+      assert {:error, ^message <> _} =
                Runtime.start_workflow_idempotent(
                  Map.merge(input, %{parent_workflow_id: "p", parent_workflow_task_id: "t"})
                )

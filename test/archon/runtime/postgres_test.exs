@@ -131,6 +131,7 @@ defmodule Archon.Runtime.PostgresTest do
         Postgres.transaction!(instance, fn -> Postgres.rollback(instance, :nope) end)
       end
 
+      keep_epoch()
       Postgres.clear_epoch()
 
       assert_raise Postgres.FencedError, fn ->
@@ -145,7 +146,7 @@ defmodule Archon.Runtime.PostgresTest do
 
   describe "the write fence" do
     setup %{instance: instance} do
-      on_exit(&Postgres.clear_epoch/0)
+      keep_epoch()
       Postgres.clear_epoch()
       %{fenced: %{instance | fence: :runtime}}
     end

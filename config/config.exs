@@ -16,6 +16,15 @@ config :archon, Archon.Runtime,
   activation_margin: 5_000,
   activation_page_size: 100
 
+# Deployments run on Postgres (ADR 0021): the database must be migrated (Archon.Release.migrate/0)
+# and DATABASE_URL set (runtime.exs) before the application starts.
+if config_env() == :prod do
+  config :archon, Archon.Runtime,
+    store: Archon.Runtime.Store.Postgres,
+    queue: Archon.Runtime.Queue.Postgres,
+    metadata: Archon.Runtime.Metadata.Postgres
+end
+
 # `evict_after` (ADR 0021, decision 6) is left to its default by backend: off with the memory
 # store, 60 s with the Postgres one.
 

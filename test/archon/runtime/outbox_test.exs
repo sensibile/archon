@@ -166,8 +166,10 @@ defmodule Archon.Runtime.OutboxTest do
       )
 
       assert %Task{status: :completed} = finish(child, :completed)
-      assert_receive {:ran, {:notify_parent, ^parent, _task, nil}}
-      assert_receive {:ran, {:notify_parent, ^parent, _task, nil}}, 1_000
+      # The child is read when the entry runs: the memory store gives nil, the Postgres store the
+      # owner it read with the entry (ADR 0021, decision 4).
+      assert_receive {:ran, {:notify_parent, ^parent, _task, _child}}
+      assert_receive {:ran, {:notify_parent, ^parent, _task, _child}}, 1_000
       assert eventually(fn -> pending(child) == [] end)
       assert await_status(parent, :completed)
       refute_receive {:ran, _effect}, 100

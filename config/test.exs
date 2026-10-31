@@ -13,5 +13,23 @@ config :archon, Archon.Runtime,
   hook: {Archon.RuntimeHooks, :hook, []},
   idle_timeout: 200
 
+# ARCHON_BACKEND=postgres runs the runtime tests on the Postgres backend (ADR 0021, decision 9).
+case System.get_env("ARCHON_BACKEND") do
+  backend when backend in [nil, "", "memory"] ->
+    :ok
+
+  "postgres" ->
+    config :archon, Archon.Runtime,
+      store: Archon.Runtime.Store.Postgres,
+      queue: Archon.Runtime.Queue.Postgres,
+      metadata: Archon.Runtime.Metadata.Postgres
+
+  other ->
+    raise "ARCHON_BACKEND must be memory or postgres, got: #{inspect(other)}"
+end
+
+# test/test_helper.exs starts the runtime after setting up the database.
+config :archon, start_runtime: false
+
 # Postgres tests share one database without the Ecto sandbox (ADR 0021, decision 9).
 config :archon, Archon.Repo, pool_size: 10, log: false

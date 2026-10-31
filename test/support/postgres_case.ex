@@ -80,6 +80,48 @@ defmodule Archon.PostgresCase do
   defp database(config),
     do: "#{config[:hostname]}:#{config[:port] || 5432}/#{config[:database]}"
 
+  @doc "The runtime's backend in this run: `:postgres` with `ARCHON_BACKEND=postgres`."
+  @spec backend() :: :memory | :postgres
+  def backend,
+    do: if(Archon.Runtime.store() == Archon.Runtime.Store.Postgres, do: :postgres, else: :memory)
+
+  @doc """
+  Starts `Archon.Runtime.Supervisor` under the application (`test/test_helper.exs`). On the
+  Postgres backend the runtime's tree owns `Archon.Repo` (ADR 0021, decision 8), so the repo
+  `setup_database/0` started is stopped first, after emptying the runtime schema: the runtime
+  tests start from no workflow, queue message or definition.
+  """
+  @spec start_runtime(:memory | :postgres) :: :ok
+  def start_runtime(:memory), do: start_runtime_child()
+
+  def start_runtime(:postgres) do
+    reset!(Postgres.new(prefix: Postgres.runtime_prefix()))
+    :ok = Supervisor.terminate_child(Archon.Supervisor, Repo)
+    :ok = Supervisor.delete_child(Archon.Supervisor, Repo)
+    start_runtime_child()
+  end
+
+  defp start_runtime_child do
+    {:ok, _pid} = Supervisor.start_child(Archon.Supervisor, Archon.Runtime.Supervisor)
+    :ok
+  end
+
+  @doc """
+  Restores the published node epoch after the test. A test that publishes or withdraws an epoch
+  calls it first: on the Postgres backend the running runtime writes with the epoch its
+  `Archon.Runtime.Postgres.NodeLock` published.
+  """
+  @spec keep_epoch() :: :ok
+  def keep_epoch do
+    saved = Postgres.epoch()
+
+    ExUnit.Callbacks.on_exit(fn ->
+      if saved, do: Postgres.put_epoch(saved), else: Postgres.clear_epoch()
+    end)
+
+    :ok
+  end
+
   @doc "Empties every table of `instance`'s schema and resets the node epoch to 0."
   @spec reset!(Postgres.t()) :: :ok
   def reset!(%Postgres{repo: repo} = instance) do
