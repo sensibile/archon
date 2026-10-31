@@ -138,6 +138,10 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   | 예외 격리(`{:commit \| :pre_effect \| :post_effect \| :env, _}`), 호출 timeout·exit, 저장소 오류 | `TransientException` | 500 | true |
   | 그 밖 | `Throwable` | 500 | false |
 
+- **`validationErrors`의 원소**는 upstream `ValidationError`(`path`, `message`, `invalidValue`)다. `validate/2`의 오류 목록은
+  `{경로, 문구}`뿐이므로, `ArchonWeb.Errors`는 오류 목록과 함께 검증한 입력(디코딩한 JSON)을 받아 경로로 값을 찾고 upstream
+  `ValidationExceptionMapper.getViolationInvalidValue`의 규칙대로 넣는다: 문자열·숫자·불리언은 문자열로(`""`도 그대로), 객체·배열·
+  `null`은 `null`. 예: `update-v2`에 `taskId: ""`면 `invalidValue: ""`. 경로 문법과 값의 문자열 표기(Java `toString`)는 픽스처로 맞춘다.
 - 문구가 없는 오류(`:not_found`, `:conflict`)는 컨트롤러가 upstream 서비스·실행기의 문구를 붙인다. 예: 조회
   `"No such workflow found by id: <id>"`(픽스처), 정의 `"No such workflow found by name: %s, version: %d"`, 태스크 정의
   `"No such taskType found by name: %s"`, 등록 충돌 `"Workflow with %s already exists!"`(`key()`는 `name.version`). 문구는
@@ -184,8 +188,11 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 ### 6. 골든 픽스처 기반 계약 시험
 
 - **재생 시험.** `test/support/archon_web/contract_case.ex`의 재생 도우미가 픽스처 시나리오를 캡처 순서대로 `Phoenix.ConnTest`로
-  보낸다. 캡처한 ID(경로와 body의 UUID)는 Archon이 실제로 만든 ID로 바꿔 끼우고(앞 응답에서 얻은 workflowId·taskId의 대응표),
-  응답의 상태 코드, `Content-Type`, `Archon.Contract.normalize/1`을 적용한 body를 비교한다. JSON 스키마 검사(`priv/contract`)도
+  보낸다. 캡처한 ID(경로와 body의 UUID)는 Archon이 실제로 만든 ID로 바꿔 끼운다. 대응표는 캡처한 UUID가 응답에 처음 나올 때
+  그 자리의 실제 값으로 한 번만 정하고, 그 뒤 요청에는 대응값을 넣는다. 응답 비교는 기대 body의 캡처 UUID를 대응값으로 바꾼 뒤 한다.
+  그래서 이미 대응이 정해진 ID(예: 갱신한 태스크의 taskId, 시작한 workflowId를 담은 태스크의 `workflowInstanceId`)가 다른 UUID로
+  나오면 실패한다. `Archon.Contract.normalize/1`은 시각 필드에만 쓰고 UUID 정규화에는 기대지 않는다. 이렇게 상태 코드,
+  `Content-Type`, body를 비교한다. JSON 스키마 검사(`priv/contract`)도
   함께 한다. 이 시험은 두 백엔드(ADR 0021 결정 9의 `ARCHON_BACKEND`)에서 돈다.
 - **픽스처 보강.** 지금 픽스처가 다루지 않는 MVP 응답은 upstream 서버에서 캡처해 더한다(손으로 만들지 않는다, ADR 0001).
   조각 5a가 `scripts/contract/capture_fixtures.sh`에 시나리오를 더하고 한 번에 다시 캡처한다. 5c·5d·5e는 스크립트·픽스처·
