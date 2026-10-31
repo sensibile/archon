@@ -140,7 +140,7 @@ defmodule Archon.Runtime.Postgres do
   Like `transaction/2`, for writes whose callers cannot take an error tuple (the queue and
   metadata callbacks): returns `fun`'s result and raises `Archon.Runtime.Postgres.FencedError`
   when the fence check fails, which the runtime's exception isolation handles (ADR 0021,
-  decision 7). `fun` must not call `rollback/2`.
+  decision 7). `fun` must not call `rollback/2`: any other rollback raises `ArgumentError`.
   """
   @spec transaction!(t(), (-> value)) :: value when value: term()
   def transaction!(%__MODULE__{} = instance, fun) do

@@ -207,10 +207,15 @@ defmodule Archon.Runtime.QueuePostgresTest do
   describe "NUL or invalid UTF-8 in a queue name or message ID" do
     test "cannot be added", %{server: server} do
       for {queue, id} <- [{"q\u0000", "a"}, {"q", "a\u0000"}, {<<0xFF>>, "a"}, {"q", <<0xFF>>}] do
-        assert_raise ArgumentError, ~r/NUL/, fn -> PgQueue.push(server, queue, id, 0, 0) end
-        assert_raise ArgumentError, ~r/NUL/, fn -> PgQueue.postpone(server, queue, id, 0, 0) end
+        assert_raise ArgumentError, ~r/UTF-8 without NUL/, fn ->
+          PgQueue.push(server, queue, id, 0, 0)
+        end
 
-        assert_raise ArgumentError, ~r/NUL/, fn ->
+        assert_raise ArgumentError, ~r/UTF-8 without NUL/, fn ->
+          PgQueue.postpone(server, queue, id, 0, 0)
+        end
+
+        assert_raise ArgumentError, ~r/UTF-8 without NUL/, fn ->
           Repo.transaction(fn -> PgQueue.apply_ops(server, [{:push, queue, id, 0, 0}]) end)
         end
       end
