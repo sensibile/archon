@@ -114,6 +114,10 @@ defmodule Archon.Runtime.Postgres do
   Returns `{:ok, value}` with `fun`'s result, `{:error, :fenced}` when the fence check fails, or
   `{:error, reason}` when `fun` calls `rollback/2`. Exceptions and exits from `fun` roll the
   transaction back and propagate.
+
+  Do not nest it in another transaction: the fence must run first in the outer transaction, so
+  code that opens its own (a `Store.commit/2` with queue writes) calls `check_fence/1` first
+  instead.
   """
   @spec transaction(t(), (-> value)) :: {:ok, value} | {:error, term()} when value: term()
   def transaction(%__MODULE__{repo: repo} = instance, fun) when is_function(fun, 0) do
