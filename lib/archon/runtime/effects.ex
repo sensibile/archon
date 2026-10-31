@@ -52,7 +52,6 @@ defmodule Archon.Runtime.Effects do
     do: start |> SubWorkflows.start_failure_workflow() |> failure_workflow_started()
 
   @doc false
-  # Public so the type checker does not judge the clauses by the 3c placeholder's result.
   @spec failure_workflow_started(:ok | {:error, String.t()}) :: :ok | {:event, Event.t()}
   def failure_workflow_started({:error, reason}),
     do: {:event, {:failure_workflow_started, {:error, reason}}}
