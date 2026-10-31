@@ -191,7 +191,8 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   보낸다. 캡처한 ID(경로와 body의 UUID)는 Archon이 실제로 만든 ID로 바꿔 끼운다. 대응표는 캡처한 UUID가 응답에 처음 나올 때
   그 자리의 실제 값으로 한 번만 정하고, 그 뒤 요청에는 대응값을 넣는다. 응답 비교는 기대 body의 캡처 UUID를 대응값으로 바꾼 뒤 한다.
   그래서 이미 대응이 정해진 ID(예: 갱신한 태스크의 taskId, 시작한 workflowId를 담은 태스크의 `workflowInstanceId`)가 다른 UUID로
-  나오면 실패한다. `Archon.Contract.normalize/1`은 시각 필드에만 쓰고 UUID 정규화에는 기대지 않는다. 이렇게 상태 코드,
+  나오면 실패한다. 시각 필드는 `Archon.Contract.normalize/1`처럼 가리되 UUID는 가리지 않는다(재생 도우미가 시각만 가리는 비교를 둔다. 대응표에 없는
+  새 UUID만 처음 나온 자리에서 대응을 정한다). 이렇게 상태 코드,
   `Content-Type`, body를 비교한다. JSON 스키마 검사(`priv/contract`)도
   함께 한다. 이 시험은 두 백엔드(ADR 0021 결정 9의 `ARCHON_BACKEND`)에서 돈다.
 - **픽스처 보강.** 지금 픽스처가 다루지 않는 MVP 응답은 upstream 서버에서 캡처해 더한다(손으로 만들지 않는다, ADR 0001).
