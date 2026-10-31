@@ -76,9 +76,10 @@ defmodule Archon.Domain.SubWorkflowParams do
   @doc false
   @spec decode_custom(:workflow_definition, Codec.json(), Codec.path(), Codec.opts()) ::
           Codec.result(WorkflowDef.t() | String.t())
-  def decode_custom(:workflow_definition, value, path, _codec_opts) when is_binary(value) do
-    # SubWorkflowParams#setWorkflowDefinition
-    if String.starts_with?(value, "${") and String.ends_with?(value, "}") do
+  def decode_custom(:workflow_definition, value, path, codec_opts) when is_binary(value) do
+    # SubWorkflowParams#setWorkflowDefinition; the storage encoding keeps what was stored.
+    if Keyword.get(codec_opts, :internal, false) or
+         (String.starts_with?(value, "${") and String.ends_with?(value, "}")) do
       {:ok, value}
     else
       {:error,

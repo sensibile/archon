@@ -72,6 +72,17 @@ defmodule Archon.Domain.StorageCodecTest do
     assert round_trip(WorkflowDef, definition) == definition
     task_def = %TaskDef{name: "t", input_keys: nil, input_template: nil}
     assert round_trip(TaskDef, task_def) == task_def
+
+    # A workflowDefinition string that REST would refuse is still given back as stored.
+    params = %SubWorkflowParams{workflow_definition: "manual"}
+
+    stored = %WorkflowDef{
+      name: "p",
+      tasks: [%WorkflowTask{name: "s", sub_workflow_param: params}]
+    }
+
+    assert round_trip(WorkflowDef, stored) == stored
+    assert {:error, _errors} = stored |> WorkflowDef.to_json() |> WorkflowDef.from_json()
   end
 
   test "strings with NUL survive the JSON text" do
