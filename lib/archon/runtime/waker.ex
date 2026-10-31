@@ -25,7 +25,7 @@ defmodule Archon.Runtime.Waker do
   @doc false
   def start_link(_arg), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
-  @doc "One round: activates the due workflows; returns how many processes it started."
+  @doc "One round: activates the due workflows; returns how many had no process (`Recovery.run/1`)."
   @spec run() :: non_neg_integer()
   def run, do: Recovery.run(:due)
 

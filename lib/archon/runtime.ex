@@ -43,7 +43,8 @@ defmodule Archon.Runtime do
     * `:hibernate_after` - idle time after which a running workflow's process hibernates, 15 s.
     * `:evict_after` - with an idle running workflow's next evaluation further than this, its
       process ends after `hibernate_after` instead of hibernating (ADR 0021, decision 6); `nil`
-      is off. By default off with the memory store and 60 s with the Postgres one.
+      is off. By default off with the memory store and 60 s with the Postgres one. A process is
+      never ended with its next evaluation within `:activation_margin`.
     * `:waker_interval` - how often `Archon.Runtime.Waker` activates the due workflows, 1 s.
     * `:activation_margin` - how far ahead a stored re-evaluation time is due for activation,
       5 s; longer than `:waker_interval`.

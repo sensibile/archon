@@ -54,6 +54,14 @@ defmodule Archon.Runtime.WakerTest do
     end
   end
 
+  # Hibernating shows as erlang:hibernate/3, or gen_server's own hibernation loop in OTP 28.
+  defp hibernating?(pid),
+    do:
+      Process.info(pid, :current_function) in [
+        {:current_function, {:erlang, :hibernate, 3}},
+        {:current_function, {:gen_server, :loop_hibernate, 4}}
+      ]
+
   defp timer(id), do: :sys.get_state(WorkflowServer.whereis(id)).timer
 
   defp capture_commits(id) do
@@ -229,13 +237,7 @@ defmodule Archon.Runtime.WakerTest do
       id = start_simple(%{"x" => 1})
       pid = WorkflowServer.whereis(id)
 
-      # Hibernating shows as erlang:hibernate/3, or gen_server's own hibernation loop in OTP 28.
-      assert eventually(fn ->
-               Process.info(pid, :current_function) in [
-                 {:current_function, {:erlang, :hibernate, 3}},
-                 {:current_function, {:gen_server, :loop_hibernate, 4}}
-               ]
-             end)
+      assert eventually(fn -> hibernating?(pid) end)
 
       assert WorkflowServer.whereis(id) == pid
     end
@@ -271,11 +273,92 @@ defmodule Archon.Runtime.WakerTest do
       assert Runtime.store().pending_outbox(id) == []
     end
 
-    test "is off with the memory store by default" do
+    test "is off with the memory store by default, and on when set" do
+      saved = Application.get_env(:archon, Archon.Runtime)
+
+      put_settings(
+        hibernate_after: 20,
+        settings: [workflow_offset_timeout_ms: 600_000]
+      )
+
+      Application.put_env(
+        :archon,
+        Archon.Runtime,
+        Keyword.delete(Application.get_env(:archon, Archon.Runtime), :evict_after)
+      )
+
+      on_exit(fn -> Application.put_env(:archon, Archon.Runtime, saved) end)
+      kept = start_simple(%{"x" => 1})
+      assert stored_wake(kept) - Runtime.now() > 60_000
+      pid = WorkflowServer.whereis(kept)
+      assert eventually(fn -> hibernating?(pid) end)
+      assert WorkflowServer.whereis(kept) == pid
+
+      put_settings(evict_after: 60_000)
+      evicted = start_simple(%{"x" => 2})
+      await_down(evicted)
+    end
+
+    test "a process with a :recover timer is not evicted" do
+      put_settings(evict_after: 1_000, hibernate_after: 20)
       id = start_simple(%{"x" => 1})
       pid = WorkflowServer.whereis(id)
-      Process.sleep(50)
+      task_id = task(id, "task_a_ref").task_id
+
+      RuntimeHooks.install(
+        hook: fn
+          :step, ^id, {:update, _result} -> raise "step down"
+          _point, _id, _data -> :ok
+        end
+      )
+
+      assert {:error, %RuntimeError{}} =
+               WorkflowServer.update(%TaskResult{
+                 workflow_instance_id: id,
+                 task_id: task_id,
+                 status: :in_progress
+               })
+
+      assert %{message: :recover, at: at} = :sys.get_state(pid).timer
+      assert at - Runtime.now() > 5_000
+      assert eventually(fn -> hibernating?(pid) end)
       assert WorkflowServer.whereis(id) == pid
+    end
+
+    test "a process whose next evaluation is within the activation margin stays" do
+      # Else the waker would activate it at once and it would end again (evict_after < margin).
+      put_settings(
+        evict_after: 1_000,
+        hibernate_after: 20,
+        settings: [workflow_offset_timeout_ms: 3_000]
+      )
+
+      id = start_simple(%{"x" => 1})
+      pid = WorkflowServer.whereis(id)
+      assert (stored_wake(id) - Runtime.now()) in 1_001..5_000
+      assert eventually(fn -> hibernating?(pid) end)
+      assert WorkflowServer.whereis(id) == pid
+    end
+  end
+
+  describe "folding the timer effects of one step (WorkflowServer.fold_wake/2)" do
+    test "gives what the store has after applying them one by one" do
+      cases = [
+        {:keep, [], :keep},
+        {:keep, [{:wake_at, 5}], {:at, 5}},
+        {:keep, [{:wake_before, 5}], {:before, 5}},
+        {:keep, [:cancel_wake], :none},
+        {:keep, [{:wake_at, 9}, {:wake_before, 5}], {:at, 5}},
+        {:keep, [{:wake_at, 3}, {:wake_before, 5}], {:at, 3}},
+        {:keep, [{:wake_before, 9}, {:wake_before, 5}], {:before, 5}},
+        {:keep, [:cancel_wake, {:wake_before, 5}], {:at, 5}},
+        {:keep, [{:wake_before, 5}, {:wake_at, 9}], {:at, 9}},
+        {:keep, [{:wake_at, 5}, :cancel_wake], :none},
+        {:keep, [{:queue_remove, "q", "t"}, {:wake_at, 5}], {:at, 5}}
+      ]
+
+      for {wake, effects, expected} <- cases,
+          do: assert(WorkflowServer.fold_wake(wake, effects) == expected, inspect(effects))
     end
   end
 end

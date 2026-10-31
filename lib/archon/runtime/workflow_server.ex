@@ -70,7 +70,7 @@ defmodule Archon.Runtime.WorkflowServer do
     * With `evict_after` set (ADR 0021, decision 6; the Postgres store's default, 60 s), a
       running workflow's process that got no message for `hibernate_after` ends normally
       instead of hibernating when its `:wake` timer, saved with a commit, is more than
-      `evict_after` away and its outbox is empty. The next request activates it again and
+      `evict_after` (and `activation_margin`) away and its outbox is empty. The next request activates it again and
       `Archon.Runtime.Waker` does before the timer is due.
 
   ## Outbox
@@ -572,7 +572,11 @@ defmodule Archon.Runtime.WorkflowServer do
 
   # ADR 0021, decision 6: the timer effects stay in post for the process timer and are saved as
   # the workflow's re-evaluation time, combined in their order as the store would apply them.
-  defp take_wake(%Commit{wake: wake}, post), do: Enum.reduce(post, wake, &wake/2)
+  defp take_wake(%Commit{wake: wake}, post), do: fold_wake(wake, post)
+
+  @doc false
+  @spec fold_wake(Commit.wake(), [Step.Effect.t()]) :: Commit.wake()
+  def fold_wake(wake, effects), do: Enum.reduce(effects, wake, &wake/2)
 
   defp wake({:wake_at, at}, _wake), do: {:at, at}
   defp wake({:wake_before, at}, {:at, current}), do: {:at, min(current, at)}
@@ -896,7 +900,8 @@ defmodule Archon.Runtime.WorkflowServer do
   defp rest, do: if(evict_after(), do: hibernate_after(), else: :infinity)
 
   # A running workflow whose next evaluation, saved in the store, is far enough for the waker to
-  # activate it again, and whose outbox is empty (ADR 0021, decision 4).
+  # activate it again, and whose outbox is empty (ADR 0021, decision 4). Never within the
+  # activation margin, or a process the waker just activated would end and be activated again.
   defp evict?(%__MODULE__{
          workflow: %Workflow{status: :running},
          runner: nil,
@@ -906,7 +911,7 @@ defmodule Archon.Runtime.WorkflowServer do
        }) do
     case evict_after() do
       nil -> false
-      after_ms -> at - Runtime.now() > after_ms
+      after_ms -> at - Runtime.now() > max(after_ms, Runtime.setting(:activation_margin, 5_000))
     end
   end
 

@@ -43,7 +43,8 @@ defmodule Archon.Runtime.Recovery do
 
   @doc """
   Activates the workflows of `selection` (`:all` with the memory store, else `:due`) and those
-  with outbox entries; returns how many processes it started.
+  with outbox entries; returns how many it activated that had no process when it looked (one
+  started meanwhile by a request is counted too).
   """
   @spec run(:all | :due) :: non_neg_integer()
   def run(selection \\ default_selection()) do
