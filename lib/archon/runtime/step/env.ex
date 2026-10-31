@@ -26,6 +26,8 @@ defmodule Archon.Runtime.Step.Env do
     * `workflows` - other workflows the step reads, by ID: the children of `SUB_WORKFLOW`
       tasks, the parent and the failure workflow. `nil` means the store has no such workflow; a
       missing key means it was not looked up, and the check that needs it is skipped.
+    * `outbox_pending?` - the workflow has outbox entries left (ADR 0021, decision 4), for the
+      recovery check of a terminal workflow.
 
   The settings default to upstream's `ConductorProperties`:
 
@@ -61,6 +63,7 @@ defmodule Archon.Runtime.Step.Env do
     in_progress: %{},
     queued: MapSet.new(),
     workflows: %{},
+    outbox_pending?: false,
     workflow_offset_timeout_ms: 30_000,
     max_postpone_ms: 3_600_000,
     active_worker_last_poll_ms: 10_000,
@@ -82,6 +85,7 @@ defmodule Archon.Runtime.Step.Env do
           in_progress: %{optional(String.t()) => non_neg_integer()},
           queued: MapSet.t(String.t()),
           workflows: %{optional(String.t()) => Workflow.t() | nil},
+          outbox_pending?: boolean(),
           workflow_offset_timeout_ms: non_neg_integer(),
           max_postpone_ms: non_neg_integer(),
           active_worker_last_poll_ms: non_neg_integer(),

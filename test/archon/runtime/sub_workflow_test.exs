@@ -653,12 +653,16 @@ defmodule Archon.Runtime.SubWorkflowTest do
     end
 
     test "terminating a child that does not exist succeeds" do
-      assert SubWorkflows.terminate_child("archon-no-such-child", "parent ended") == :ok
+      assert SubWorkflows.terminate_child("archon-owner", "archon-no-such-child", "parent ended") ==
+               :ok
     end
 
-    test "a notice to a parent that does not exist is dropped" do
+    test "a notice to a parent that does not exist answers not found (the outbox acks it)" do
       child = %Workflow{workflow_id: "archon-orphan", status: :completed}
-      assert SubWorkflows.notify_parent("archon-no-such-parent", "t", child) == :ok
+
+      assert SubWorkflows.notify_parent("archon-no-such-parent", "t", child) ==
+               {:error, :not_found}
+
       assert SubWorkflows.notify_parent("archon-no-such-parent", nil, child) == :ok
     end
 

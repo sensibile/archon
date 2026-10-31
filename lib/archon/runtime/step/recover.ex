@@ -27,7 +27,8 @@ defmodule Archon.Runtime.Step.Recover do
 
   For a terminal workflow nothing is decided: a failure workflow that the output names but the
   store does not have is started again, and the children of `CANCELED` `SUB_WORKFLOW` tasks that
-  are still running are terminated.
+  are still running are terminated. Both are skipped while the workflow's outbox has entries
+  left (`Env.outbox_pending?`, ADR 0021, decision 4).
 
   A child retried or restarted after its parent ended is neither terminated by the parent nor
   terminates itself: the parent revives when it hears of it (ADR 0018, decision 9).
@@ -131,6 +132,10 @@ defmodule Archon.Runtime.Step.Recover do
   end
 
   defp unstick(state), do: state
+
+  # The outbox still holds work of this workflow, which does what these checks would (ADR 0021,
+  # decision 4); they remain for workflows stored before it.
+  defp terminal(%State{env: %{outbox_pending?: true}} = state), do: state
 
   defp terminal(%State{wf: wf, env: env} = state) do
     state =

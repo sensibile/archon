@@ -143,7 +143,8 @@ defmodule Archon.Runtime.Step.Lifecycle do
       wf = %{
         State.set_status(%{wf | tasks: Enum.reverse(tasks)}, :running)
         | last_retried_time: state.now,
-          reason_for_incompletion: nil
+          reason_for_incompletion: nil,
+          revived_parent_end_count: parent_end_count(state)
       }
 
       state = state |> State.put_workflow(wf) |> State.save_workflow() |> State.due(due)
@@ -271,7 +272,8 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
         wf = %{
           State.set_status(state.wf, :running)
-          | workflow_definition: definition,
+          | revived_parent_end_count: parent_end_count(state),
+            workflow_definition: definition,
             reason_for_incompletion: nil,
             failed_task_id: nil,
             create_time: state.now,
@@ -339,9 +341,15 @@ defmodule Archon.Runtime.Step.Lifecycle do
           state
       end
 
+    revived =
+      if Workflow.terminal?(state.wf.status),
+        do: parent_end_count(state),
+        else: state.wf.revived_parent_end_count
+
     wf = %{
       State.set_status(state.wf, :running)
-      | reason_for_incompletion: nil,
+      | revived_parent_end_count: revived,
+        reason_for_incompletion: nil,
         failed_task_id: nil,
         failed_reference_task_names: [],
         failed_task_names: [],
@@ -475,16 +483,31 @@ defmodule Archon.Runtime.Step.Lifecycle do
   def unsuccessful_terminal_task?(task), do: unsuccessful_terminal?(task)
 
   @doc """
-  Whether a child runs again since its parent ended: it ended itself, and was retried or
-  restarted no earlier than the parent's `endTime` (the same millisecond counts). The recovery
-  checks leave such a child alone, as the parent is about to revive (`child_revived/2`) or chose
-  not to. A child that never ended, or that ran again before its parent ended, is not one.
+  Whether a child runs again since its parent's last end (ADR 0021, L2): it was retried,
+  restarted or revived after reading the parent's current `endCount`
+  (`revivedParentEndCount`). The recovery checks leave such a child alone, as the parent is about
+  to revive (`child_revived/2`) or chose not to. A child that never ended, or that ran again
+  before its parent ended, is not one; once the parent runs and ends again, its `endCount` moves
+  on and the child is an ordinary one.
   """
   @spec revived_after?(Workflow.t(), Workflow.t()) :: boolean()
-  def revived_after?(%Workflow{} = child, %Workflow{end_time: end_time}) do
-    child.previous_status not in [nil, :running, :paused] and end_time > 0 and
-      max(child.create_time, child.last_retried_time) >= end_time
+  def revived_after?(%Workflow{revived_parent_end_count: seen}, %Workflow{end_count: end_count}),
+    do: seen != 0 and seen == end_count
+
+  # The parent's endCount as this step reads it, when the parent has ended (0 when it runs or
+  # does not exist): what revived_after?/2 compares later.
+  defp parent_end_count(%State{wf: %Workflow{parent_workflow_id: parent}, env: env})
+       when parent not in [nil, ""] do
+    case Map.get(env.workflows, parent) do
+      %Workflow{status: status, end_count: end_count} ->
+        if Workflow.terminal?(status), do: end_count, else: 0
+
+      nil ->
+        0
+    end
   end
+
+  defp parent_end_count(_state), do: 0
 
   # WorkflowModel#toShortString: name.version/id
   defp short_string(%Workflow{workflow_definition: definition, workflow_id: id}) do

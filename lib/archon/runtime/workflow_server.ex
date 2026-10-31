@@ -26,7 +26,10 @@ defmodule Archon.Runtime.WorkflowServer do
   is run as the next event within the same message, up to the decide iteration limit.
 
   The queue effects of `post` are not run: they go into the commit's `queue`, their delays added
-  to the event's `Env.now`, so the store writes them with the workflow (ADR 0021, decision 3). A
+  to the event's `Env.now`, so the store writes them with the workflow (ADR 0021, decision 3).
+  The effects of `post` on other workflows (a child termination, a notice or a revival request to
+  the parent, a child retry, the failure workflow start) go into the commit's `outbox`, which
+  the workflow's outbox runner runs (`Archon.Runtime.Outbox`, ADR 0021, decision 4). A
   commit the store refuses with `{:error, {:limit, name}}` (the step's `Commit.limits`, ADR 0021,
   decision 5) runs the same event again with `in_progress[name]` at the limit, which counts
   toward the decide iteration limit.
@@ -37,17 +40,19 @@ defmodule Archon.Runtime.WorkflowServer do
   worker task types and the domains of `taskToDomain`, `in_progress` for every task definition
   with a `concurrentExecLimit`, and for `:wake` and `:recover` also `queued` (the `SCHEDULED`
   worker tasks that have a queue message) and `workflows` (the parent, the children of
-  `IN_PROGRESS` and `CANCELED` `SUB_WORKFLOW` tasks and the failure workflow). For
-  `{:child_revived, task_id}`, `workflows` holds the children of the `SUB_WORKFLOW` tasks that
-  ended unsuccessfully and of the task that revives.
+  `IN_PROGRESS` and `CANCELED` `SUB_WORKFLOW` tasks and the failure workflow), and for `:recover`
+  `outbox_pending?`. For `{:child_revived, task_id}`, `workflows` holds the parent and the
+  children of the `SUB_WORKFLOW` tasks that ended unsuccessfully and of the task that revives;
+  for `{:retry, _}` and `{:restart, _}` the parent (its `endCount`, ADR 0021, L2).
 
   ## Client functions
 
   `start/1`, `start_idempotent/1`, `poll/3`, `update/1`, `terminate_workflow/2`,
-  `cancel_by_parent/2` and the lifecycle operations (`pause/1`, `resume/1`, `retry/2`,
-  `restart/2`) call the workflow's process and `child_changed/3`, `child_revived/2` cast to it, starting the process first when
-  it is not running (activation, `activate/2`). A call that meets a process just ending is tried
-  once more. The call timeout is `config :archon, Archon.Runtime, call_timeout:` (30 s).
+  `cancel_by_parent/3`, the lifecycle operations (`pause/1`, `resume/1`, `retry/2`,
+  `restart/2`) and the outbox notices `child_changed/3`, `child_revived/2` call the workflow's
+  process, starting it first when it is not running (activation, `activate/2`). A call that
+  meets a process just ending is tried once more. The call timeout is
+  `config :archon, Archon.Runtime, call_timeout:` (30 s).
 
   ## Lifetime
 
@@ -59,8 +64,20 @@ defmodule Archon.Runtime.WorkflowServer do
       process ends. `{:start_idempotent, workflow}` answers once the workflow is created and
       decides after the answer (a `:wake`).
     * After a request, a timer or a `:recover`, the process ends normally when the workflow is
-      terminal and no other message is waiting. Activated with a terminal workflow, it waits `idle_timeout` for the request
-      that activated it. A running workflow's process hibernates after `hibernate_after`.
+      terminal, its outbox runner is done and no other message is waiting. Activated with a
+      terminal workflow, it waits `idle_timeout` for the request that activated it. A running
+      workflow's process hibernates after `hibernate_after`.
+
+  ## Outbox
+
+  The process keeps one outbox runner (`Archon.Runtime.Outbox`, ADR 0021, decision 4): started
+  after a commit that added entries and after activation when entries are left. When it is done
+  the process starts it again if entries were added meanwhile; when it stopped on a failure, it
+  starts it again after a delay that begins at `outbox_retry_ms` (1 s) and doubles up to
+  `workflow_offset_timeout_ms` (30 s). When the runner of an earlier process still runs, the
+  process waits for it to end (the same answer again waits the delay). A failure workflow that
+  could not start comes back as `{:failure_workflow_started, {:error, message}}`, whose commit
+  deletes the entry (`Commit.outbox_ack`).
 
   ## Timer
 
@@ -82,7 +99,8 @@ defmodule Archon.Runtime.WorkflowServer do
 
   For tests, the `hook` configuration is called with `(point, workflow_id, data)` at `:env`
   (before the env is read, with the event), `:step` (before the step, with the event), `:effect`
-  (before each effect), `:commit` (before the commit) and `:committed` (after it).
+  (before each effect), `:commit` (before the commit) and `:committed` (after it), and by the
+  outbox runner at `:outbox` and `:outbox_ack`.
   """
 
   use GenServer, restart: :transient
@@ -92,21 +110,40 @@ defmodule Archon.Runtime.WorkflowServer do
   alias Archon.Decider.SystemTasks
   alias Archon.Domain.{SubWorkflowParams, Task, TaskDef, TaskResult, Workflow, WorkflowDef}
   alias Archon.Runtime
-  alias Archon.Runtime.{Commit, Effects}
+  alias Archon.Runtime.{Commit, Effects, Outbox}
   alias Archon.Runtime.Step
   alias Archon.Runtime.Step.{Env, Lifecycle, Schedule, Terminate}
 
   @registry Archon.Runtime.Registry
   @supervisor Archon.Runtime.WorkflowSupervisor
 
-  defstruct [:id, :workflow, :timer, :journal]
+  defstruct [
+    :id,
+    :workflow,
+    :timer,
+    :journal,
+    :runner,
+    :blocker,
+    :outbox_delay,
+    kick?: false,
+    ack: []
+  ]
 
   @type t :: %__MODULE__{
           id: String.t(),
           workflow: Workflow.t() | nil,
           timer:
             %{token: reference(), ref: term(), at: integer(), message: :wake | :recover} | nil,
-          journal: %{committed?: boolean(), pushed: [{String.t(), String.t()}]} | nil
+          journal: %{committed?: boolean(), pushed: [{String.t(), String.t()}]} | nil,
+          runner:
+            {:running, Elixir.Task.t()}
+            | {:blocked, reference(), pid()}
+            | {:delayed, reference()}
+            | nil,
+          blocker: pid() | nil,
+          outbox_delay: pos_integer() | nil,
+          kick?: boolean(),
+          ack: [Archon.Runtime.Store.outbox_id()]
         }
 
   ## Client
@@ -191,11 +228,14 @@ defmodule Archon.Runtime.WorkflowServer do
   def terminate_workflow(id, reason), do: call(id, :existing, {:terminate, reason})
 
   @doc """
-  `{:cancel_by_parent, reason}` from the parent: `:ok`, or `{:error, :not_found}` when the child
-  does not exist.
+  `{:cancel_by_parent, reason, parent_end_count}` from the parent: `:ok`, or
+  `{:error, :not_found}` when the child does not exist. `parent_end_count` is the parent's
+  `endCount` for a termination from its outbox, `nil` for one before its commit.
   """
-  @spec cancel_by_parent(String.t(), String.t()) :: :ok | {:error, term()}
-  def cancel_by_parent(id, reason), do: call(id, :existing, {:cancel_by_parent, reason})
+  @spec cancel_by_parent(String.t(), String.t(), non_neg_integer() | nil) ::
+          :ok | {:error, term()}
+  def cancel_by_parent(id, reason, parent_end_count \\ nil),
+    do: call(id, :existing, {:cancel_by_parent, reason, parent_end_count})
 
   @doc "`:pause`: `:ok` or `{:error, {:conflict, message}}` (`Archon.Runtime.Step.Lifecycle`)."
   @spec pause(String.t()) :: :ok | {:error, term()}
@@ -216,21 +256,21 @@ defmodule Archon.Runtime.WorkflowServer do
   @spec restart(String.t(), WorkflowDef.t() | nil) :: :ok | {:error, term()}
   def restart(id, definition), do: call(id, :existing, {:restart, definition})
 
-  @doc "Casts `{:child_revived, task_id}` to the parent."
+  @doc """
+  `{:child_revived, task_id}` to the parent, from the child's outbox runner: `:ok` once the
+  parent saved it, or `{:error, reason}`.
+  """
   @spec child_revived(String.t(), String.t()) :: :ok | {:error, term()}
-  def child_revived(parent_id, task_id) do
-    with {:ok, pid} <- activate(parent_id) do
-      GenServer.cast(pid, {:child_revived, task_id})
-    end
-  end
+  def child_revived(parent_id, task_id),
+    do: call(parent_id, :existing, {:child_revived, task_id})
 
-  @doc "Casts `{:child_changed, task_id, child}` to the parent."
+  @doc """
+  `{:child_changed, task_id, child}` to the parent, from the child's outbox runner: `:ok` once
+  the parent saved it, or `{:error, reason}`.
+  """
   @spec child_changed(String.t(), String.t(), Workflow.t()) :: :ok | {:error, term()}
-  def child_changed(parent_id, task_id, %Workflow{} = child) do
-    with {:ok, pid} <- activate(parent_id) do
-      GenServer.cast(pid, {:child_changed, task_id, child})
-    end
-  end
+  def child_changed(parent_id, task_id, %Workflow{} = child),
+    do: call(parent_id, :existing, {:child_changed, task_id, child})
 
   defp call(id, mode, request, retry? \\ true) do
     with {:ok, pid} <- activate(id, mode) do
@@ -268,6 +308,7 @@ defmodule Archon.Runtime.WorkflowServer do
   def handle_continue(:recover, state) do
     terminal? = terminal?(state.workflow)
     {_reply, state} = handle_event(:recover, state)
+    state = check_outbox(state)
     if terminal?, do: idle(state), else: settle(state)
   end
 
@@ -340,20 +381,6 @@ defmodule Archon.Runtime.WorkflowServer do
   end
 
   @impl GenServer
-  def handle_cast(_event, %__MODULE__{workflow: nil} = state),
-    do: {:noreply, state, idle_timeout()}
-
-  def handle_cast({:child_changed, _task_id, %Workflow{}} = event, state) do
-    {_reply, state} = handle_event(event, state)
-    settle(state)
-  end
-
-  def handle_cast({:child_revived, _task_id} = event, state) do
-    {_reply, state} = handle_event(event, state)
-    settle(state)
-  end
-
-  @impl GenServer
   def handle_info({:timer, token}, %__MODULE__{timer: %{token: token, message: message}} = state) do
     state = %{state | timer: nil}
     handle_info(message, state)
@@ -367,8 +394,31 @@ defmodule Archon.Runtime.WorkflowServer do
     settle(state)
   end
 
+  # The outbox runner (ADR 0021, decision 4).
+  def handle_info({ref, result}, %__MODULE__{runner: {:running, %Elixir.Task{ref: ref}}} = state) do
+    Process.demonitor(ref, [:flush])
+    %{state | runner: nil} |> outbox_result(result) |> settle()
+  end
+
+  def handle_info(
+        {:DOWN, ref, :process, _pid, reason},
+        %__MODULE__{runner: {:running, %Elixir.Task{ref: ref}}} = state
+      ) do
+    Logger.error("the outbox runner of workflow #{state.id} failed: #{inspect(reason)}")
+    %{state | runner: nil} |> delay_outbox() |> settle()
+  end
+
+  def handle_info(
+        {:DOWN, ref, :process, _pid, _reason},
+        %__MODULE__{runner: {:blocked, ref, _}} = state
+      ),
+      do: settle(%{state | runner: nil, kick?: true})
+
+  def handle_info({:outbox_retry, token}, %__MODULE__{runner: {:delayed, token}} = state),
+    do: settle(%{state | runner: nil, kick?: true})
+
   def handle_info(:timeout, state) do
-    if state.workflow == nil or terminal?(state.workflow),
+    if ending?(state),
       do: {:stop, :normal, state},
       else: {:noreply, state}
   end
@@ -421,6 +471,8 @@ defmodule Archon.Runtime.WorkflowServer do
          end) do
       {:ok, {reply, stored, pre, commit, post}} ->
         {commit, post} = take_queue(commit, post, env.now)
+        {commit, post} = take_outbox(commit, post)
+        commit = %{commit | outbox_ack: commit.outbox_ack ++ state.ack}
 
         case commit_step(state, pre, commit, stored) do
           {:ok, state} ->
@@ -476,6 +528,31 @@ defmodule Archon.Runtime.WorkflowServer do
   defp queue_effect?(effect),
     do: is_tuple(effect) and elem(effect, 0) in [:queue_push, :queue_remove, :queue_postpone]
 
+  # ADR 0021, decision 4: the work on other workflows is saved with the commit and run by the
+  # outbox runner. A notice names its child (this workflow), which the runner reads when it runs.
+  defp take_outbox(%Commit{} = commit, post) do
+    {entries, post} = Enum.split_with(post, &outbox_effect?/1)
+
+    entries =
+      Enum.map(entries, fn
+        {:notify_parent, parent, task, _child} -> {:notify_parent, parent, task, nil}
+        effect -> effect
+      end)
+
+    {%{commit | outbox: commit.outbox ++ entries}, post}
+  end
+
+  defp outbox_effect?(effect) do
+    is_tuple(effect) and
+      elem(effect, 0) in [
+        :terminate_sub_workflow,
+        :notify_parent,
+        :revive_parent,
+        :retry_sub_workflow,
+        :start_failure_workflow
+      ]
+  end
+
   defp run_pre(state, effects) do
     Enum.reduce_while(effects, :ok, fn effect, :ok ->
       case run_effect(state, effect) do
@@ -498,7 +575,14 @@ defmodule Archon.Runtime.WorkflowServer do
 
       case result do
         {:ok, :ok} ->
-          state = %{state | workflow: stored, journal: journal_commit(state.journal, commit)}
+          state = %{
+            state
+            | workflow: stored,
+              journal: journal_commit(state.journal, commit),
+              ack: [],
+              kick?: state.kick? or commit.outbox != []
+          }
+
           hook(state, :committed, stored)
           {:ok, state}
 
@@ -618,7 +702,7 @@ defmodule Archon.Runtime.WorkflowServer do
   defp run_effect(state, effect) do
     case guard(fn ->
            hook(state, :effect, effect)
-           Effects.run(effect)
+           Effects.run(effect, state.id)
          end) do
       {:ok, :ok} -> :ok
       {:ok, {:event, event}} -> {:event, event}
@@ -705,27 +789,108 @@ defmodule Archon.Runtime.WorkflowServer do
 
   # A process whose workflow ended stops once its mailbox is empty (a zero timeout fires only
   # then), so a message already waiting, such as a child asking it to revive, is still handled.
+  # It does not stop while its outbox runner works (ADR 0021, decision 4).
   defp reply_and_settle(reply, state) do
-    if state.workflow == nil or terminal?(state.workflow),
+    state = kick(state)
+
+    if ending?(state),
       do: {:reply, reply, state, 0},
       else: {:reply, reply, state}
   end
 
   defp settle(state) do
-    if state.workflow == nil or terminal?(state.workflow),
+    state = kick(state)
+
+    if ending?(state),
       do: {:noreply, state, 0},
       else: noreply(state)
   end
 
-  defp idle(state), do: {:noreply, state, idle_timeout()}
-  defp idle(state, reply), do: {:reply, reply, state, idle_timeout()}
+  defp idle(state), do: {:noreply, kick(state), idle_timeout()}
+  defp idle(state, reply), do: {:reply, reply, kick(state), idle_timeout()}
 
   defp stop(state, reason), do: {:stop, :normal, {:error, reason}, state}
 
   defp noreply(state) do
-    if state.workflow == nil or terminal?(state.workflow),
+    if ending?(state),
       do: {:noreply, state, idle_timeout()},
       else: {:noreply, state}
+  end
+
+  defp ending?(state),
+    do: (state.workflow == nil or terminal?(state.workflow)) and state.runner == nil
+
+  ## Outbox
+
+  # Starts the runner when entries were added and none is running; a running, blocked or
+  # delayed runner reads them when it starts again.
+  defp kick(%__MODULE__{kick?: false} = state), do: state
+
+  defp kick(%__MODULE__{runner: nil} = state) do
+    {:running, Outbox.start(state.id)}
+  catch
+    # The task supervisor is restarting with the rest of the runtime tree.
+    :exit, reason ->
+      Logger.error("workflow #{state.id} could not start its outbox runner: #{inspect(reason)}")
+      delay_outbox(%{state | kick?: false})
+  else
+    runner -> %{state | runner: runner, kick?: false}
+  end
+
+  defp kick(state), do: %{state | kick?: false}
+
+  # Entries left after activation (or a store that cannot tell) start the runner.
+  defp check_outbox(state) do
+    case guard(fn -> Runtime.store().pending_outbox(state.id) != [] end) do
+      {:ok, pending?} -> %{state | kick?: state.kick? or pending?}
+      {:error, reason} -> outbox_unread(state, reason)
+    end
+  end
+
+  defp outbox_unread(state, reason) do
+    Logger.error("workflow #{state.id} could not read its outbox: #{inspect(reason)}")
+    delay_outbox(state)
+  end
+
+  defp outbox_result(state, :done),
+    do: check_outbox(%{state | outbox_delay: nil, blocker: nil})
+
+  # The process ended before the runner did; it is alive again, so only a restart reads it.
+  defp outbox_result(state, :owner_down), do: %{state | kick?: true}
+
+  defp outbox_result(state, {:retry, reason}) do
+    Logger.warning("workflow #{state.id} retries its outbox: #{inspect(reason)}")
+    delay_outbox(%{state | blocker: nil})
+  end
+
+  defp outbox_result(state, {:feedback, entry, event}) do
+    {reply, state} = handle_event(event, %{state | ack: [entry], blocker: nil})
+    state = %{state | ack: []}
+
+    case reply do
+      :ok -> %{state | kick?: true}
+      {:error, _reason} -> delay_outbox(state)
+    end
+  end
+
+  # The runner of an earlier process still runs: wait for it to end, and when the registry
+  # still names the same one, wait the delay (it drops an ended process asynchronously).
+  defp outbox_result(%__MODULE__{blocker: pid} = state, {:already_registered, pid}),
+    do: delay_outbox(state)
+
+  defp outbox_result(state, {:already_registered, pid}),
+    do: %{state | runner: {:blocked, Process.monitor(pid), pid}, blocker: pid}
+
+  defp delay_outbox(state) do
+    delay =
+      case state.outbox_delay do
+        nil -> Runtime.setting(:outbox_retry_ms, 1_000)
+        delay -> min(delay * 2, offset_timeout())
+      end
+
+    token = make_ref()
+    Process.send_after(self(), {:outbox_retry, token}, delay)
+    %{state | runner: {:delayed, token}, outbox_delay: delay, kick?: false}
   end
 
   defp idle_timeout, do: Runtime.setting(:idle_timeout, 5_000)
@@ -778,11 +943,24 @@ defmodule Archon.Runtime.WorkflowServer do
     }
 
     case event do
-      event when event in [:wake, :recover] ->
+      :recover ->
+        %{
+          env
+          | queued: queued(env, wf),
+            workflows: workflows(wf),
+            outbox_pending?:
+              Workflow.terminal?(wf.status) and
+                Runtime.store().pending_outbox(wf.workflow_id) != []
+        }
+
+      :wake ->
         %{env | queued: queued(env, wf), workflows: workflows(wf)}
 
       {:child_revived, task_id} ->
-        %{env | workflows: failed_children(wf, task_id)}
+        %{env | workflows: Map.merge(failed_children(wf, task_id), parent(wf))}
+
+      {lifecycle, _arg} when lifecycle in [:retry, :restart] ->
+        %{env | workflows: parent(wf)}
 
       _other ->
         env
@@ -917,6 +1095,8 @@ defmodule Archon.Runtime.WorkflowServer do
     |> Enum.map(&Task.sub_workflow_id/1)
     |> read_workflows()
   end
+
+  defp parent(%Workflow{parent_workflow_id: parent}), do: read_workflows([parent])
 
   defp read_workflows(ids) do
     ids

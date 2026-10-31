@@ -164,12 +164,21 @@ defmodule Archon.Runtime.Step.State do
     %{state | wf: wf, stored: %{wf | tasks: stored.tasks}, workflow_dirty?: true}
   end
 
-  @doc "`WorkflowModel#setStatus`: a change of status records the previous one."
+  @doc """
+  `WorkflowModel#setStatus`: a change of status records the previous one. A change from a status
+  that is not terminal to a terminal one counts in `endCount` (ADR 0021, L2).
+  """
   @spec set_status(Workflow.t(), Workflow.status()) :: Workflow.t()
   def set_status(%Workflow{status: status} = workflow, status), do: workflow
 
-  def set_status(%Workflow{status: previous} = workflow, status),
-    do: %{workflow | status: status, previous_status: previous}
+  def set_status(%Workflow{status: previous} = workflow, status) do
+    end_count =
+      if Workflow.terminal?(status) and not Workflow.terminal?(previous),
+        do: workflow.end_count + 1,
+        else: workflow.end_count
+
+    %{workflow | status: status, previous_status: previous, end_count: end_count}
+  end
 
   @spec pre(t(), Effect.t()) :: t()
   def pre(state, effect), do: %{state | pre: [effect | state.pre]}
