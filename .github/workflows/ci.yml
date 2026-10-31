@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly validation of main without changes: Monday 08:27 KST (validation health, ADR 0022).
+  schedule:
+    - cron: '27 23 * * 0'
 permissions:
   contents: read
 concurrency:
