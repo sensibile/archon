@@ -174,6 +174,52 @@ defmodule Archon.Runtime.TasksTest do
       assert {:ok, %Task{workflow_instance_id: ^second, status: :in_progress}} =
                Tasks.poll(ctx.name, "w")
     end
+
+    # ADR 0021, decision 5 (L10): both read the free slot before either saves.
+    test "of two polls that saw the same free slot, the store lets one through", ctx do
+      ids =
+        for _ <- 1..2 do
+          {:ok, id} = Runtime.start_workflow(%{definition: ctx.definition, input: %{}})
+          id
+        end
+
+      test = self()
+
+      RuntimeHooks.install(
+        hook: fn
+          :step, id, {:poll, _task_id, _worker} ->
+            # each process waits once, after reading its env
+            if id in ids and Process.put(:held, true) == nil do
+              send(test, {:held, self()})
+
+              receive do
+                :go -> :ok
+              after
+                5_000 -> :ok
+              end
+            end
+
+          _point, _id, _data ->
+            :ok
+        end
+      )
+
+      polls =
+        for id <- ids do
+          task_id = task(id, "limited").task_id
+          Elixir.Task.async(fn -> WorkflowServer.poll(id, task_id, "w") end)
+        end
+
+      for _ <- ids, do: assert_receive({:held, _pid})
+      for id <- ids, do: send(WorkflowServer.whereis(id), :go)
+
+      results = Enum.map(polls, &Elixir.Task.await/1)
+      assert [%Task{status: :in_progress, workflow_instance_id: given}] = results -- [nil]
+      assert nil in results
+      assert Runtime.store().in_progress_count(ctx.name) == 1
+      [refused] = ids -- [given]
+      assert %Task{status: :scheduled, poll_count: 0} = task(refused, "limited")
+    end
   end
 
   describe "domains" do

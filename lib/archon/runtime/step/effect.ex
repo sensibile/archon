@@ -10,7 +10,9 @@ defmodule Archon.Runtime.Step.Effect do
 
     * `{:queue_push, queue, task_id, priority, delay_ms}`, `{:queue_remove, queue, task_id}`,
       `{:queue_postpone, queue, task_id, priority, delay_ms}` - worker task queues
-      (`Archon.Runtime.Queue`). Only tasks that are not system tasks are queued.
+      (`Archon.Runtime.Queue`). Only tasks that are not system tasks are queued. The process
+      writes them with the commit as `Archon.Runtime.Commit` queue operations (ADR 0021,
+      decision 3).
     * `{:start_sub_workflow, task_id, start}` - starts the child of a `SUB_WORKFLOW` task with
       `Archon.Runtime.start_workflow_idempotent/1`. The result goes back to the step as
       `{:sub_workflow_started, task_id, result}`.
