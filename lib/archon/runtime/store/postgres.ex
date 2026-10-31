@@ -337,9 +337,8 @@ defmodule Archon.Runtime.Store.Postgres do
     lock_limits(instance, commit.limits)
 
     with :ok <- create_or_lock(instance, workflow_id, rows.create),
-         :ok <- put_tasks(instance, workflow_id, rows.create_tasks),
          :ok <- update_workflow(instance, workflow_id, rows.workflow),
-         :ok <- put_tasks(instance, workflow_id, rows.upsert_tasks),
+         :ok <- put_tasks(instance, workflow_id, rows.tasks),
          :ok <- delete_tasks(instance, workflow_id, commit.delete_task_ids),
          :ok <- delete_outbox(instance, workflow_id, outbox_ids(commit.outbox_ack)),
          :ok <- append_outbox(instance, workflow_id, rows.outbox),
@@ -356,9 +355,9 @@ defmodule Archon.Runtime.Store.Postgres do
   defp encode_commit!(%Commit{} = commit) do
     %{
       create: commit.create && encode_workflow!(commit.create),
-      create_tasks: encode_tasks!((commit.create && commit.create.tasks) || []),
       workflow: commit.workflow && encode_workflow!(commit.workflow),
-      upsert_tasks: encode_tasks!(commit.upsert_tasks),
+      # The created tasks and then the upserts, as one statement: a later version wins.
+      tasks: encode_tasks!(((commit.create && commit.create.tasks) || []) ++ commit.upsert_tasks),
       outbox: Enum.map(commit.outbox, &encode_effect!/1)
     }
   end
@@ -487,8 +486,9 @@ defmodule Archon.Runtime.Store.Postgres do
 
   defp put_tasks(_instance, _workflow_id, []), do: :ok
 
-  # A task ID another workflow owns is neither inserted nor updated, so it is not counted. Rows
-  # are locked in task ID order, so two commits over the same IDs never wait on each other.
+  # A task ID another workflow owns is neither inserted nor updated, so it is not counted. A
+  # commit writes all its tasks in this one statement, locking them in task ID order, so two
+  # commits over the same IDs wait on each other but never deadlock.
   defp put_tasks(instance, workflow_id, tasks) do
     [ids, seqs, statuses, names, jsons] = transpose(tasks, 5)
     table = table(instance, "task")
@@ -651,36 +651,35 @@ defmodule Archon.Runtime.Store.Postgres do
 
   # ADR 0021, decision 4: the kind and its arguments, never a workflow struct.
   defp encode_effect!(effect) do
-    {kind, args} =
-      case effect do
-        {:terminate_sub_workflow, child, reason} when is_binary(child) and is_binary(reason) ->
-          {"terminate_sub_workflow", [child, reason]}
-
-        # Slice 4e adds the parent's end count (ADR 0021, decision 4).
-        {:terminate_sub_workflow, child, reason, end_count}
-        when is_binary(child) and is_binary(reason) and is_integer(end_count) ->
-          {"terminate_sub_workflow", [child, reason, end_count]}
-
-        {:notify_parent, parent, task, _child}
-        when is_binary(parent) and (is_binary(task) or task == nil) ->
-          {"notify_parent", [parent, task]}
-
-        {:revive_parent, parent, task}
-        when is_binary(parent) and (is_binary(task) or task == nil) ->
-          {"revive_parent", [parent, task]}
-
-        {:retry_sub_workflow, child} when is_binary(child) ->
-          {"retry_sub_workflow", [child]}
-
-        {:start_failure_workflow, %{} = start} ->
-          {"start_failure_workflow", [encode_start!(start)]}
-
-        _other ->
-          raise ArgumentError, "an outbox entry cannot hold #{inspect(effect)}"
-      end
-
+    {kind, args} = effect_args(effect)
     encode_json!(%{"kind" => kind, "args" => args})
   end
+
+  defguardp id?(value) when is_binary(value)
+  defguardp task_id?(value) when is_binary(value) or value == nil
+
+  defp effect_args({:terminate_sub_workflow, child, reason}) when id?(child) and id?(reason),
+    do: {"terminate_sub_workflow", [child, reason]}
+
+  # Slice 4e adds the parent's end count (ADR 0021, decision 4).
+  defp effect_args({:terminate_sub_workflow, child, reason, end_count})
+       when id?(child) and id?(reason) and is_integer(end_count),
+       do: {"terminate_sub_workflow", [child, reason, end_count]}
+
+  defp effect_args({:notify_parent, parent, task, _child}) when id?(parent) and task_id?(task),
+    do: {"notify_parent", [parent, task]}
+
+  defp effect_args({:revive_parent, parent, task}) when id?(parent) and task_id?(task),
+    do: {"revive_parent", [parent, task]}
+
+  defp effect_args({:retry_sub_workflow, child}) when id?(child),
+    do: {"retry_sub_workflow", [child]}
+
+  defp effect_args({:start_failure_workflow, %{} = start}),
+    do: {"start_failure_workflow", [encode_start!(start)]}
+
+  defp effect_args(effect),
+    do: raise(ArgumentError, "an outbox entry cannot hold #{inspect(effect)}")
 
   defp encode_start!(start) do
     case Map.keys(start) -- @start_keys do
