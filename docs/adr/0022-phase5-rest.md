@@ -198,7 +198,7 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   - 시작 오류: 없는 정의(404), `StartWorkflowRequest`의 인라인 `workflowDef` 시작
   - `GET /api/workflow/{id}?includeTasks=false`의 다른 상태, `status`의 `includeOutput`·`includeVariables`
   - 종료 오류: 없는 워크플로우, 완료된 워크플로우(409)
-  - `GET /api/tasks/poll/batch` 빈 큐, `update-v2`가 다음 태스크를 돌려주는 경우, 없는 태스크 갱신·조회, `update-v2`의 검증 실패
+  - `GET /api/tasks/poll/batch/{tasktype}` 빈 큐(200 `[]`), `update-v2`가 다음 태스크를 돌려주는 경우, 없는 태스크 갱신·조회, `update-v2`의 검증 실패
   - 없는 경로 404, 위 매개변수 경로와 겹치는 Later 경로 표본, MVP 경로의 다른 메서드(upstream 405, Archon은 404로 차이 기록),
     JSON이 아닌 body, 숫자 쿼리에 문자
 - 다시 캡처한 기존 픽스처가 `normalize/1` 기준으로 바뀌면 그 차이를 PR에서 검토한다(`priv/contract/README.md` 절차).
