@@ -1,6 +1,13 @@
+# Copyright Conductor Authors.
 # Copyright 2026 sensibile
 #
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
+#
+# `check!/2` is derived from conductor-oss sqlite-persistence/src/main/java/com/netflix/conductor/sqlite/dao/SqliteExecutionDAO.java
+# (createTasks and validate) at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
+# Modified by sensibile: the task checks run on a whole `Archon.Runtime.Commit` before any store
+# writes, together with checks of the commit's own fields (ADR 0018, decision 2; ADR 0021,
+# decision 3).
 
 defmodule Archon.Runtime.Commit do
   @moduledoc """
