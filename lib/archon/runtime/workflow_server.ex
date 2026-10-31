@@ -76,9 +76,9 @@ defmodule Archon.Runtime.WorkflowServer do
   `workflow_offset_timeout_ms` (ADR 0018, decision 1). The reason is tagged with where it
   happened: `{:env, _}` (reading the env), `{:pre_effect, _}`, `{:commit, _}` (also a queue
   operation that failed with the commit) or `{:post_effect, _}`; an exception in the step itself
-  is untagged. A `pre` effect that fails leaves nothing committed. A workflow that the failed step already made terminal is not tried again: the
-  process ends, as a terminal workflow's process does, and what its effects left undone is the
-  Phase 4 recovery's (ADR 0018, 결과).
+  is untagged. A `pre` effect that fails leaves nothing committed. A workflow that the failed
+  step already made terminal is not tried again: the process ends, as a terminal workflow's
+  process does, and what its effects left undone is the Phase 4 recovery's (ADR 0018, 결과).
 
   For tests, the `hook` configuration is called with `(point, workflow_id, data)` at `:env`
   (before the env is read, with the event), `:step` (before the step, with the event), `:effect`
