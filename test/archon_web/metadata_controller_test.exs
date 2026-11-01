@@ -337,6 +337,14 @@ defmodule ArchonWeb.MetadataControllerTest do
 
       assert detail == "Cannot deserialize [0].retryCount: must be integer"
 
+      # As Jackson, a numeric string is a number (seen upstream).
+      assert post_json("/api/metadata/taskdefs", [
+               %{"name" => "archon_task_c", "retryCount" => "7"}
+             ]) ==
+               {200, nil}
+
+      assert {:ok, %TaskDef{retry_count: 7}} = Archon.Metadata.get_task_def("archon_task_c")
+
       assert {500, %{"message" => "JSON parse error: Cannot deserialize the request body: " <> _}} =
                put_json("/api/metadata/taskdefs", [%{"name" => "x"}])
     end

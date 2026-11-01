@@ -219,8 +219,7 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   `"JSON parse error: Cannot deserialize <경로>: <이유>"`(경로가 비면 `the request body`, 예 `Cannot deserialize [0].retryCount: must be
   integer`). Jackson 문구를 옮기려면 필드마다 Java 타입과 Jackson의 값 표기를 다시 만들어야 해서 맞추지 않는다. 지금 이 경우의
   픽스처는 없고(5a가 관측만 함), 5f가 캡처하면 재생에서 `ignore: [["message"]]`로 둔다. 같은 규칙을 5d·5e의 body에도 쓴다.
-  Jackson은 숫자 문자열을 숫자 필드로 받지만(`"retryCount": "7"`은 7, upstream 관측) 코덱은 받지 않으므로 같은 body가 Archon에서는
-  이 500이다("upstream과 의도적으로 다른 점").
+  숫자 문자열은 Jackson처럼 숫자 필드로 받는다(`"retryCount": "7"`은 7, upstream 관측, 코덱의 스칼라 강제 변환은 ADR 0002).
 - 문구가 없는 오류(`:not_found`, `:conflict`)는 컨트롤러가 upstream 서비스·실행기의 문구를 붙인다. 예: 조회
   `"No such workflow found by id: <id>"`(픽스처), 정의 `"No such workflow found by name: %s, version: %d"`, 태스크 정의
   `"No such taskType found by name: %s"`, 등록 충돌 `"Workflow with %s already exists!"`(`key()`는 `name.version`). 문구는
@@ -378,7 +377,7 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   (upstream은 `BigDecimal`로 받는다).
 - **`GET /api/metadata/taskdefs`는 이름 순이다**(결정 2). upstream은 순서를 정하지 않는다(SQLite는 삽입 순).
 - **일괄 갱신에서 저장 예외의 실패 문구는 고정 문구다**(결정 2). upstream은 예외의 `getMessage()`를 넣는다.
-- **코덱 타입 오류의 문구는 Jackson 문구가 아니고, 숫자 문자열을 숫자 필드로 바꾸지 않는다**(결정 4).
+- **코덱 타입 오류의 문구는 Jackson 문구가 아니다**(결정 4).
 - JSON 객체 키 순서 등 코덱 차이는 ADR 0002의 목록 그대로다.
 
 ## 대안
