@@ -452,9 +452,9 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 - **일괄 갱신에서 저장 예외의 실패 문구는 고정 문구다**(결정 2). upstream은 예외의 `getMessage()`를 넣는다.
 - **코덱 타입 오류의 문구는 Jackson 문구가 아니다**(결정 4).
 - **외부 입력 경로의 거절이 런타임의 시작 검사보다 먼저다**(결정 4). upstream은 정의 확인, 태스크 정의 채우기, `NULL input`·스키마
-  검사를 모두 마친 뒤 입력을 내려받다 실패한다. 그래서 그 검사 중 하나에 걸리는 시작(없는 정의, 정의 없는 SUB_WORKFLOW, Archon이
-  거절하는 스키마)에 `externalInputPayloadStoragePath`도 주면 upstream은 그 검사의 오류(404·500·400)를, Archon은 500을 준다. 외부
-  저장소는 범위 밖이다.
+  검사를 모두 마친 뒤 입력을 내려받다 실패한다. 그래서 그 검사 중 하나에 걸리는 시작(없는 정의, 정의 없는 SUB_WORKFLOW)에
+  `externalInputPayloadStoragePath`도 주면 upstream은 그 검사의 오류(404·500)를, Archon은 500을 준다. Archon이 거절하는 스키마를
+  가진 정의도 Archon은 500이다(upstream은 빈 입력이 스키마 검사를 통과하면 내려받기에서 같은 500, 아니면 400). 외부 저장소는 범위 밖이다.
 - **Java `int` 범위를 넘는 정수.** 도메인 코덱은 정수 필드의 범위를 보지 않으므로(ADR 0002 코덱, 5d 이전부터) `StartWorkflowRequest`의
   `priority`·`version`에 int 범위를 넘는 수를 주면 upstream은 500 `"JSON parse error: Numeric value ... out of range of int"`, Archon은
   검증 400(`priority`)이나 정의 404(`version`)다. 쿼리 값(`ArchonWeb.Request.int/4`)은 범위를 본다.

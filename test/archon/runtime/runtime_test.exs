@@ -79,17 +79,24 @@ defmodule Archon.Runtime.RuntimeTest do
             decision_cases: %{"x" => [task.("x1"), task.("x2")]},
             default_case: [task.("d1"), task.("d2")]
           },
+          %WorkflowTask{
+            name: "loop",
+            task_reference_name: "loop",
+            type: "DO_WHILE",
+            loop_over: [task.("l1"), task.("l2")]
+          },
           task.("last")
         ]
       }
 
       assert {:ok, populated} = Runtime.populate(definition)
       refs = &Enum.map(&1, fn wt -> wt.task_reference_name end)
-      [fork, switch, last] = populated.tasks
+      [fork, switch, loop, last] = populated.tasks
 
       assert Enum.map(fork.fork_tasks, refs) == [~w(a1 a2), ~w(b1 b2 b3)]
       assert refs.(switch.decision_cases["x"]) == ~w(x1 x2)
       assert refs.(switch.default_case) == ~w(d1 d2)
+      assert refs.(loop.loop_over) == ~w(l1 l2)
       assert last.task_reference_name == "last"
       assert %TaskDef{name: "archon_task_a"} = last.task_definition
     end
