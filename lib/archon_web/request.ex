@@ -290,6 +290,25 @@ defmodule ArchonWeb.Request do
     end
   end
 
+  @doc """
+  A path variable of upstream type `Integer`, converted as `int/4` converts a query value. Blank
+  text converts to null, which Spring refuses for a required path variable (a 500).
+  """
+  @spec path_integer(String.t(), String.t()) ::
+          {:ok, integer()} | {:error, {:server_error, String.t()}}
+  def path_integer(text, name) when is_binary(text) do
+    case String.replace(text, ~r/\s/u, "") do
+      "" ->
+        {:error,
+         {:server_error,
+          "Required URI template variable '#{name}' for method parameter type Integer is " <>
+            "present but converted to null"}}
+
+      digits ->
+        int_result(parse_int(digits), name, "java.lang.Integer")
+    end
+  end
+
   defp int_result({:ok, value}, _name, _java_type), do: {:ok, value}
   defp int_result({:error, detail}, name, java_type), do: mismatch(name, java_type, detail)
 

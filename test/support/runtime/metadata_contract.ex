@@ -6,7 +6,8 @@
 # Derived from conductor-oss sqlite-persistence/src/test/java/com/netflix/conductor/sqlite/dao/SqliteMetadataDAOTest.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: ported to ExUnit as a shared contract for every `Archon.Runtime.Metadata`
-# implementation (ADR 0018, decision 10), keeping the operations in the behaviour.
+# implementation (ADR 0018, decision 10), keeping the operations in the behaviour (with the
+# Phase 6 list and removal, ADR 0025 decision 6).
 
 defmodule Archon.Runtime.MetadataContract do
   @moduledoc """
@@ -31,7 +32,14 @@ defmodule Archon.Runtime.MetadataContract do
 
       defp m(ctx, fun, args), do: apply(ctx.impl, fun, [ctx.server | args])
 
-      describe "Metadata contract" do
+      unquote(workflow_cases())
+      unquote(task_cases())
+    end
+  end
+
+  defp workflow_cases do
+    quote do
+      describe "Metadata contract: workflow definitions" do
         # SqliteMetadataDAOTest#testDuplicateWorkflowDef
         test "creating an existing workflow definition is a conflict", ctx do
           definition = %WorkflowDef{name: "testDuplicate", version: 1}
@@ -96,6 +104,51 @@ defmodule Archon.Runtime.MetadataContract do
                    m(ctx, :get_latest_workflow_def, ["b"])
         end
 
+        # SqliteMetadataDAOTest#testWorkflowDefOperations (getAllWorkflowDefs)
+        test "all workflow definitions, ordered by name and version", ctx do
+          assert m(ctx, :get_all_workflow_defs, []) == []
+
+          for {name, version} <- [{"b", 2}, {"a", 10}, {"B", 1}, {"a", 9}, {"a0", 1}, {"b", 1}],
+              do: m(ctx, :create_workflow_def, [%WorkflowDef{name: name, version: version}])
+
+          m(ctx, :update_workflow_def, [%WorkflowDef{name: "a", version: 9, description: "u"}])
+
+          assert m(ctx, :get_all_workflow_defs, []) == [
+                   %WorkflowDef{name: "B", version: 1},
+                   %WorkflowDef{name: "a", version: 9, description: "u"},
+                   %WorkflowDef{name: "a", version: 10},
+                   %WorkflowDef{name: "a0", version: 1},
+                   %WorkflowDef{name: "b", version: 1},
+                   %WorkflowDef{name: "b", version: 2}
+                 ]
+        end
+
+        # SqliteMetadataDAOTest#testWorkflowDefOperations (removeWorkflowDef) and
+        # #testRemoveNotExistingWorkflowDef
+        test "removing a workflow definition removes that version only", ctx do
+          for version <- [1, 2, 3],
+              do: m(ctx, :create_workflow_def, [%WorkflowDef{name: "rm", version: version}])
+
+          m(ctx, :create_workflow_def, [%WorkflowDef{name: "rm_other", version: 3}])
+
+          assert m(ctx, :remove_workflow_def, ["rm", 3]) == :ok
+          assert m(ctx, :get_workflow_def, ["rm", 3]) == {:error, :not_found}
+          assert {:ok, %WorkflowDef{version: 2}} = m(ctx, :get_latest_workflow_def, ["rm"])
+          assert {:ok, _definition} = m(ctx, :get_workflow_def, ["rm_other", 3])
+
+          assert m(ctx, :remove_workflow_def, ["rm", 3]) == {:error, :not_found}
+          assert m(ctx, :remove_workflow_def, ["absent", 1]) == {:error, :not_found}
+
+          # A removed version can be created again.
+          assert m(ctx, :create_workflow_def, [%WorkflowDef{name: "rm", version: 3}]) == :ok
+        end
+      end
+    end
+  end
+
+  defp task_cases do
+    quote do
+      describe "Metadata contract: task definitions" do
         # SqliteMetadataDAOTest#testTaskDefOperations (the operations in the behaviour)
         test "task definitions are inserted or replaced by name", ctx do
           definition = %TaskDef{
@@ -151,6 +204,19 @@ defmodule Archon.Runtime.MetadataContract do
 
         test "a missing task definition is not found", ctx do
           assert m(ctx, :get_task_def, ["absent"]) == {:error, :not_found}
+        end
+
+        # SqliteMetadataDAOTest#testRemoveNotExistingTaskDef and #testTaskDefOperations
+        test "removing a task definition", ctx do
+          m(ctx, :create_task_def, [%TaskDef{name: "rm_task"}])
+          m(ctx, :create_task_def, [%TaskDef{name: "rm_task0"}])
+
+          assert m(ctx, :remove_task_def, ["rm_task"]) == :ok
+          assert m(ctx, :get_task_def, ["rm_task"]) == {:error, :not_found}
+          assert m(ctx, :get_all_task_defs, []) == [%TaskDef{name: "rm_task0"}]
+
+          assert m(ctx, :remove_task_def, ["rm_task"]) == {:error, :not_found}
+          assert m(ctx, :remove_task_def, ["absent"]) == {:error, :not_found}
         end
       end
     end

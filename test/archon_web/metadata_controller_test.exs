@@ -4,9 +4,10 @@
 
 defmodule ArchonWeb.MetadataControllerTest do
   @moduledoc """
-  `ArchonWeb.MetadataController` (ADR 0023, slice 5c): the `metadata_*` fixtures replayed in
-  capture order, and the answers no fixture holds (seen on the upstream server at the ADR's
-  commit, or Archon's own schema refusal of decision 5).
+  `ArchonWeb.MetadataController` (ADR 0023, slice 5c; ADR 0025, slice 6c): the `metadata_*`
+  fixtures replayed in capture order, and the answers no fixture holds (seen on the upstream
+  server at the ADR's commit, or Archon's own schema refusal of ADR 0023 decision 5). The Phase 6
+  fixtures are replayed by `ArchonWeb.ContractReplayTest`, after the workflows they follow.
   """
 
   use ArchonWeb.ContractCase, async: false
@@ -16,7 +17,7 @@ defmodule ArchonWeb.MetadataControllerTest do
   # Every definition name the metadata fixtures use.
   @names ~w(archon_task_a archon_task_b archon_task_c archon_coerced archon_missing archon_simple
             archon_switch archon_fork archon_no_tasks archon_bulk archon_bulk_valid
-            archon_bulk_invalid)
+            archon_bulk_invalid archon_meta6 archon_meta6_agent)
 
   setup do
     # The fixtures were captured on an empty server; other tests register some of these names.
@@ -242,6 +243,113 @@ defmodule ArchonWeb.MetadataControllerTest do
     end
   end
 
+  describe "Phase 6 lists, deletion and validation (ADR 0025, decision 6)" do
+    test "the lists through REST" do
+      agent = Map.put(workflow("archon_meta6_agent"), "metadata", %{"classifier" => "Agent"})
+      assert post_json("/api/metadata/workflow", agent) == {200, nil}
+      assert post_json("/api/metadata/workflow", workflow("archon_meta6")) == {200, nil}
+      assert {200, _bulk} = put_json("/api/metadata/workflow", [workflow("archon_meta6", 2)])
+
+      names = fn {200, list} ->
+        for %{"name" => "archon_meta6" <> _} = d <- list, do: d["name"]
+      end
+
+      assert names.(get_json("/api/metadata/workflow?classifier=%20aGeNt")) == [
+               "archon_meta6_agent"
+             ]
+
+      assert names.(get_json("/api/metadata/workflow?classifier=workflow")) == [
+               "archon_meta6",
+               "archon_meta6"
+             ]
+
+      assert names.(get_json("/api/metadata/workflow")) ==
+               ["archon_meta6", "archon_meta6", "archon_meta6_agent"]
+
+      assert {200, [%{"version" => 2} = latest]} =
+               get_json("/api/metadata/workflow/latest-versions")
+               |> then(fn {200, list} ->
+                 {200, Enum.filter(list, &(&1["name"] == "archon_meta6"))}
+               end)
+
+      assert latest["tasks"] != nil
+
+      # {name}/versions leaves updateTime out; names-and-versions writes it, 0 when unset.
+      assert {200, [%{"version" => 1, "createTime" => created} = v1, %{"version" => 2} = v2]} =
+               get_json("/api/metadata/workflow/archon_meta6/versions")
+
+      assert created > 0
+      assert Map.keys(v1) == ["createTime", "name", "version"]
+      assert v2["createTime"] == 0
+
+      assert {200, %{"archon_meta6" => [n1, n2]}} =
+               get_json("/api/metadata/workflow/names-and-versions")
+
+      assert n1 == Map.put(v1, "updateTime", 0)
+      assert n2["updateTime"] > 0
+
+      assert {200, names} = get_json("/api/metadata/workflow/names")
+
+      assert Enum.filter(names, &String.starts_with?(&1, "archon_meta6")) == [
+               "archon_meta6",
+               "archon_meta6_agent"
+             ]
+    end
+
+    # Seen on the upstream server: the version converts as NumberUtils.parseNumber does.
+    test "the version path value" do
+      for version <- ["%201", "0x1", "+1"] do
+        assert post_json("/api/metadata/workflow", workflow("archon_meta6")) == {200, nil}
+        assert delete("/api/metadata/workflow/archon_meta6/#{version}") == {200, nil}
+      end
+
+      assert {500, %{"message" => message}} = delete("/api/metadata/workflow/archon_meta6/%20")
+
+      assert message ==
+               "Required URI template variable 'version' for method parameter type Integer is " <>
+                 "present but converted to null"
+
+      assert {500, %{"message" => message}} =
+               delete("/api/metadata/workflow/archon_meta6/99999999999")
+
+      assert message ==
+               "Method parameter 'version': Failed to convert value of type 'java.lang.String' " <>
+                 ~s(to required type 'java.lang.Integer'; For input string: "99999999999")
+
+      assert {500, %{"message" => "No such workflow definition: archon_meta6 version: 1"}} =
+               delete("/api/metadata/workflow/archon_meta6/1")
+    end
+
+    test "a task definition is deleted whatever refers to it" do
+      assert post_json("/api/metadata/taskdefs", [%{"name" => "archon_meta6"}]) == {200, nil}
+      assert delete("/api/metadata/taskdefs/archon_meta6") == {200, nil}
+
+      assert {500, %{"message" => "No such task definition", "retryable" => false}} =
+               delete("/api/metadata/taskdefs/archon_meta6")
+    end
+
+    test "validation: a missing body names the handler, a refused schema is a 400" do
+      assert {500, %{"message" => message}} =
+               send_json("POST", "/api/metadata/workflow/validate", "null")
+
+      assert message ==
+               "Required request body is missing: public void " <>
+                 "com.netflix.conductor.rest.controllers.MetadataResource.validate(" <>
+                 "com.netflix.conductor.common.metadata.workflow.WorkflowDef)"
+
+      refused = Map.put(workflow("archon_meta6"), "inputSchema", %{"data" => %{}})
+
+      assert {400, %{"message" => message}} =
+               post_json("/api/metadata/workflow/validate", refused)
+
+      assert {400, %{"message" => ^message}} = post_json("/api/metadata/workflow", refused)
+      assert {404, _not_stored} = get_json("/api/metadata/workflow/archon_meta6")
+
+      assert {400, %{"validationErrors" => [%{"path" => "validateWorkflowDef.arg0.name"}]}} =
+               post_json("/api/metadata/workflow/validate", %{"tasks" => [simple_task()]})
+    end
+  end
+
   describe "request errors" do
     # Seen on the upstream server: the handler signature completes the message.
     test "a missing body names the handler" do
@@ -289,8 +397,8 @@ defmodule ArchonWeb.MetadataControllerTest do
 
   ## Helpers
 
-  defp workflow(name),
-    do: %{"name" => name, "version" => 1, "tasks" => [simple_task()]}
+  defp workflow(name, version \\ 1),
+    do: %{"name" => name, "version" => version, "tasks" => [simple_task()]}
 
   defp simple_task,
     do: %{"name" => "archon_task_a", "taskReferenceName" => "a", "type" => "SIMPLE"}
@@ -298,6 +406,7 @@ defmodule ArchonWeb.MetadataControllerTest do
   defp get_json(path), do: send_json("GET", path, nil)
   defp post_json(path, body), do: send_json("POST", path, JSON.encode!(body))
   defp put_json(path, body), do: send_json("PUT", path, JSON.encode!(body))
+  defp delete(path), do: send_json("DELETE", path, nil)
 
   defp send_json(method, path, raw) do
     conn = build_conn()

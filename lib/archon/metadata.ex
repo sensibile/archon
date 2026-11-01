@@ -4,10 +4,12 @@
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
 #
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/service/MetadataService.java
-# and MetadataServiceImpl.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
-# Modified by sensibile: the MVP operations only; the interface's method validation is done here,
-# results are tagged tuples instead of exceptions, and definitions whose schemas cannot be checked
-# are refused (ADR 0023, decisions 2 and 5).
+# and MetadataServiceImpl.java, core/.../dao/MetadataDAO.java, rest/.../controllers/MetadataResource.java
+# (the classifier filter) and common/.../metadata/workflow/WorkflowClassifier.java
+# at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
+# Modified by sensibile: the MVP and Phase 6 operations only; the interface's method validation is
+# done here, results are tagged tuples instead of exceptions, and definitions whose schemas cannot
+# be checked are refused (ADR 0023, decisions 2 and 5; ADR 0025, decision 6).
 
 defmodule Archon.Metadata do
   @moduledoc """
@@ -32,7 +34,7 @@ defmodule Archon.Metadata do
 
   require Logger
 
-  alias Archon.Domain.{BulkResponse, TaskDef, Validation, WorkflowDef}
+  alias Archon.Domain.{BulkResponse, TaskDef, Validation, WorkflowDef, WorkflowDefSummary}
   alias Archon.Runtime
 
   # WorkflowContext's client app; the server without one has "".
@@ -123,6 +125,19 @@ defmodule Archon.Metadata do
   @doc "Upstream `getTaskDefs`: every task definition (ordered by name, see `Archon.Runtime.Metadata`)."
   @spec get_task_defs() :: [TaskDef.t()]
   def get_task_defs, do: metadata().get_all_task_defs()
+
+  @doc """
+  Upstream `unregisterTaskDef`: deletes the definition whatever refers to it. A name that is not
+  stored is upstream SQLite's `NotFoundException` wrapped by its transaction helper in a
+  `NonTransientException`: `{:error, {:server_error, "No such task definition"}}` (a 500).
+  """
+  @spec unregister_task_def(String.t()) :: :ok | {:error, {:server_error, String.t()}}
+  def unregister_task_def(name) when is_binary(name) do
+    case metadata().remove_task_def(name) do
+      :ok -> :ok
+      {:error, :not_found} -> {:error, {:server_error, "No such task definition"}}
+    end
+  end
 
   ## Workflow definitions
 
@@ -239,6 +254,167 @@ defmodule Archon.Metadata do
 
   def find_workflow_def(name, version) when is_binary(name) and is_integer(version),
     do: metadata().get_workflow_def(name, version)
+
+  @doc """
+  Upstream `validateWorkflowDef`: the validation of `register_workflow_def/1` and its schema
+  refusal (ADR 0023, decision 5), without storing anything or looking at what is stored. Upstream
+  passes a schema Archon refuses; refusing it here keeps a definition that validates from failing
+  its registration (ADR 0025, decision 6).
+  """
+  @spec validate_workflow_def(WorkflowDef.t()) :: :ok | {:error, {:invalid, term()}}
+  def validate_workflow_def(%WorkflowDef{} = definition) do
+    with :ok <- validate(definition, &WorkflowDef.validate/1) do
+      WorkflowDef.check_schema(definition)
+    end
+  end
+
+  @doc """
+  Upstream `unregisterWorkflowDef`: deletes that version whatever runs on it (a running workflow
+  keeps the definition it started with). A version that is not stored is upstream SQLite's
+  `NotFoundException` wrapped in a `NonTransientException`:
+  `{:error, {:server_error, "No such workflow definition: <name> version: <version>"}}` (a 500).
+  """
+  @spec unregister_workflow_def(String.t(), integer()) ::
+          :ok | {:error, {:server_error, String.t()}}
+  def unregister_workflow_def(name, version) when is_binary(name) and is_integer(version) do
+    case metadata().remove_workflow_def(name, version) do
+      :ok ->
+        :ok
+
+      {:error, :not_found} ->
+        {:error, {:server_error, "No such workflow definition: #{name} version: #{version}"}}
+    end
+  end
+
+  ## Workflow definition lists
+
+  @doc """
+  Upstream `getAll` of `MetadataResource`: every version, by name (byte order) and version. A
+  `classifier` that is not blank keeps the definitions whose `classifier_of/1` equals it trimmed,
+  ignoring case.
+  """
+  @spec get_workflow_defs(String.t() | nil) :: [WorkflowDef.t()]
+  def get_workflow_defs(classifier \\ nil) do
+    definitions = metadata().get_all_workflow_defs()
+    # Tomcat decodes the query as UTF-8, an invalid sequence as U+FFFD.
+    classifier = classifier && String.replace_invalid(classifier)
+
+    if Validation.java_blank?(classifier) do
+      definitions
+    else
+      wanted = java_trim(classifier)
+      Enum.filter(definitions, &equals_ignore_case?(wanted, classifier_of(&1)))
+    end
+  end
+
+  @doc """
+  Upstream `WorkflowClassifier.classifierOf`: the definition's `metadata` `classifier` when it is
+  a string that is not blank (as it is, not trimmed), else `"agent"` when `agent_sdk` or
+  `agentDef` is not null, else `"workflow"`.
+  """
+  @spec classifier_of(WorkflowDef.t()) :: String.t()
+  def classifier_of(%WorkflowDef{metadata: metadata}) do
+    metadata = metadata || %{}
+
+    case Map.get(metadata, "classifier") do
+      explicit when is_binary(explicit) ->
+        if Validation.java_blank?(explicit), do: implicit_classifier(metadata), else: explicit
+
+      _other ->
+        implicit_classifier(metadata)
+    end
+  end
+
+  defp implicit_classifier(metadata) do
+    if Map.get(metadata, "agent_sdk") != nil or Map.get(metadata, "agentDef") != nil,
+      do: "agent",
+      else: "workflow"
+  end
+
+  @doc """
+  Upstream `getWorkflowNamesAndVersions`: a summary of each version (`createTime` and
+  `updateTime` written as 0 when unset, as upstream's audit getters) by name, each list ordered
+  by version.
+  """
+  @spec get_workflow_names_and_versions() :: %{String.t() => [WorkflowDefSummary.t()]}
+  def get_workflow_names_and_versions do
+    # The store's order is by name, then version.
+    Enum.group_by(
+      metadata().get_all_workflow_defs(),
+      & &1.name,
+      &summary(&1, &1.update_time || 0)
+    )
+  end
+
+  @doc """
+  Upstream `MetadataDAO#getWorkflowNames`: every name once, in Java's `String` order (UTF-16 code
+  units).
+  """
+  @spec get_workflow_names() :: [String.t()]
+  def get_workflow_names do
+    metadata().get_all_workflow_defs()
+    |> Enum.map(& &1.name)
+    |> Enum.uniq()
+    |> Enum.sort_by(&:unicode.characters_to_binary(&1, :utf8, :utf16))
+  end
+
+  @doc """
+  Upstream `MetadataDAO#getWorkflowVersions`: a summary of each version of `name` by version,
+  without `updateTime`; `[]` for a name that is not stored.
+  """
+  @spec get_workflow_versions(String.t()) :: [WorkflowDefSummary.t()]
+  def get_workflow_versions(name) when is_binary(name) do
+    for %WorkflowDef{name: ^name} = definition <- metadata().get_all_workflow_defs(),
+        do: summary(definition, nil)
+  end
+
+  @doc """
+  Upstream `getWorkflowDefsLatestVersions`: the highest version of each name. Upstream gives no
+  order; this is by name (byte order).
+  """
+  @spec get_latest_workflow_defs() :: [WorkflowDef.t()]
+  def get_latest_workflow_defs do
+    metadata().get_all_workflow_defs()
+    |> Enum.chunk_by(& &1.name)
+    |> Enum.map(&List.last/1)
+  end
+
+  # Auditable#getCreateTime writes a null as 0.
+  defp summary(%WorkflowDef{} = definition, update_time) do
+    %WorkflowDefSummary{
+      name: definition.name,
+      version: definition.version,
+      create_time: definition.create_time || 0,
+      update_time: update_time
+    }
+  end
+
+  # String#trim: the code points up to U+0020 at both ends.
+  defp java_trim(text), do: String.replace(text, ~r/\A[\x00-\x20]+|[\x00-\x20]+\z/, "")
+
+  # String#equalsIgnoreCase, code point by code point: equal, or equal upper-cased, or equal
+  # lower-casing the upper-cased ones. Each mapping is to one code point; one that gives several
+  # (String.upcase("ß")) leaves it as it is, as Character#toUpperCase does.
+  defp equals_ignore_case?(a, b) do
+    a = String.to_charlist(a)
+    b = String.to_charlist(b)
+
+    length(a) == length(b) and
+      Enum.all?(Enum.zip(a, b), fn {x, y} ->
+        upper_x = simple_case(x, &String.upcase/1)
+        upper_y = simple_case(y, &String.upcase/1)
+
+        x == y or upper_x == upper_y or
+          simple_case(upper_x, &String.downcase/1) == simple_case(upper_y, &String.downcase/1)
+      end)
+  end
+
+  defp simple_case(code_point, map) do
+    case String.to_charlist(map.(<<code_point::utf8>>)) do
+      [mapped] -> mapped
+      _several -> code_point
+    end
+  end
 
   ## Validation
 

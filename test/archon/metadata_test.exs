@@ -18,6 +18,7 @@ defmodule Archon.MetadataTest do
     SubWorkflowParams,
     TaskDef,
     WorkflowDef,
+    WorkflowDefSummary,
     WorkflowTask
   }
 
@@ -268,6 +269,164 @@ defmodule Archon.MetadataTest do
     end
   end
 
+  describe "workflow definition lists (ADR 0025, decision 6)" do
+    setup do
+      # The shared runtime's lists are replayed against fixtures: no classifier of these may stay.
+      on_exit(fn ->
+        names =
+          for name <- Metadata.get_workflow_names(), String.starts_with?(name, @prefix), do: name
+
+        ArchonWeb.ContractCase.remove_definitions(names)
+      end)
+
+      for {suffix, version, fields} <- [
+            {"l_b", 2, [create_time: 20, update_time: 21]},
+            {"l_a", 1, [create_time: 10, metadata: %{"classifier" => "Agent"}]},
+            {"l_b", 1, [create_time: nil, update_time: nil, metadata: %{"agent_sdk" => "x"}]},
+            {"l_a", 3, [metadata: %{"classifier" => " ", "agentDef" => 1}]},
+            {"l_c", 1, [metadata: %{"classifier" => " Foo ", "agent_sdk" => nil}]}
+          ],
+          # The store as it is: the service would stamp updateTime.
+          do:
+            :ok =
+              Runtime.metadata().update_workflow_def(
+                workflow(suffix, [version: version] ++ fields)
+              )
+
+      :ok
+    end
+
+    # This describe's definitions: "l_" in the setup, "c_" and "j_" in one test each.
+    defp ours(list, key \\ & &1.name, group \\ "l_"),
+      do: Enum.filter(list, &String.starts_with?(key.(&1), @prefix <> group))
+
+    defp keys(definitions), do: Enum.map(definitions, &{&1.name, &1.version})
+
+    test "every version by name and version, filtered by classifier" do
+      assert keys(ours(Metadata.get_workflow_defs())) ==
+               [{name("l_a"), 1}, {name("l_a"), 3}, {name("l_b"), 1}, {name("l_b"), 2}] ++
+                 [{name("l_c"), 1}]
+
+      assert keys(ours(Metadata.get_workflow_defs(" \t"))) ==
+               keys(ours(Metadata.get_workflow_defs()))
+
+      agents = [{name("l_a"), 1}, {name("l_a"), 3}, {name("l_b"), 1}]
+      assert keys(ours(Metadata.get_workflow_defs("AGENT"))) == agents
+      assert keys(ours(Metadata.get_workflow_defs(" agent\n"))) == agents
+      assert keys(ours(Metadata.get_workflow_defs("workflow"))) == [{name("l_b"), 2}]
+
+      # The stored classifier is not trimmed, the asked one is.
+      assert ours(Metadata.get_workflow_defs(" Foo ")) == []
+      assert ours(Metadata.get_workflow_defs("Foo")) == []
+    end
+
+    test "the classifier of a definition" do
+      classifier = &Metadata.classifier_of(%WorkflowDef{metadata: &1})
+      assert classifier.(nil) == "workflow"
+      assert classifier.(%{}) == "workflow"
+      assert classifier.(%{"classifier" => "Mine"}) == "Mine"
+      assert classifier.(%{"classifier" => 1, "agentDef" => %{}}) == "agent"
+      assert classifier.(%{"classifier" => "\u3000"}) == "workflow"
+      assert classifier.(%{"agent_sdk" => nil, "agentDef" => nil}) == "workflow"
+    end
+
+    test "a classifier compares as String#equalsIgnoreCase" do
+      :ok = Metadata.update_workflow_def(workflow("c_d", metadata: %{"classifier" => "ǅ\uFFFD"}))
+
+      assert keys(ours(Metadata.get_workflow_defs("ǆ\xFF"), & &1.name, "c_")) == [
+               {name("c_d"), 1}
+             ]
+
+      assert keys(ours(Metadata.get_workflow_defs("Ǆ\uFFFD"), & &1.name, "c_")) == [
+               {name("c_d"), 1}
+             ]
+
+      :ok = Metadata.update_workflow_def(workflow("c_e", metadata: %{"classifier" => "ß"}))
+      assert ours(Metadata.get_workflow_defs("SS"), & &1.name, "c_") == []
+      assert keys(ours(Metadata.get_workflow_defs("ß"), & &1.name, "c_")) == [{name("c_e"), 1}]
+    end
+
+    test "names, summaries and the latest versions" do
+      assert ours(Metadata.get_workflow_names(), & &1) == [name("l_a"), name("l_b"), name("l_c")]
+
+      by_name = Metadata.get_workflow_names_and_versions()
+
+      assert by_name[name("l_b")] == [
+               %WorkflowDefSummary{name: name("l_b"), version: 1, create_time: 0, update_time: 0},
+               %WorkflowDefSummary{
+                 name: name("l_b"),
+                 version: 2,
+                 create_time: 20,
+                 update_time: 21
+               }
+             ]
+
+      assert Metadata.get_workflow_versions(name("l_b")) == [
+               %WorkflowDefSummary{name: name("l_b"), version: 1, create_time: 0},
+               %WorkflowDefSummary{name: name("l_b"), version: 2, create_time: 20}
+             ]
+
+      assert Metadata.get_workflow_versions(name("none")) == []
+
+      assert keys(ours(Metadata.get_latest_workflow_defs())) ==
+               [{name("l_a"), 3}, {name("l_b"), 2}, {name("l_c"), 1}]
+    end
+
+    test "names are in Java String order" do
+      # U+FF5E sorts before U+1F600 in UTF-8 and after its surrogates in UTF-16 code units.
+      for suffix <- ["j_\u{1F600}", "j_\uFF5E"],
+          do: :ok = Metadata.update_workflow_def(workflow(suffix))
+
+      assert ours(Metadata.get_workflow_names(), & &1, "j_") ==
+               [name("j_\u{1F600}"), name("j_\uFF5E")]
+    end
+  end
+
+  describe "unregistering and validating (ADR 0025, decision 6)" do
+    test "a workflow definition version" do
+      :ok = Metadata.update_workflow_def(workflow("u", version: 1))
+      :ok = Metadata.update_workflow_def(workflow("u", version: 2))
+
+      assert Metadata.unregister_workflow_def(name("u"), 2) == :ok
+      assert {:ok, %WorkflowDef{version: 1}} = Metadata.get_workflow_def(name("u"), nil)
+
+      assert Metadata.unregister_workflow_def(name("u"), 2) ==
+               {:error, {:server_error, "No such workflow definition: #{name("u")} version: 2"}}
+    end
+
+    test "a task definition" do
+      :ok = Metadata.register_task_defs([%TaskDef{name: name("ut")}])
+      assert Metadata.unregister_task_def(name("ut")) == :ok
+      assert {:error, {:not_found, _message}} = Metadata.get_task_def(name("ut"))
+
+      assert Metadata.unregister_task_def(name("ut")) ==
+               {:error, {:server_error, "No such task definition"}}
+    end
+
+    test "validation stores nothing and does not look at what is stored" do
+      :ok = Metadata.update_workflow_def(workflow("v"))
+      assert Metadata.validate_workflow_def(workflow("v", description: "other")) == :ok
+      assert Metadata.validate_workflow_def(workflow("v_new")) == :ok
+      assert {:ok, %WorkflowDef{description: nil}} = Metadata.get_workflow_def(name("v"), 1)
+      assert {:error, {:not_found, _message}} = Metadata.get_workflow_def(name("v_new"), nil)
+
+      assert Metadata.validate_workflow_def(%WorkflowDef{tasks: []}) ==
+               {:error,
+                {:invalid,
+                 [
+                   {"name", "WorkflowDef name cannot be null or empty"},
+                   {"tasks", "WorkflowTask list cannot be empty"}
+                 ]}}
+    end
+
+    test "validation refuses a schema registration would refuse" do
+      definition = workflow("v_schema", input_schema: %SchemaDef{data: %{}})
+
+      assert {:error, {:invalid, message}} = Metadata.validate_workflow_def(definition)
+      assert Metadata.register_workflow_def(definition) == {:error, {:invalid, message}}
+    end
+  end
+
   defmodule RaisingMetadata do
     @moduledoc false
     # The runtime's metadata, except that storing "..._raise" raises and "..._exit" exits. Other
@@ -297,5 +456,11 @@ defmodule Archon.MetadataTest do
     defdelegate get_workflow_def(name, version), to: @real
     @impl true
     defdelegate get_latest_workflow_def(name), to: @real
+    @impl true
+    defdelegate get_all_workflow_defs(), to: @real
+    @impl true
+    defdelegate remove_workflow_def(name, version), to: @real
+    @impl true
+    defdelegate remove_task_def(name), to: @real
   end
 end
