@@ -8,8 +8,8 @@ defmodule Archon.Runtime.TasksTest do
   poll checks of upstream `ExecutionService#poll` (queue cleanup, the concurrent execution limit,
   a failed poll, poll data and acks), domain queues, and the update, update-v2 and get calls.
 
-  The queues are the application's, shared with other tests, so each test first removes the
-  messages left visible in the queues it polls.
+  The queues are the application's, shared with other tests, so each test first empties the
+  queues it polls and stops what would fill them again (`Archon.RuntimeCase.isolate_queues/1`).
   """
 
   use Archon.RuntimeCase
@@ -17,27 +17,10 @@ defmodule Archon.Runtime.TasksTest do
   @moduletag :capture_log
 
   alias Archon.Domain.{Task, TaskDef, TaskResult, WorkflowDef, WorkflowTask}
-  alias Archon.Runtime.{Tasks, Waker}
+  alias Archon.Runtime.Tasks
 
-  # The tests poll the shared queues of the captured definitions. The waker is suspended so that
-  # it does not activate a workflow left by another test, whose recovery check would queue its
-  # task again (on the Postgres backend, whose stored times other tests set with their clock).
   setup do
-    :ok = :sys.suspend(Waker)
-    on_exit(fn -> with(pid when is_pid(pid) <- Process.whereis(Waker), do: :sys.resume(pid)) end)
-    drain(["archon_task_a", "archon_task_b"])
-    :ok
-  end
-
-  defp drain(queues) do
-    for queue <- queues, id <- pop_all(queue), do: Runtime.queue().remove(queue, id)
-  end
-
-  defp pop_all(queue) do
-    case Runtime.queue().pop(queue, 100, 0) do
-      [] -> []
-      ids -> ids ++ pop_all(queue)
-    end
+    isolate_queues(["archon_task_a", "archon_task_b"])
   end
 
   defp unique(prefix), do: "#{prefix}_#{System.unique_integer([:positive])}"

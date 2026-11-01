@@ -10,11 +10,13 @@ defmodule Archon.Runtime.GoldenReplayTest do
   polled tasks match the `task_poll_*` responses, and `task_get` and `task_poll_empty` are
   answered as captured. The `DO_WHILE` scenarios of `do_while_replay_test.exs` run the same way.
 
-  The queues are the application's, shared with other tests, so each test first removes the
-  messages left visible in the queues it polls.
+  The queues are the application's, shared with other tests, so each test first empties the
+  queues it polls and stops what would fill them again (`Archon.RuntimeCase.isolate_queues/1`).
   """
 
   use Archon.RuntimeCase
+
+  @moduletag :capture_log
 
   import Archon.StepReplay, only: [assert_matches: 2]
 
@@ -30,19 +32,7 @@ defmodule Archon.Runtime.GoldenReplayTest do
       :ok = Runtime.metadata().update_workflow_def(definition)
     end
 
-    drain(["archon_task_a", "archon_task_b"])
-    :ok
-  end
-
-  defp drain(queues) do
-    for queue <- queues, id <- pop_all(queue), do: Runtime.queue().remove(queue, id)
-  end
-
-  defp pop_all(queue) do
-    case Runtime.queue().pop(queue, 100, 0) do
-      [] -> []
-      ids -> ids ++ pop_all(queue)
-    end
+    isolate_queues(["archon_task_a", "archon_task_b"])
   end
 
   # The task as the REST response encodes it, compared with a captured one.
@@ -216,7 +206,7 @@ defmodule Archon.Runtime.GoldenReplayTest do
     end
 
     defp start(definition, input) do
-      drain(Enum.map(["a", "after"], &("archon_dw_" <> &1)))
+      isolate_queues(Enum.map(["a", "after"], &("archon_dw_" <> &1)))
       {:ok, id} = Runtime.start_workflow(%{definition: definition, input: input})
       id
     end
