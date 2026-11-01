@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks",
+    "body": {
+      "workflowInstanceId": "00000000-0000-0000-0000-000000000000",
+      "taskId": "x",
+      "status": "BAD"
+    }
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "JSON parse error: Cannot deserialize value of type `com.netflix.conductor.common.metadata.tasks.TaskResult$Status` from String \"BAD\": not one of the values accepted for Enum class: [CANCELED, COMPLETED, FAILED_WITH_TERMINAL_ERROR, FAILED, IN_PROGRESS]",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

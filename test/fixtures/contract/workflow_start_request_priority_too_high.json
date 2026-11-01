@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow",
+    "body": {
+      "name": "archon_simple",
+      "priority": 100
+    }
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Validation failed, check below errors for detail.",
+      "retryable": false,
+      "validationErrors": [
+        {
+          "path": "startWorkflow.arg0.priority",
+          "message": "priority: 100 should be maximum 99",
+          "invalidValue": "100"
+        }
+      ]
+    }
+  }
+}

@@ -53,6 +53,37 @@ BASE_URL=http://localhost:18080 scripts/contract/capture_fixtures.sh
 | `route_*` | 없는 경로 404, MVP 매개변수 경로와 모양이 같은 Later 경로의 upstream 응답, MVP 경로의 다른 메서드(405) |
 | `request_*` | JSON이 아닌 body, 숫자·불리언 쿼리에 변환되지 않는 값(500) |
 
+아래는 마지막 조각 5f가 앞 조각들이 시험에 손으로 적은 upstream 응답을 캡처해 더한 것이다(40개, 모두 127개). 상태를
+바꾸지 않는 오류를 먼저, 큐에 태스크를 남기는 시작을 마지막에 둔다.
+
+| 접두사·이름 | 내용 |
+|---|---|
+| `*_missing_body`, `*_null_body` | 빈 body와 `null` body의 `"Required request body is missing: <handler>"`(500), body를 받는 경로 여덟 개에 하나씩 |
+| `metadata_register_workflow_no_name`, `metadata_register_workflow_overwrite_invalid`, `metadata_update_taskdef_invalid` | 검증 접두사 `registerWorkflowDef.arg0`, `overwrite=true`의 `updateWorkflowDef.arg0`, `updateTaskDef.arg0` |
+| `metadata_update_workflows_null_element`, `metadata_register_taskdefs_null_element` | `[null]`: 일괄 갱신은 400, TaskDef 등록은 upstream `NullPointerException` 문구 500 |
+| `*_wrong_type`, `workflow_start_not_object` | Jackson이 바꾸지 못하는 값(500). 재생은 `message`를 뺀다(Archon 문구는 ADR 0023 결정 4) |
+| `*_query_not_{number,boolean}` | `overwrite`, `version`, `includeOutput` 쿼리 변환 실패(500) |
+| `task_update_v2_invalid_both` | `update-v2`의 두 필드 모두 실패(`" with 2 errors"`) |
+| `task_batch_poll_{timeout_too_long,count_zero}`, `task_poll_domain_empty` | `timeout=5001` 400, `count=0`의 `[]`, 도메인 큐가 빈 poll 204 |
+| `workflow_start_request_{no_name,priority_too_high,invalid_definition}`, `workflow_start_priority_too_low` | 시작 검증 400(`startWorkflow.arg0`, `startWorkflow.arg3`) |
+| `workflow_start_request_{blank_name,null_input,external_input}`, `workflow_start_version_not_found` | 공백 이름 400, `input: null` 400, 외부 입력 경로 500, 없는 버전 404 |
+| `workflow_get_status_no_correlation`, `workflow_terminate_terminated` | `correlationId` 없는 상태 요약, `TERMINATED` 재종료 200 |
+| `workflow_start_request_{defaults,inline_other_name}`, `workflow_start_options`, `workflow_get_{request_defaults,options}` | `priority`·`taskToDomain`의 `null`은 기본값, 이름이 다른 인라인 정의 시작, `version`·`correlationId`·`priority` 쿼리 |
+
+5f에서 다시 캡처한 기존 87개는 `normalize/1` 기준으로 하나만 달랐다(`metadata_register_taskdefs_coerced`의
+`validationErrors` 순서, Hibernate가 정하지 않는 순서라 재생은 순서 없이 비교한다). 새 픽스처가 앞 단계의 워크플로우 ID를
+쓰므로 127개 모두 같은 캡처에서 가져왔다.
+
+캡처하지 않은 것과 그 이유. 이 경우들은 각 컨트롤러의 단위 시험이 본다.
+
+| 경우 | 이유 |
+|---|---|
+| 정의별 실패가 섞인 `BulkResponse` | upstream SQLite에서 만들 수 없다(이름 `null`만 DAO에서 실패하고 `@Valid`가 먼저 막는다). Archon의 스키마 거절·저장 예외에서만 생긴다 |
+| 스키마 거절 400(등록, 시작) | Archon만의 거절이다(ADR 0023 결정 5). upstream은 받거나 다른 400을 준다 |
+| `DELETE /api/metadata/taskdefs/{tasktype}` | Later 경로이고 upstream에서 정의를 지운다 |
+| JSON이 아닌 `Content-Type` | upstream 문구를 `ArchonWeb.Request` 단위 시험이 본다. 캡처 스크립트는 JSON만 보낸다 |
+| 같은 경우의 다른 표본(빈 body와 `null`을 모든 경로에, 코덱 타입 오류의 다른 필드, `%20` 이름, 같은 쿼리의 다른 값, 클래스 단위 정의 오류 `startWorkflow.arg0.workflowDef`·`updateTaskDef.arg0`, 오류가 둘 이상인 검증) | 경로·규칙마다 표본 하나를 캡처했다. 나머지는 같은 규칙의 변형이라 단위 시험에 둔다 |
+
 Archon이 일부러 다르게 답하는 픽스처(Later 경로와 405는 404, Jackson 문구)는 재생 도우미
 `test/support/archon_web/contract_case.ex`의 시나리오에 단계 옵션으로 적혀 있다.
 

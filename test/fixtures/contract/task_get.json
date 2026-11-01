@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/tasks/e1d8e8e9-caf0-41c2-ab60-b66d03003b38",
+    "path": "/api/tasks/a22947ef-3432-4901-a6a9-d7ec9d2ac8bd",
     "body": null
   },
   "response": {
@@ -19,18 +19,18 @@
       "correlationId": "archon-corr-1",
       "pollCount": 1,
       "taskDefName": "archon_task_a",
-      "scheduledTime": 1793502387406,
-      "startTime": 1793502387552,
-      "endTime": 1793502388012,
-      "updateTime": 1793502387576,
+      "scheduledTime": 1793520125234,
+      "startTime": 1793520125317,
+      "endTime": 1793520125764,
+      "updateTime": 1793520125337,
       "startDelayInSeconds": 0,
       "retried": false,
       "executed": true,
       "callbackFromWorker": true,
       "responseTimeoutSeconds": 60,
-      "workflowInstanceId": "50d58a73-7cf6-4617-ac94-c8e003a298d6",
+      "workflowInstanceId": "1a03ebb0-f036-4108-9455-b17405104628",
       "workflowType": "archon_simple",
-      "taskId": "e1d8e8e9-caf0-41c2-ab60-b66d03003b38",
+      "taskId": "a22947ef-3432-4901-a6a9-d7ec9d2ac8bd",
       "callbackAfterSeconds": 0,
       "workerId": "archon-contract",
       "outputData": {
@@ -50,7 +50,7 @@
         "joinOn": [],
         "optional": false,
         "taskDefinition": {
-          "createTime": 1793502386720,
+          "createTime": 1793520124583,
           "updateTime": 0,
           "createdBy": "",
           "name": "archon_task_a",
@@ -92,11 +92,11 @@
       "firstStartTime": 0,
       "executionMetadata": {
         "additionalContext": {},
-        "additionalContextMap": {},
-        "empty": true
+        "empty": true,
+        "additionalContextMap": {}
       },
       "taskDefinition": {
-        "createTime": 1793502386720,
+        "createTime": 1793520124583,
         "updateTime": 0,
         "createdBy": "",
         "name": "archon_task_a",
@@ -123,8 +123,8 @@
         "taskStatusListenerEnabled": true,
         "enforceSchema": false
       },
-      "queueWaitTime": 146,
-      "loopOverTask": false
+      "loopOverTask": false,
+      "queueWaitTime": 83
     }
   }
 }

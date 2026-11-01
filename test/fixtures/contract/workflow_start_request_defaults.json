@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow",
+    "body": {
+      "name": "archon_simple",
+      "priority": null,
+      "taskToDomain": null,
+      "input": {
+        "x": 5
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "6a8795be-84b9-47ff-9a1f-58cbddb71e4a"
+  }
+}

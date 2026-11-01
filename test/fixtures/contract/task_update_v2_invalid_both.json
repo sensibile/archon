@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks/update-v2",
+    "body": {}
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Validation failed for argument [0] in public org.springframework.http.ResponseEntity<com.netflix.conductor.common.metadata.tasks.Task> com.netflix.conductor.rest.controllers.TaskResource.updateTaskV2(com.netflix.conductor.common.metadata.tasks.TaskResult) with 2 errors: [Field error in object 'taskResult' on field 'taskId': rejected value [null]; codes [NotEmpty.taskResult.taskId,NotEmpty.taskId,NotEmpty.java.lang.String,NotEmpty]; arguments [org.springframework.context.support.DefaultMessageSourceResolvable: codes [taskResult.taskId,taskId]; arguments []; default message [taskId]]; default message [Task ID cannot be null or empty]] [Field error in object 'taskResult' on field 'workflowInstanceId': rejected value [null]; codes [NotEmpty.taskResult.workflowInstanceId,NotEmpty.workflowInstanceId,NotEmpty.java.lang.String,NotEmpty]; arguments [org.springframework.context.support.DefaultMessageSourceResolvable: codes [taskResult.workflowInstanceId,workflowInstanceId]; arguments []; default message [workflowInstanceId]]; default message [Workflow Id cannot be null or empty]] ",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

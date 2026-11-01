@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow",
+    "body": {
+      "name": "archon_simple",
+      "externalInputPayloadStoragePath": "archon/input.json"
+    }
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Unable to download payload from external storage path: archon/input.json",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

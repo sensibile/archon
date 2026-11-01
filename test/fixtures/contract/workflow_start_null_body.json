@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_simple",
+    "body": "null"
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Required request body is missing: public java.lang.String com.netflix.conductor.rest.controllers.WorkflowResource.startWorkflow(java.lang.String,java.lang.Integer,java.lang.String,int,java.util.Map<java.lang.String, java.lang.Object>)",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

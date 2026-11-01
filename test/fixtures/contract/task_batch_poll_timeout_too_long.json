@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/poll/batch/archon_task_a?workerid=archon-contract&timeout=5001",
+    "body": null
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Long Poll Timeout value cannot be more than 5 seconds",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

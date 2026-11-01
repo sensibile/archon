@@ -1,0 +1,48 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow?overwrite=abc",
+    "body": {
+      "name": "archon_simple",
+      "version": 1,
+      "schemaVersion": 2,
+      "description": "Two sequential SIMPLE tasks",
+      "inputParameters": [
+        "x"
+      ],
+      "outputParameters": {
+        "y": "${task_b_ref.output.y}"
+      },
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_task_a",
+          "taskReferenceName": "task_a_ref",
+          "type": "SIMPLE",
+          "inputParameters": {
+            "x": "${workflow.input.x}"
+          }
+        },
+        {
+          "name": "archon_task_b",
+          "taskReferenceName": "task_b_ref",
+          "type": "SIMPLE",
+          "inputParameters": {
+            "a": "${task_a_ref.output.y}"
+          }
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Method parameter 'overwrite': Failed to convert value of type 'java.lang.String' to required type 'boolean'; Invalid boolean value [abc]",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

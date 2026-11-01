@@ -1,0 +1,30 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "tasks": [
+        {
+          "name": "archon_task_a",
+          "taskReferenceName": "task_a_ref",
+          "type": "SIMPLE"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Validation failed, check below errors for detail.",
+      "retryable": false,
+      "validationErrors": [
+        {
+          "path": "registerWorkflowDef.arg0.name",
+          "message": "WorkflowDef name cannot be null or empty"
+        }
+      ]
+    }
+  }
+}

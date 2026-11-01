@@ -48,4 +48,5 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
 - Phase 2~5는 아직 구현되지 않았다.
   (비고: Phase 2는 [ADR 0014](0014-phase2-decider.md)의 조각 2a~2e로, Phase 3은 [ADR 0018](0018-phase3-otp-runtime.md)의
   조각 3a~3f로, Phase 4는 [ADR 0021](0021-phase4-postgres-persistence.md)의 조각 4a~4h로 구현했다.
-  Phase 5는 [ADR 0023](0023-phase5-rest.md)의 조각 5a~5f로 구현하며 아직 구현되지 않았다.)
+  Phase 5는 [ADR 0023](0023-phase5-rest.md)의 조각 5a~5f와 [ADR 0024](0024-worker-input-trust-and-auth.md)로 구현했다(2026-11-01,
+  MVP REST 19개 경로, 두 백엔드에서 골든 픽스처 전체 재생). Later 경로와 인증은 그 뒤다.)

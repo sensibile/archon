@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow",
+    "body": ""
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Required request body is missing: public java.lang.String com.netflix.conductor.rest.controllers.WorkflowResource.startWorkflow(com.netflix.conductor.common.metadata.workflow.StartWorkflowRequest)",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

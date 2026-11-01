@@ -12,7 +12,6 @@ defmodule ArchonWeb.MetadataControllerTest do
   use ArchonWeb.ContractCase, async: false
 
   alias Archon.Domain.TaskDef
-  alias Archon.Runtime
 
   # Every definition name the metadata fixtures use.
   @names ~w(archon_task_a archon_task_b archon_task_c archon_coerced archon_missing archon_simple
@@ -42,50 +41,11 @@ defmodule ArchonWeb.MetadataControllerTest do
   end
 
   describe "POST /api/metadata/workflow" do
-    test "a definition without a name is registered and fails validation" do
-      assert post_json("/api/metadata/workflow", %{"tasks" => [simple_task()]}) ==
-               {400,
-                %{
-                  "status" => 400,
-                  "message" => "Validation failed, check below errors for detail.",
-                  "retryable" => false,
-                  "validationErrors" => [
-                    %{
-                      "path" => "registerWorkflowDef.arg0.name",
-                      "message" => "WorkflowDef name cannot be null or empty"
-                    }
-                  ]
-                }}
-    end
-
-    test "overwrite validates as updateWorkflowDef, a conflict comes before validation" do
+    test "a conflict comes before validation" do
       post_json("/api/metadata/workflow", workflow("archon_simple"))
 
       assert {409, %{"message" => "Workflow with archon_simple.1 already exists!"}} =
                post_json("/api/metadata/workflow", %{workflow("archon_simple") | "tasks" => []})
-
-      assert {400,
-              %{
-                "validationErrors" => [
-                  %{
-                    "path" => "updateWorkflowDef.arg0.tasks",
-                    "message" => "WorkflowTask list cannot be empty"
-                  }
-                ]
-              }} =
-               post_json("/api/metadata/workflow?overwrite=true", %{
-                 workflow("archon_simple")
-                 | "tasks" => []
-               })
-    end
-
-    test "the overwrite query converts as a boolean" do
-      assert {500,
-              %{
-                "message" =>
-                  "Method parameter 'overwrite': Failed to convert value of type " <>
-                    "'java.lang.String' to required type 'boolean'; Invalid boolean value [abc]"
-              }} = post_json("/api/metadata/workflow?overwrite=abc", workflow("archon_simple"))
     end
   end
 
@@ -93,18 +53,6 @@ defmodule ArchonWeb.MetadataControllerTest do
     test "a single object is a list of one" do
       assert put_json("/api/metadata/workflow", workflow("archon_bulk")) ==
                {200, %{"bulkErrorResults" => %{}, "bulkSuccessfulResults" => ["archon_bulk"]}}
-    end
-
-    test "a null element fails the request" do
-      assert {400,
-              %{
-                "validationErrors" => [
-                  %{
-                    "path" => "updateWorkflowDef.arg0[0].<list element>",
-                    "message" => "WorkflowDef cannot be null"
-                  }
-                ]
-              }} = put_json("/api/metadata/workflow", [nil])
     end
 
     test "a refused schema fails that definition only" do
@@ -264,18 +212,7 @@ defmodule ArchonWeb.MetadataControllerTest do
       assert {:ok, %TaskDef{created_by: ""}} = Archon.Metadata.get_task_def("archon_task_c")
     end
 
-    test "PUT validates as updateTaskDef" do
-      assert {400,
-              %{
-                "validationErrors" => [
-                  %{
-                    "path" => "updateTaskDef.arg0.name",
-                    "message" => "TaskDef name cannot be null or empty",
-                    "invalidValue" => ""
-                  }
-                ]
-              }} = put_json("/api/metadata/taskdefs", %{"name" => ""})
-
+    test "PUT validates as updateTaskDef, a class-level error at the argument" do
       assert {400,
               %{
                 "validationErrors" => [
@@ -348,15 +285,6 @@ defmodule ArchonWeb.MetadataControllerTest do
       assert {500, %{"message" => "JSON parse error: must be object"}} =
                put_json("/api/metadata/taskdefs", [%{"name" => "x"}])
     end
-
-    test "a version that is not a number is Spring's conversion error" do
-      assert {500,
-              %{
-                "message" =>
-                  "Method parameter 'version': Failed to convert value of type 'java.lang.String' " <>
-                    ~s|to required type 'java.lang.Integer'; For input string: "abc"|
-              }} = get_json("/api/metadata/workflow/archon_simple?version=abc")
-    end
   end
 
   ## Helpers
@@ -384,33 +312,5 @@ defmodule ArchonWeb.MetadataControllerTest do
 
     body = if conn.resp_body in [nil, ""], do: nil, else: JSON.decode!(conn.resp_body)
     {conn.status, body}
-  end
-
-  # Removes these definitions from the runtime's store, whichever backend it is (there is no
-  # remove operation in `Archon.Runtime.Metadata`, as the MVP has no delete route).
-  defp remove_definitions(names) do
-    case Runtime.metadata() do
-      Archon.Runtime.Metadata.Memory ->
-        :sys.replace_state(Archon.Runtime.Metadata.Memory, fn state ->
-          %{
-            state
-            | task_defs: Map.drop(state.task_defs, names),
-              workflow_defs:
-                Map.reject(state.workflow_defs, fn {{name, _version}, _def} -> name in names end)
-          }
-        end)
-
-      Archon.Runtime.Metadata.Postgres ->
-        instance = Archon.Runtime.Postgres.runtime()
-
-        for table <- ["meta_task_def", "meta_workflow_def"] do
-          Archon.Repo.query!(
-            "DELETE FROM #{Archon.Runtime.Postgres.table(instance, table)} WHERE name = ANY($1)",
-            [names]
-          )
-        end
-    end
-
-    :ok
   end
 end
