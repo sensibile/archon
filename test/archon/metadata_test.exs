@@ -253,7 +253,6 @@ defmodule Archon.MetadataTest do
   # Runs `fun` with another `Archon.Runtime.Metadata` configured.
   defp with_metadata(module, fun) do
     config = Application.get_env(:archon, Runtime, [])
-    Process.put(:archon_metadata_test_real, Runtime.metadata())
     Application.put_env(:archon, Runtime, Keyword.put(config, :metadata, module))
 
     try do
@@ -265,13 +264,31 @@ defmodule Archon.MetadataTest do
 
   defmodule RaisingMetadata do
     @moduledoc false
-    # The runtime's metadata, except that storing a definition named "..._raise" raises.
+    # The runtime's metadata, except that storing a definition named "..._raise" raises. Other
+    # processes may read the configuration while it is swapped, so every callback delegates.
+    @behaviour Archon.Runtime.Metadata
 
+    @real Archon.Runtime.metadata()
+
+    @impl true
     def update_workflow_def(%WorkflowDef{name: "archon_metadata_test_raise"}),
       do: raise("store down")
 
-    def update_workflow_def(definition), do: real().update_workflow_def(definition)
+    def update_workflow_def(definition), do: @real.update_workflow_def(definition)
 
-    defp real, do: Process.get(:archon_metadata_test_real)
+    @impl true
+    defdelegate create_task_def(task_def), to: @real
+    @impl true
+    defdelegate update_task_def(task_def), to: @real
+    @impl true
+    defdelegate get_task_def(name), to: @real
+    @impl true
+    defdelegate get_all_task_defs(), to: @real
+    @impl true
+    defdelegate create_workflow_def(definition), to: @real
+    @impl true
+    defdelegate get_workflow_def(name, version), to: @real
+    @impl true
+    defdelegate get_latest_workflow_def(name), to: @real
   end
 end

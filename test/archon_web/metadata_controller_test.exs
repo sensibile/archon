@@ -182,6 +182,34 @@ defmodule ArchonWeb.MetadataControllerTest do
                })
     end
 
+    # ADR 0023, decision 5: the refusal comes after upstream's own checks.
+    test "after the conflict, the unknown task definition and the whole list" do
+      post_json("/api/metadata/workflow", workflow("archon_simple"))
+      refused = Map.put(workflow("archon_simple"), "inputSchema", %{"data" => %{}})
+
+      assert {409, %{"message" => "Workflow with archon_simple.1 already exists!"}} =
+               post_json("/api/metadata/workflow", refused)
+
+      assert {400, %{"message" => "Schema validation is not supported yet: " <> _}} =
+               post_json("/api/metadata/workflow?overwrite=true", refused)
+
+      assert {404, %{"message" => "No such task by name archon_missing"}} =
+               put_json("/api/metadata/taskdefs", %{
+                 "name" => "archon_missing",
+                 "enforceSchema" => true,
+                 "inputSchema" => %{"data" => %{}}
+               })
+
+      assert {400, %{"message" => "Schema validation is not supported yet: archon_task_b " <> _}} =
+               post_json("/api/metadata/taskdefs", [
+                 %{"name" => "archon_task_c"},
+                 nil,
+                 %{"name" => "archon_task_b", "enforceSchema" => true, "inputSchema" => %{}}
+               ])
+
+      assert {:error, _} = Archon.Metadata.get_task_def("archon_task_c")
+    end
+
     test "an embedded definition is checked too" do
       embedded = %{
         "name" => "archon_task_b",

@@ -83,8 +83,8 @@ defmodule Archon.Runtime do
   (`Archon.Domain.WorkflowDef.check_schema/1` on the definition with its task definitions
   embedded: an inline `:definition`, a registered one, and the task definitions they get;
   ADR 0023, decision 5), `{:error, {:terminate, message}}` when a `SUB_WORKFLOW` task names a
-  workflow that has no definition, `{:error, :conflict}` when the ID exists, or `{:error, reason}` when the
-  start failed (nothing is left in the store).
+  workflow that has no definition, `{:error, :conflict}` when the ID exists, or
+  `{:error, reason}` when the start failed (nothing is left in the store).
   """
   @spec start_workflow(start_input()) :: {:ok, String.t()} | {:error, term()}
   def start_workflow(input) when is_map(input) do

@@ -130,7 +130,7 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
     `updateWorkflowDef.arg0[i].<list element>`, 문구 `WorkflowDef cannot be null`)이다. `POST /api/metadata/taskdefs`는 `@Valid`가
     `null`을 건너뛰어 검증을 통과하고, 앞 원소를 저장한 뒤 그 원소에서 upstream의 `NullPointerException` 문구로 500이다
     (`Cannot invoke "...TaskDef.setCreatedBy(String)" because "taskDefinition" is null`). 둘 다 upstream 관측 그대로다.
-  - 일괄 갱신에서 정의 하나의 저장이 예외를 내면(Postgres의 NUL 이름, 펜스) upstream처럼 그 정의만 실패로 넣고 나머지를
+  - 일괄 갱신에서 정의 하나의 저장이 예외나 exit(호출 timeout, 멈춘 저장소 서버)를 내면(Postgres의 NUL 이름, 펜스) upstream처럼 그 정의만 실패로 넣고 나머지를
     저장한다. 문구는 Elixir 용어를 내보내지 않도록 고정 문구 `"Internal server error"`이고 자세한 내용은 로그에 남긴다.
 - 컨트롤러는 런타임 API와 `Archon.Metadata`만 부른다. 저장소·큐·`WorkflowServer`를 직접 부르지 않는다. ADR 0018 결정 7은
   REST가 부를 API를 `Archon.Runtime`·`Archon.Runtime.Tasks`로 정했으나 정의 등록 API가 없었으므로, 이 결정이 그 경계에
@@ -268,14 +268,18 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
     `{:error, {:invalid, 문구}}`. 정의 이름이 없으면 문구의 이름은 `null`이다. WorkflowDef는 자기 스키마(`inputSchema`, 그다음
     `outputSchema`)를 먼저, 그다음 태스크를 순서대로 본다. 태스크 안의 목록(`decisionCases`, `defaultCase`, `forkTasks`, `loopOver`)은
     태스크 타입과 상관없이 모두 내려간다(`collectTasks`는 타입별 목록만 보지만 박힌 정의를 하나도 빠뜨리지 않기 위해서다).
-    `subWorkflowParam.workflowDefinition`이 `${...}` 식이면 그 자리에서는 볼 것이 없다.
+    `subWorkflowParam.workflowDefinition`이 `${...}` 식이면 그 자리에서는 볼 것이 없다. 거절할 곳이 여럿이면 첫 거절만 문구에
+    나오고, `decisionCases` 사이의 순서는 JSON 순서가 아니라 맵 순서다(ADR 0002의 키 순서 차이).
   - `Archon.Metadata`: 메서드 검증 다음에 본다. `POST /api/metadata/taskdefs`는 목록 전체를 본 뒤 하나라도 거절이면 아무것도
     저장하지 않는다. `PUT /api/metadata/taskdefs`는 없는 이름의 404 다음, `POST /api/metadata/workflow`는 409 판정 다음이다.
   - `Archon.Runtime.new_workflow`: 태스크 정의를 채운 정의(`populate`) 전체를 `NULL input` 검사 다음에 본다. 인라인
     `:definition`(`StartWorkflowRequest.workflowDef`, 식으로 정해진 `subWorkflowDefinition`)뿐 아니라 이름으로 찾은 등록본과 그
     태스크에 채운 등록 TaskDef도 함께 본다. 등록 때 이미 거절되므로 보통은 통과하지만, 이 결정 전에 저장된 정의나 저장소에 직접
     넣은 정의도 시작에서 막기 위해서다. 하위 워크플로우 시작에서는 `SubWorkflows.start_child`가 `{:invalid, 문구}`를 기존처럼
-    SUB_WORKFLOW 태스크의 `FAILED`(`reasonForIncompletion`이 그 문구)로 바꾼다.
+    SUB_WORKFLOW 태스크의 `FAILED`(`reasonForIncompletion`이 그 문구)로 바꾼다. `start_workflow_idempotent/1`도 저장된 같은 ID의
+    자식을 찾기 전에 이 검사를 하므로, 이 결정 전에 그런 정의로 시작된 자식의 SUB_WORKFLOW 태스크를 다시 실행하면(복구, outbox)
+    자식이 살아 있어도 태스크가 `FAILED`가 된다. 정의를 못 찾을 때(`:not_found`)와 같은 동작이고, 이 결정 전에 저장된 정의는 개발
+    중의 시험 데이터뿐이라 받아들인다.
 - 검증기 채택과 `/api/schema`는 Later의 별도 ADR이다. 그때 이 거절을 없앤다.
 
 ### 6. 골든 픽스처 기반 계약 시험
@@ -310,8 +314,8 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 - **5a 캡처 결과.** 위 목록을 51개 픽스처로 더했다(모두 87개). 기존 36개는 다시 캡처해도 `normalize/1` 기준 같았고, 새 캡처를
   빈 서버에서 한 번 더 받아 87개 모두 같음을 확인했다. 목록에서 다음은 그대로 캡처할 수 없었다.
   - "서비스 단계 실패가 섞인 일괄": upstream SQLite DAO의 `updateWorkflowDef`는 이름이 `null`일 때만 실패하는데, 그 정의는
-    `@Valid`가 먼저 막는다. 그래서 정의별 실패가 섞인 `BulkResponse`는 Archon의 스키마 거절(결정 5)에서만 생기고, 5c의 단위 시험이
-    맡는다.
+    `@Valid`가 먼저 막는다. 그래서 정의별 실패가 섞인 `BulkResponse`는 Archon의 스키마 거절(결정 5)이나 저장 예외(결정 2)에서만
+    생기고, 5c의 단위 시험이 맡는다.
   - "MVP 경로의 다른 메서드" 중 Later 경로와 겹치는 것(`DELETE /api/metadata/taskdefs/{tasktype}`)은 upstream에서 정의를 지우는
     부작용이 있어 캡처하지 않았다. `PATCH /api/workflow`, `PUT /api/tasks/{taskId}`(405)를 캡처했다.
 - **재생 도우미 세부(5a).** `ArchonWeb.ContractCase.scenario/0`이 캡처 순서 전체이고, `steps/2`로 잘라 `replay/2`로 돌린다. 의도적인

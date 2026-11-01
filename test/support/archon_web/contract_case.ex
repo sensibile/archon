@@ -435,7 +435,8 @@ defmodule ArchonWeb.ContractCase do
     %{actual | body: Enum.filter(actual.body, &(&1["name"] in names))}
   end
 
-  defp only(actual, _expected, nil), do: actual
+  # Not a list (an error): left for the comparison to report.
+  defp only(actual, _expected, _only), do: actual
 
   defp assert_no_route(name, actual) do
     "/" <> path = actual.path |> URI.parse() |> Map.fetch!(:path)

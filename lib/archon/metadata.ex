@@ -194,6 +194,15 @@ defmodule Archon.Metadata do
       )
 
       BulkResponse.failure(response, definition.name, "Internal server error")
+  catch
+    # A store call that timed out or found its server down.
+    :exit, reason ->
+      Logger.error(
+        "bulk update workflow def failed, name #{inspect(definition.name)}: " <>
+          Exception.format_exit(reason)
+      )
+
+      BulkResponse.failure(response, definition.name, "Internal server error")
   end
 
   defp store_workflow_def(definition),
