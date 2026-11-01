@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/metadata/taskdefs/archon_task_c",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "createTime": 1793502389691,
+      "updateTime": 1793502389722,
+      "createdBy": "",
+      "updatedBy": "",
+      "name": "archon_task_c",
+      "description": "updated",
+      "retryCount": 0,
+      "timeoutSeconds": 600,
+      "inputKeys": [],
+      "outputKeys": [],
+      "runtimeMetadata": [],
+      "timeoutPolicy": "TIME_OUT_WF",
+      "retryLogic": "FIXED",
+      "retryDelaySeconds": 60,
+      "responseTimeoutSeconds": 60,
+      "inputTemplate": {},
+      "rateLimitPerFrequency": 0,
+      "rateLimitFrequencyInSeconds": 1,
+      "backoffScaleFactor": 1,
+      "maxRetryDelaySeconds": 0,
+      "backoffJitterMs": 0,
+      "totalTimeoutSeconds": 0,
+      "taskStatusListenerEnabled": true,
+      "enforceSchema": false
+    }
+  }
+}

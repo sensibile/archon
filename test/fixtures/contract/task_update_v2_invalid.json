@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks/update-v2",
+    "body": {
+      "workflowInstanceId": "00000000-0000-0000-0000-000000000000",
+      "taskId": ""
+    }
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Validation failed for argument [0] in public org.springframework.http.ResponseEntity<com.netflix.conductor.common.metadata.tasks.Task> com.netflix.conductor.rest.controllers.TaskResource.updateTaskV2(com.netflix.conductor.common.metadata.tasks.TaskResult): [Field error in object 'taskResult' on field 'taskId': rejected value []; codes [NotEmpty.taskResult.taskId,NotEmpty.taskId,NotEmpty.java.lang.String,NotEmpty]; arguments [org.springframework.context.support.DefaultMessageSourceResolvable: codes [taskResult.taskId,taskId]; arguments []; default message [taskId]]; default message [Task ID cannot be null or empty]] ",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

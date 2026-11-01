@@ -1,0 +1,65 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/metadata/taskdefs",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": [
+      {
+        "createTime": 1793502386720,
+        "updateTime": 0,
+        "createdBy": "",
+        "name": "archon_task_a",
+        "retryCount": 0,
+        "timeoutSeconds": 300,
+        "inputKeys": [
+          "x"
+        ],
+        "outputKeys": [
+          "y"
+        ],
+        "runtimeMetadata": [],
+        "timeoutPolicy": "TIME_OUT_WF",
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 60,
+        "responseTimeoutSeconds": 60,
+        "inputTemplate": {},
+        "rateLimitPerFrequency": 0,
+        "rateLimitFrequencyInSeconds": 1,
+        "backoffScaleFactor": 1,
+        "maxRetryDelaySeconds": 0,
+        "backoffJitterMs": 0,
+        "totalTimeoutSeconds": 0,
+        "taskStatusListenerEnabled": true,
+        "enforceSchema": false
+      },
+      {
+        "createTime": 1793502386766,
+        "updateTime": 0,
+        "createdBy": "",
+        "name": "archon_task_b",
+        "retryCount": 1,
+        "timeoutSeconds": 300,
+        "inputKeys": [],
+        "outputKeys": [],
+        "runtimeMetadata": [],
+        "timeoutPolicy": "TIME_OUT_WF",
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 1,
+        "responseTimeoutSeconds": 60,
+        "inputTemplate": {},
+        "rateLimitPerFrequency": 0,
+        "rateLimitFrequencyInSeconds": 1,
+        "backoffScaleFactor": 1,
+        "maxRetryDelaySeconds": 0,
+        "backoffJitterMs": 0,
+        "totalTimeoutSeconds": 0,
+        "taskStatusListenerEnabled": true,
+        "enforceSchema": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/tasks/00000000-0000-0000-0000-000000000000",
+    "body": {}
+  },
+  "response": {
+    "status": 405,
+    "content_type": "application/json",
+    "body": {
+      "status": 405,
+      "message": "Request method 'PUT' is not supported",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

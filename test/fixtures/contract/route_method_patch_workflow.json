@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "PATCH",
+    "path": "/api/workflow",
+    "body": {}
+  },
+  "response": {
+    "status": 405,
+    "content_type": "application/json",
+    "body": {
+      "status": 405,
+      "message": "Request method 'PATCH' is not supported",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

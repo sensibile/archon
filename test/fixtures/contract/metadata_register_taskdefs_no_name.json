@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/taskdefs",
+    "body": [
+      {
+        "retryCount": 1
+      }
+    ]
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Validation failed, check below errors for detail.",
+      "retryable": false,
+      "validationErrors": [
+        {
+          "path": "registerTaskDef.arg0[0].name",
+          "message": "TaskDef name cannot be null or empty"
+        }
+      ]
+    }
+  }
+}

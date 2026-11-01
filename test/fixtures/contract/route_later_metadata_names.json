@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/metadata/workflow/names",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": [
+      "archon_bulk",
+      "archon_fork",
+      "archon_simple",
+      "archon_switch"
+    ]
+  }
+}

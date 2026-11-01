@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/metadata/taskdefs",
+    "body": {
+      "name": "archon_task_c",
+      "description": "updated",
+      "retryCount": 0,
+      "timeoutSeconds": 600,
+      "responseTimeoutSeconds": 60
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

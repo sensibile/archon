@@ -1,14 +1,14 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/workflow/4c1fb7f9-80e7-4d02-aaf3-b00a6316031a/status?includeOutput=true",
+    "path": "/api/workflow/50d58a73-7cf6-4617-ac94-c8e003a298d6/status?includeOutput=true",
     "body": null
   },
   "response": {
     "status": 200,
     "content_type": "application/json",
     "body": {
-      "workflowId": "4c1fb7f9-80e7-4d02-aaf3-b00a6316031a",
+      "workflowId": "50d58a73-7cf6-4617-ac94-c8e003a298d6",
       "correlationId": "archon-corr-1",
       "output": {
         "y": 3

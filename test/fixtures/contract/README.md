@@ -21,7 +21,7 @@ BASE_URL=http://localhost:18080 scripts/contract/capture_fixtures.sh
 }
 ```
 
-- 요청 body가 없으면 `null`.
+- 요청 body가 없으면 `null`, JSON이 아니면 보낸 문자열 그대로.
 - 응답 body는 `application/json`이면 파싱한 값, 그 밖(`text/plain`)이면 문자열, 비어 있으면 `null`.
 - `content_type`은 응답 `Content-Type` 헤더 그대로이며 헤더가 없으면 `null`.
 
@@ -35,6 +35,26 @@ BASE_URL=http://localhost:18080 scripts/contract/capture_fixtures.sh
 | `*_fork*` | batch poll, 두 분기 완료 후 JOIN 완료 |
 | `workflow_terminate`, `workflow_get_terminated` | `DELETE /api/workflow/{workflowId}` 후 `TERMINATED`, 진행 중 task는 `CANCELED` |
 | `*_not_found`, `task_poll_empty` | 404 오류 body, 큐가 비었을 때 204 |
+
+아래는 Phase 5 REST를 위해 더한 시나리오다([ADR 0023](../../../docs/adr/0023-phase5-rest.md) 결정 6, 조각 5a).
+
+| 접두사·이름 | 내용 |
+|---|---|
+| `health`, `health_api` | `GET /health`, `GET /api/health` |
+| `metadata_list_taskdefs`, `metadata_*taskdef*` | 목록, 배열 자리에 객체 하나(`_single`), 단건 갱신과 없는 이름 404 |
+| `metadata_register_taskdefs_{empty,no_name,blank_name,coerced}`, `metadata_register_workflow_no_tasks` | 검증 실패 400. `coerced`는 primitive의 `null`(→ `"0"`)과 정수 필드의 실수(→ `"-1"`)의 `invalidValue` |
+| `metadata_*overwrite*`, `metadata_get_workflow_version_not_found` | `overwrite=true` 덮어쓰기, 없는 버전 404 |
+| `metadata_update_workflows*`, `metadata_get_workflow_bulk_*` | `PUT /api/metadata/workflow`: 성공 `BulkResponse`, 한 원소 실패로 전체 400(유효한 원소도 저장되지 않음), 빈 배열 |
+| `workflow_start_*not_found`, `*inline*` | 없는 정의로 시작(두 경로), `StartWorkflowRequest.workflowDef` 인라인 시작 |
+| `workflow_get_running_without_tasks`, `workflow_get_status_*` | 실행 중 `includeTasks=false`, 상태 요약의 기본값과 `includeOutput`·`includeVariables` |
+| `task_update_v2_next` | `update-v2`가 같은 타입의 다음 태스크를 돌려줌 |
+| `workflow_terminate_{completed,not_found}`, `task_*not_found` | 완료된 워크플로우 종료 409, 없는 워크플로우·태스크 |
+| `task_update_invalid`, `task_update_v2_invalid` | 같은 검증 실패가 `POST /api/tasks`는 400, `update-v2`는 500(Spring `MethodArgumentNotValidException`) |
+| `route_*` | 없는 경로 404, MVP 매개변수 경로와 모양이 같은 Later 경로의 upstream 응답, MVP 경로의 다른 메서드(405) |
+| `request_*` | JSON이 아닌 body, 숫자·불리언 쿼리에 변환되지 않는 값(500) |
+
+Archon이 일부러 다르게 답하는 픽스처(Later 경로와 405는 404, Jackson 문구)는 재생 도우미
+`test/support/archon_web/contract_case.ex`의 시나리오에 단계 옵션으로 적혀 있다.
 
 ## 가변 필드
 
@@ -56,5 +76,7 @@ BASE_URL=http://localhost:18080 scripts/contract/capture_fixtures.sh
 
 ## 검사
 
-`test/archon/contract_test.exs`가 모든 픽스처를 분류해 검사한다. 새 픽스처를 추가하면 그 테스트의
-`@schematized` 또는 `@unschematized`에 등록해야 테스트가 통과한다.
+`test/archon/contract_test.exs`가 모든 픽스처를 분류해 검사한다. 새 픽스처를 추가하면
+`Archon.Contract.fixture_schemas/0`(`test/support/contract.ex`) 또는 그 테스트의 `@unschematized`, 그리고
+`test/archon/domain/contract_round_trip_test.exs`의 `@models`에 등록해야 테스트가 통과한다. 재생 순서는
+`ArchonWeb.ContractCase.scenario/0`에 캡처 스크립트와 같은 순서로 더한다.

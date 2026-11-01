@@ -1,0 +1,34 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow",
+    "body": {
+      "name": "archon_inline",
+      "correlationId": "archon-corr-3",
+      "input": {
+        "n": 2
+      },
+      "workflowDef": {
+        "name": "archon_inline",
+        "version": 1,
+        "schemaVersion": 2,
+        "timeoutSeconds": 0,
+        "tasks": [
+          {
+            "name": "archon_task_c",
+            "taskReferenceName": "task_c_ref",
+            "type": "SIMPLE",
+            "inputParameters": {
+              "n": "${workflow.input.n}"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "3fd8a5c7-02e5-4f30-82b2-d03cef4008c0"
+  }
+}

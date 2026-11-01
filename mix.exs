@@ -48,12 +48,14 @@ defmodule Archon.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:bandit, "~> 1.14"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ecto_sql, "~> 3.14"},
       {:elixir_make, "~> 0.10.0", runtime: false},
       {:ex_json_schema, "~> 0.11.5", only: :test},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
+      {:phoenix, "~> 1.8"},
       {:postgrex, "~> 0.22.4"}
     ]
   end
