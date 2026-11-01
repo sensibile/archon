@@ -225,6 +225,14 @@ defmodule Archon.Runtime.StepTasksTest do
         Step.run(workflow([simple([])]), {:update, result}, env())
 
       assert {task.sub_workflow_id, task.output_data} == {"new", %{"subWorkflowId" => "new"}}
+
+      # without the result's, the key stays with a null value (only a SUB_WORKFLOW drops it)
+      result = result(status: :failed, output_data: %{"subWorkflowId" => "old"})
+
+      {task, _stored, [], _commit, _post} =
+        Step.run(workflow([simple([])]), {:update, result}, env())
+
+      assert {task.sub_workflow_id, task.output_data} == {nil, %{"subWorkflowId" => nil}}
     end
 
     # ADR 0024, decision 1

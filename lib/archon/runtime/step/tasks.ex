@@ -140,9 +140,14 @@ defmodule Archon.Runtime.Step.Tasks do
 
     output =
       cond do
-        not Map.has_key?(output, "subWorkflowId") -> output
-        sub_workflow_id == nil -> Map.delete(output, "subWorkflowId")
-        true -> Map.put(output, "subWorkflowId", sub_workflow_id)
+        not Map.has_key?(output, "subWorkflowId") ->
+          output
+
+        task.task_type == "SUB_WORKFLOW" and sub_workflow_id == nil ->
+          Map.delete(output, "subWorkflowId")
+
+        true ->
+          Map.put(output, "subWorkflowId", sub_workflow_id)
       end
 
     task = %{
