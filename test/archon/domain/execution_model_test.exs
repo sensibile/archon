@@ -76,6 +76,23 @@ defmodule Archon.Domain.ExecutionModelTest do
   end
 
   describe "Task beyond the upstream tests" do
+    test "to_json puts the task's own child ID under an output subWorkflowId key (toTask)" do
+      task = %Task{sub_workflow_id: "mid", output_data: %{"subWorkflowId" => "leaf", "r" => 1}}
+      assert Task.to_json(task)["outputData"] == %{"subWorkflowId" => "mid", "r" => 1}
+      assert Task.to_json(%Task{sub_workflow_id: "mid"})["outputData"] == %{}
+
+      # without a stored ID, getSubWorkflowId falls back to the output, then the input
+      task = %Task{output_data: %{"subWorkflowId" => nil}, input_data: %{"subWorkflowId" => "in"}}
+      assert Task.to_json(task)["outputData"] == %{"subWorkflowId" => "in"}
+
+      task = %Task{
+        output_data: %{"subWorkflowId" => "out"},
+        input_data: %{"subWorkflowId" => "in"}
+      }
+
+      assert Task.to_json(task)["outputData"] == %{"subWorkflowId" => "out"}
+    end
+
     test "status flags match upstream Task.Status" do
       assert Enum.filter(Task.statuses(), &Task.terminal?/1) ==
                ~w(canceled failed failed_with_terminal_error completed completed_with_errors timed_out skipped)a

@@ -7,6 +7,8 @@
   추천안으로 정했다.
 - 갱신: 2026-11-02 조각 6a. 캡처에서 확인한 upstream 응답 중 이 문서의 기술과 다르거나 더 자세한 것을 결정 7 끝
   "조각 6a의 캡처에서 확인한 것"에 적었다. 그 응답이 정답이고, 해당 조각이 맞춘다.
+- 갱신: 2026-11-02 후속 PR. 결정 7 끝의 `workflow_get_top_failed` 차이를 [ADR 0024](0024-worker-input-trust-and-auth.md)
+  결정 6으로 맞췄다고 적었다.
 - 갱신: 2026-11-02 조각 6e. 결정 5 끝 "조각 6e가 정한 것"에 구현에서 정한 세부(모르는 자식, 응답 없음의 문구, 대기의
   30초 상한, 변환 실패 문구, `ArchonWeb.Request` 보충)를 적었다.
 
@@ -377,8 +379,9 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   - Unsupported `PUT /api/workflow/decide/{id}`는 upstream이 결정을 돌리고 없는 워크플로우에 404를 준다. archon은 경로 없음 404다
     (`route_unsupported_workflow_decide`, ADR 0001 그대로). task log GET은 upstream 204다(`route_later_task_log`).
   - 의도하지 않은 archon 차이 하나를 찾았다(Phase 5까지의 동작): 자식이 실패하면 archon은 자식의 최종 출력을 SUB_WORKFLOW 태스크
-    출력에 합쳐 `subWorkflowId`가 손자의 ID가 되고, upstream 태스크는 자기가 시작한 자식의 ID를 지킨다
-    (`workflow_get_top_failed`). 6a는 재생에서 그 두 경로를 빼고 따로 고친다.
+    출력에 합쳐 `subWorkflowId`가 손자의 ID가 되고, upstream 응답과 최상위 출력은 자기가 시작한 자식의 ID다
+    (`workflow_get_top_failed`). 6a는 재생에서 그 두 경로를 뺐고, 후속 PR이 upstream `toTask`의 덮어쓰기로 원인을 확인해
+    맞췄다([ADR 0024](0024-worker-input-trust-and-auth.md) 결정 6). 재생은 이제 그 경로도 비교한다.
   - upstream 타이밍이 정하는 값: JOIN의 `pollCount`(관측 2·3·11), `update-v2` 두 필드 오류의 순서, `lastRetriedTime`(시각 키에
     더함). 앞의 둘은 기존 픽스처와 같은 값이 나온 캡처를 골랐다(`test/fixtures/contract/README.md`).
   - 재생 도우미에 단계 옵션 셋을 더했다: `until:`(비동기 단계를 기다림, 자식 시작 등), `only: :bound_ids`(공유 런타임의 다른
