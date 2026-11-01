@@ -86,6 +86,23 @@ defmodule Archon.Runtime.Metadata.Memory do
     GenServer.call(server, {:get_latest_workflow_def, name})
   end
 
+  @impl Metadata
+  @spec get_all_workflow_defs(GenServer.server()) :: [WorkflowDef.t()]
+  def get_all_workflow_defs(server \\ __MODULE__),
+    do: GenServer.call(server, :get_all_workflow_defs)
+
+  @impl Metadata
+  @spec remove_workflow_def(GenServer.server(), String.t(), integer()) ::
+          :ok | {:error, :not_found}
+  def remove_workflow_def(server \\ __MODULE__, name, version) when is_integer(version) do
+    GenServer.call(server, {:remove, :workflow_defs, {name, version}})
+  end
+
+  @impl Metadata
+  @spec remove_task_def(GenServer.server(), String.t()) :: :ok | {:error, :not_found}
+  def remove_task_def(server \\ __MODULE__, name),
+    do: GenServer.call(server, {:remove, :task_defs, name})
+
   @impl GenServer
   def init(:ok), do: {:ok, %{task_defs: %{}, workflow_defs: %{}}}
 
@@ -127,6 +144,18 @@ defmodule Archon.Runtime.Metadata.Memory do
       |> Enum.max_by(&elem(&1, 0), fn -> nil end)
 
     {:reply, if(latest, do: {:ok, elem(latest, 1)}, else: {:error, :not_found}), state}
+  end
+
+  # Keys are {name, version}: term order is name in byte order, then version.
+  def handle_call(:get_all_workflow_defs, _from, state) do
+    {:reply, state.workflow_defs |> Enum.sort_by(&elem(&1, 0)) |> Enum.map(&elem(&1, 1)), state}
+  end
+
+  def handle_call({:remove, table, key}, _from, state) do
+    case Map.pop(Map.fetch!(state, table), key) do
+      {nil, _defs} -> {:reply, {:error, :not_found}, state}
+      {_definition, defs} -> {:reply, :ok, Map.put(state, table, defs)}
+    end
   end
 
   defp fetch(map, key) do

@@ -119,6 +119,48 @@ defmodule Archon.Runtime.Metadata.Postgres do
     )
   end
 
+  @impl Metadata
+  @spec get_all_workflow_defs(Postgres.t()) :: [WorkflowDef.t()]
+  def get_all_workflow_defs(instance \\ Postgres.runtime()) do
+    %{rows: rows} =
+      query!(
+        instance,
+        "SELECT name, json_data FROM #{table(instance, "meta_workflow_def")} " <>
+          ~s(ORDER BY name COLLATE "C", version),
+        []
+      )
+
+    Enum.map(rows, fn [name, json] -> decode!(WorkflowDef, name, json) end)
+  end
+
+  @impl Metadata
+  @spec remove_workflow_def(Postgres.t(), String.t(), integer()) :: :ok | {:error, :not_found}
+  def remove_workflow_def(instance \\ Postgres.runtime(), name, version)
+      when is_binary(name) and is_integer(version) do
+    delete(
+      instance,
+      "DELETE FROM #{table(instance, "meta_workflow_def")} WHERE name = $1 AND version = $2",
+      [name, version]
+    )
+  end
+
+  @impl Metadata
+  @spec remove_task_def(Postgres.t(), String.t()) :: :ok | {:error, :not_found}
+  def remove_task_def(instance \\ Postgres.runtime(), name) when is_binary(name) do
+    delete(instance, "DELETE FROM #{table(instance, "meta_task_def")} WHERE name = $1", [name])
+  end
+
+  # PostgresMetadataDAO#removeWorkflowDef and #removeTaskDef: no row is upstream's
+  # NotFoundException. A name `text` cannot hold is not stored either.
+  defp delete(instance, sql, [name | _rest] = params) do
+    if storable?(name),
+      do: Postgres.transaction!(instance, fn -> deleted(query!(instance, sql, params)) end),
+      else: {:error, :not_found}
+  end
+
+  defp deleted(%{num_rows: 0}), do: {:error, :not_found}
+  defp deleted(%{num_rows: 1}), do: :ok
+
   # PostgresMetadataDAO#insertOrUpdateTaskDef: both create and update replace by name.
   defp put_task_def(instance, %TaskDef{name: name} = task_def) do
     check_storable!(name)

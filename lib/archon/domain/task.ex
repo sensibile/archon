@@ -22,8 +22,10 @@ defmodule Archon.Domain.Task do
     * `loopOverTask` - `iteration > 0`
 
   `taskDefName` falls back to `taskType` and `subWorkflowId` to the `subWorkflowId` key of
-  `outputData`/`inputData`, as upstream's getters do. `executionMetadata` is always written (the
-  getter creates an empty one) and `runtimeMetadata` only when non-empty (`NON_EMPTY`).
+  `outputData`/`inputData`, as upstream's getters do; an `outputData` `subWorkflowId` key takes
+  that ID (`with_own_sub_workflow_id/1`, upstream `toTask`). `executionMetadata` is always
+  written (the getter creates an empty one) and `runtimeMetadata` only when non-empty
+  (`NON_EMPTY`).
 
   The protobuf `inputMessage`/`outputMessage` fields (`@Hidden` upstream) are not modelled.
 
@@ -206,6 +208,8 @@ defmodule Archon.Domain.Task do
   """
   @spec to_json(t(), integer()) :: Codec.json_object()
   def to_json(%__MODULE__{} = task, now_ms \\ System.system_time(:millisecond)) do
+    task = with_own_sub_workflow_id(task)
+
     resolved = %{
       task
       | task_def_name: task_def_name(task),
@@ -257,6 +261,21 @@ defmodule Archon.Domain.Task do
       task.sub_workflow_id
     end
   end
+
+  @doc """
+  What upstream `TaskModel#toTask` does to the output: its bean copy calls
+  `setSubWorkflowId(getSubWorkflowId())`, which puts the task's `sub_workflow_id/1` under an
+  `outputData` `subWorkflowId` key when the key is there. The copy shares the output map, so the
+  task it came from changes too. A SUB_WORKFLOW task that took its failed child's output
+  (`SubWorkflow#updateTaskStatus`) gets its own child's ID back this way.
+  """
+  @spec with_own_sub_workflow_id(t()) :: t()
+  def with_own_sub_workflow_id(
+        %__MODULE__{output_data: %{"subWorkflowId" => _id} = output} = task
+      ),
+      do: %{task | output_data: Map.put(output, "subWorkflowId", sub_workflow_id(task))}
+
+  def with_own_sub_workflow_id(%__MODULE__{} = task), do: task
 
   @doc "Upstream `getTaskDefinition`: the task definition embedded in `workflowTask`."
   @spec task_definition(t()) :: TaskDef.t() | nil
