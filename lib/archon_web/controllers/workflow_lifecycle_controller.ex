@@ -154,8 +154,12 @@ defmodule ArchonWeb.WorkflowLifecycleController do
     end
   end
 
-  # The adapter takes the request's host and port from its Host header (or HTTP/2 authority).
-  defp host(conn), do: "#{String.downcase(conn.host)}:#{conn.port}"
+  # The adapter takes the request's host and port from its Host header (or HTTP/2 authority),
+  # keeping an IPv6 literal's brackets, which URI.parse/1 drops.
+  defp host(conn) do
+    host = conn.host |> String.trim_leading("[") |> String.trim_trailing("]")
+    "#{String.downcase(host)}:#{conn.port}"
+  end
 
   defp reply(conn, _id, :ok, send), do: send.(conn)
 

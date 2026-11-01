@@ -83,6 +83,13 @@ defmodule ArchonWeb.WorkflowLifecycleControllerTest do
       assert json_response(on_host.(build_conn(), "http://archon.local:9090"), 403)
       assert json_response(on_host.(build_conn(), "http://www.example.com"), 403)
 
+      ipv6 =
+        %{build_conn() | host: "[::1]", port: 4000}
+        |> put_req_header("origin", "http://[::1]:4000")
+        |> post("/api/workflow/#{id}/resetcallbacks")
+
+      assert response(ipv6, 204)
+
       # running: retry's own 404
       assert %{"status" => 404} =
                build_conn()
