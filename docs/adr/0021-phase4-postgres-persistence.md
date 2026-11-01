@@ -410,9 +410,9 @@ ADR 0018 대안 절이 Phase 4로 넘긴 outbox를 들인다.
     주기 확인의 서버 프로세스 비교는 그래도 다시 연결된 경우를 잡는 둘째 장치다.
   - DB에 닿지 못하는 동안(재시작, failover)도 락이 잡혀 있을 때처럼 `node_lock_retry_timeout` 동안 새 연결로 다시 시도한 뒤
     `{:stop, {:node_lock_connection, reason}}`로 실패한다. 시도마다 연결·질의·epoch 올리기를 남은 기한(`connect_timeout`,
-    `handshake_timeout`, 질의 `timeout`, 풀 대기)으로 묶어, 응답하지 않는 서버에서도 기한을 크게 넘기지 않는다. 다만 시도마다 최소 250ms를
-    준다. 마지막 시도는 기한 몇 ms 전에 시작할 수 있고, 그 남은 기한을 그대로 쓰면 락이 잡혀 있다는 응답 대신 연결 오류
-    (`{:node_lock_connection, _}`)로 끝난다. 그래서 시작 실패는 기한보다 최대 250ms 늦을 수 있다. epoch 올리기는 Repo 풀이 아니라
+    `handshake_timeout`, 질의 `timeout`, 풀 대기)으로 묶어, 응답하지 않는 서버에서도 기한을 크게 넘기지 않는다. 다만 시도의 단계(연결, 락 시도, epoch 올리기)마다
+    최소 250ms를 준다. 마지막 시도는 기한 몇 ms 전에 시작할 수 있고, 그 남은 기한을 그대로 쓰면 락이 잡혀 있다는 응답 대신 연결 오류
+    (`{:node_lock_connection, _}`)로 끝난다. 그래서 시작 실패는 기한보다 수백 ms(락이 잡혀 있거나 DB에 닿지 못하면 약 250ms, epoch 올리기가 실패하면 약 500ms) 늦을 수 있다. epoch 올리기는 Repo 풀이 아니라
     NodeLock 연결에서 한다(`Postgres.advance_epoch/3`). 장애 직후 다시 연결 중인 Repo 풀을 기다리지 않기 위해서다. 그래서 짧은 DB 장애가 NodeLock의 연속 재시작으로 감독자 한도를 바로
     넘기지 않는다. 그보다 긴 장애는 애플리케이션 정지까지 이어질 수 있고, 그때는 배포 환경(오케스트레이터)이 다시 띄운다.
   - 시험용 옵션: `:name`, `:instance`(epoch 표의 스키마), `:lock_key`, `:publish`(epoch 게시 여부). 한 VM에서 다른 노드를
