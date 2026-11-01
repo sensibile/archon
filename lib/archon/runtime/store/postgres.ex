@@ -13,7 +13,8 @@
 # exceedsLimit's separate count, a workflow and its tasks are read in one statement, there are no
 # workflow_to_task, workflow_pending or task_in_progress tables, the poll data has no trigger
 # keeping lastPollTime from going back, and every write is fenced by the node epoch (ADR 0021,
-# decisions 2 to 7).
+# decisions 2 to 7); the queries by name and correlation ID read index columns of the workflow
+# row instead of the workflow_def_to_workflow and workflow_pending tables (ADR 0025, decision 4).
 
 defmodule Archon.Runtime.Store.Postgres do
   @moduledoc """
@@ -26,9 +27,10 @@ defmodule Archon.Runtime.Store.Postgres do
 
   ## Rows
 
-  A workflow row keeps its status, parent workflow ID and re-evaluation time `wake_at` as columns
-  and the workflow's storage encoding (`Archon.Domain.Workflow.to_storage/1`) without its `tasks`
-  as `json_data` text. A task row keeps its workflow, `seq`, status and task definition name
+  A workflow row keeps its status, parent workflow ID, re-evaluation time `wake_at`, definition
+  name and version, correlation ID and create time as columns and the workflow's storage
+  encoding (`Archon.Domain.Workflow.to_storage/1`) without its `tasks` as `json_data` text. A
+  task row keeps its workflow, `seq`, status and task definition name
   (`Archon.Domain.Task.task_def_name/1`, so the type when there is none) as columns and its
   storage encoding. Statuses are stored as upstream's constant names (`RUNNING`, `IN_PROGRESS`).
   Workflow IDs sort in binary order (`COLLATE "C"`).
@@ -64,6 +66,11 @@ defmodule Archon.Runtime.Store.Postgres do
   JSON; NUL inside JSON values is escaped and kept. Reads and deletes treat such an ID or name as
   absent. A page cursor with one raises `ArgumentError`, as no stored ID can have produced it.
 
+  A workflow's definition name and version, correlation ID and create time are the exception:
+  only the queries read their columns, so a value a column cannot hold (NUL, invalid UTF-8, a
+  number outside the column's range) leaves it `NULL` instead of refusing the commit, and the
+  queries do not find that workflow by it (`Archon.Runtime.Store`).
+
   ## Writes that cannot return an error
 
   `remove_workflow/2`, `ack_outbox/3` and `put_poll_data/5` run in
@@ -85,8 +92,12 @@ defmodule Archon.Runtime.Store.Postgres do
   @running Codec.enum_name(:running)
   @in_progress Codec.enum_name(:in_progress)
   @not_terminal Enum.map([:running, :paused], &Codec.enum_name/1)
+  # Inlined, so a generic plan still matches the partial index workflow_pending_name_index.
+  @not_terminal_sql Enum.map_join(@not_terminal, ", ", &"'#{&1}'")
 
   @max_bigint 0x7FFFFFFFFFFFFFFF
+  @int_range -0x80000000..0x7FFFFFFF
+  @bigint_range (-@max_bigint - 1)..@max_bigint
 
   # Effect.start keys, in the order they are written.
   @start_keys [
@@ -161,6 +172,75 @@ defmodule Archon.Runtime.Store.Postgres do
 
     Enum.map(rows, &hd/1)
   end
+
+  @impl Store
+  @spec correlated_workflows(Postgres.t(), String.t(), [String.t()], boolean(), boolean()) ::
+          [Workflow.t()]
+  def correlated_workflows(
+        instance \\ Postgres.runtime(),
+        name,
+        correlation_ids,
+        include_closed?,
+        include_tasks?
+      )
+      when is_binary(name) and is_list(correlation_ids) and is_boolean(include_closed?) and
+             is_boolean(include_tasks?) do
+    ids = correlation_ids |> Enum.filter(&(is_binary(&1) and storable?(&1))) |> Enum.uniq()
+
+    if storable?(name) and ids != [],
+      do: read_correlated(instance, name, ids, include_closed?, include_tasks?),
+      else: []
+  end
+
+  @impl Store
+  @spec pending_workflow_ids(Postgres.t(), String.t()) :: [String.t()]
+  def pending_workflow_ids(instance \\ Postgres.runtime(), name) when is_binary(name) do
+    if storable?(name) do
+      instance
+      |> query!(
+        "SELECT workflow_id FROM #{table(instance, "workflow")} " <>
+          "WHERE workflow_name = $1 AND status IN (#{@not_terminal_sql}) " <>
+          "ORDER BY create_time, workflow_id",
+        [name]
+      )
+      |> Map.fetch!(:rows)
+      |> Enum.map(&hd/1)
+    else
+      []
+    end
+  end
+
+  @impl Store
+  @spec workflow_ids_created_between(Postgres.t(), String.t(), integer(), integer(), integer()) ::
+          [String.t()]
+  def workflow_ids_created_between(
+        instance \\ Postgres.runtime(),
+        name,
+        version,
+        start_ms,
+        end_ms
+      )
+      when is_binary(name) and is_integer(version) and is_integer(start_ms) and
+             is_integer(end_ms) do
+    # A column holds no time past a bound outside its range: that range is empty, and the other
+    # bound is clamped.
+    if storable?(name) and version in @int_range and start_ms <= @bigint_range.last and
+         end_ms >= @bigint_range.first do
+      instance
+      |> query!(
+        "SELECT workflow_id FROM #{table(instance, "workflow")} " <>
+          "WHERE workflow_name = $1 AND workflow_version = $2 " <>
+          "AND create_time BETWEEN $3 AND $4 ORDER BY create_time, workflow_id",
+        [name, version, clamp(start_ms), clamp(end_ms)]
+      )
+      |> Map.fetch!(:rows)
+      |> Enum.map(&hd/1)
+    else
+      []
+    end
+  end
+
+  defp clamp(ms), do: ms |> max(@bigint_range.first) |> min(@bigint_range.last)
 
   @impl Store
   @spec remove_workflow(Postgres.t(), String.t()) :: :ok | {:error, :not_found}
@@ -365,8 +445,24 @@ defmodule Archon.Runtime.Store.Postgres do
   defp encode_workflow!(%Workflow{} = workflow) do
     json = workflow |> Workflow.to_storage() |> Map.delete("tasks")
     Enum.each([json["status"], workflow.parent_workflow_id], &(&1 == nil or check_storable!(&1)))
-    %{status: json["status"], parent: workflow.parent_workflow_id, json: encode_json!(json)}
+
+    [
+      json["status"],
+      workflow.parent_workflow_id,
+      queryable(Workflow.workflow_name(workflow)),
+      in_range(Workflow.workflow_version(workflow), @int_range),
+      queryable(workflow.correlation_id),
+      in_range(workflow.create_time, @bigint_range),
+      encode_json!(json)
+    ]
   end
+
+  # A value only the queries read: NULL when the column cannot hold it.
+  defp queryable(value) when is_binary(value), do: if(storable?(value), do: value)
+  defp queryable(_value), do: nil
+
+  defp in_range(value, range) when is_integer(value), do: if(value in range, do: value)
+  defp in_range(_value, _range), do: nil
 
   # A task listed twice keeps its last version, as the memory store does.
   defp encode_tasks!(tasks) do
@@ -463,9 +559,10 @@ defmodule Archon.Runtime.Store.Postgres do
       query!(
         instance,
         "INSERT INTO #{table(instance, "workflow")} " <>
-          "(workflow_id, status, parent_workflow_id, json_data) VALUES ($1, $2, $3, $4) " <>
+          "(workflow_id, status, parent_workflow_id, workflow_name, workflow_version, " <>
+          "correlation_id, create_time, json_data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) " <>
           "ON CONFLICT (workflow_id) DO NOTHING",
-        [workflow_id, row.status, row.parent, row.json]
+        [workflow_id | row]
       )
 
     if rows == 1, do: :ok, else: {:error, :conflict}
@@ -477,8 +574,9 @@ defmodule Archon.Runtime.Store.Postgres do
     query!(
       instance,
       "UPDATE #{table(instance, "workflow")} SET status = $2, parent_workflow_id = $3, " <>
-        "json_data = $4 WHERE workflow_id = $1",
-      [workflow_id, row.status, row.parent, row.json]
+        "workflow_name = $4, workflow_version = $5, correlation_id = $6, create_time = $7, " <>
+        "json_data = $8 WHERE workflow_id = $1",
+      [workflow_id | row]
     )
 
     :ok
@@ -614,6 +712,33 @@ defmodule Archon.Runtime.Store.Postgres do
       %{rows: []} ->
         {:error, :not_found}
     end
+  end
+
+  # One statement, as read_workflow/3: the workflows and their tasks come from one snapshot.
+  defp read_correlated(instance, name, correlation_ids, include_closed?, include_tasks?) do
+    tasks =
+      if include_tasks? do
+        "ARRAY(SELECT t.json_data FROM #{table(instance, "task")} t " <>
+          "WHERE t.workflow_id = w.workflow_id ORDER BY t.seq, t.task_id COLLATE \"C\")"
+      else
+        "NULL"
+      end
+
+    status = if include_closed?, do: "", else: "AND w.status = '#{@running}' "
+
+    %{rows: rows} =
+      query!(
+        instance,
+        "SELECT w.workflow_id, w.json_data, #{tasks} FROM #{table(instance, "workflow")} w " <>
+          "WHERE w.workflow_name = $1 AND w.correlation_id = ANY($2) #{status}" <>
+          "ORDER BY w.create_time, w.workflow_id",
+        [name, correlation_ids]
+      )
+
+    Enum.map(rows, fn [id, json, tasks] ->
+      workflow = decode!(Workflow, json, id)
+      %{workflow | tasks: Enum.map(tasks || [], &decode!(Task, &1, id))}
+    end)
   end
 
   # A :notify_parent entry carries the stored child: the workflow that owns the entry.
