@@ -313,7 +313,17 @@ defmodule ArchonWeb.MetadataControllerTest do
       assert {500, %{"message" => message}} =
                delete("/api/metadata/workflow/archon_meta6/1%C2%A0")
 
-      assert message =~ ~s(For input string: "1\u00A0")
+      assert message ==
+               "Method parameter 'version': Failed to convert value of type 'java.lang.String' " <>
+                 ~s(to required type 'java.lang.Integer'; For input string: "1\u00A0")
+
+      # The same rule for a query value (Request.int/4), seen upstream.
+      assert {500, %{"message" => ^message}} =
+               get_json("/api/metadata/workflow/archon_meta6?version=1%C2%A0")
+
+      assert {404, %{"message" => "No such workflow found by name: archon_meta6, version: 1"}} =
+               get_json("/api/metadata/workflow/archon_meta6?version=1%E2%80%80")
+
       assert post_json("/api/metadata/workflow", workflow("archon_meta6")) == {200, nil}
       assert delete("/api/metadata/workflow/archon_meta6/1%E3%80%80") == {200, nil}
 
