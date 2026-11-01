@@ -561,18 +561,31 @@ defmodule Archon.Runtime.StoreContract do
           create(ctx, named("r-big-version", "flow", 2 ** 40, create_time: 10))
           create(ctx, named("r-big-time", "flow", 1, create_time: 2 ** 70))
           create(ctx, named("r-small", "flow", 1, create_time: 20))
+          # The ends of the range a column holds.
+          create(ctx, named("r-max", "flow", 1, create_time: 0x7FFFFFFFFFFFFFFF))
+          create(ctx, named("r-min", "flow", 1, create_time: -0x8000000000000000))
 
           assert s(ctx, :workflow_ids_created_between, ["flow", 2 ** 40, 0, 100]) == []
 
           assert s(ctx, :workflow_ids_created_between, ["flow", 1, -(2 ** 80), 2 ** 80]) ==
-                   ["r-small"]
+                   ["r-min", "r-small", "r-max"]
+
+          assert s(ctx, :workflow_ids_created_between, ["flow", 1, 0x7FFFFFFFFFFFFFFF, 2 ** 80]) ==
+                   ["r-max"]
+
+          assert s(ctx, :workflow_ids_created_between, [
+                   "flow",
+                   1,
+                   -(2 ** 80),
+                   -0x8000000000000000
+                 ]) == ["r-min"]
 
           # A bound past the column's range leaves nothing between.
           assert s(ctx, :workflow_ids_created_between, ["flow", 1, 2 ** 70, 2 ** 80]) == []
           assert s(ctx, :workflow_ids_created_between, ["flow", 1, -(2 ** 80), -(2 ** 70)]) == []
 
           assert s(ctx, :pending_workflow_ids, ["flow"]) ==
-                   ["r-big-version", "r-small", "r-big-time"]
+                   ["r-min", "r-big-version", "r-small", "r-max", "r-big-time"]
         end
 
         test "the queries see a commit's new name, version, correlation ID and create time",
