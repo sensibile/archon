@@ -509,6 +509,29 @@ defmodule Archon.Runtime.SubWorkflowTest do
       assert [{"SUB_WORKFLOW", :completed}] = statuses(await_status(id, :completed))
     end
 
+    # TestSubWorkflow#testStartSubWorkflowTaskToDomain and SubWorkflow#start: the task's
+    # taskToDomain replaces the parent's, and a priority set on the task is forwarded.
+    test "the child takes the taskToDomain and priority of its subWorkflowParam" do
+      define(~S"""
+      {"name": "archon_sub_wf_domain_parent", "version": 1, "tasks": [
+        {"name": "sub_workflow_task", "taskReferenceName": "st", "type": "SUB_WORKFLOW",
+         "inputParameters": {},
+         "subWorkflowParam": {"name": "sub_workflow", "version": 1,
+                              "taskToDomain": {"*": "archon_child_domain"}, "priority": 7}}]}
+      """)
+
+      id =
+        start("archon_sub_wf_domain_parent", %{},
+          task_to_domain: %{"*" => "archon_parent_domain"},
+          priority: 2
+        )
+
+      child = workflow(child_of(id, "st"))
+      assert child.parent_workflow_id == id
+      assert child.task_to_domain == %{"*" => "archon_child_domain"}
+      assert child.priority == 7
+    end
+
     test "a child that belongs to another parent is refused" do
       {id, child_id} = start_with_child("sub_workflow")
       sub_task = task(id, "t2")
