@@ -401,16 +401,19 @@ defmodule Archon.Metadata do
 
     length(a) == length(b) and
       Enum.all?(Enum.zip(a, b), fn {x, y} ->
-        upper_x = simple_case(x, &String.upcase/1)
-        upper_y = simple_case(y, &String.upcase/1)
+        upper_x = simple_case(x, :upcase)
+        upper_y = simple_case(y, :upcase)
 
         x == y or upper_x == upper_y or
-          simple_case(upper_x, &String.downcase/1) == simple_case(upper_y, &String.downcase/1)
+          simple_case(upper_x, :downcase) == simple_case(upper_y, :downcase)
       end)
   end
 
-  defp simple_case(code_point, map) do
-    case String.to_charlist(map.(<<code_point::utf8>>)) do
+  # Character#toLowerCase('İ') is 'i'; String.downcase/1 adds a combining dot (SpecialCasing).
+  defp simple_case(0x130, :downcase), do: ?i
+
+  defp simple_case(code_point, mapping) do
+    case String.to_charlist(apply(String, mapping, [<<code_point::utf8>>])) do
       [mapped] -> mapped
       _several -> code_point
     end

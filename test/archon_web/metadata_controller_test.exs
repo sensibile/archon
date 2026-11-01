@@ -309,6 +309,14 @@ defmodule ArchonWeb.MetadataControllerTest do
                "Required URI template variable 'version' for method parameter type Integer is " <>
                  "present but converted to null"
 
+      # A no-break space is not Character#isWhitespace.
+      assert {500, %{"message" => message}} =
+               delete("/api/metadata/workflow/archon_meta6/1%C2%A0")
+
+      assert message =~ ~s(For input string: "1\u00A0")
+      assert post_json("/api/metadata/workflow", workflow("archon_meta6")) == {200, nil}
+      assert delete("/api/metadata/workflow/archon_meta6/1%E3%80%80") == {200, nil}
+
       assert {500, %{"message" => message}} =
                delete("/api/metadata/workflow/archon_meta6/99999999999")
 

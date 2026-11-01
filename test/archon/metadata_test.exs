@@ -341,6 +341,10 @@ defmodule Archon.MetadataTest do
                {name("c_d"), 1}
              ]
 
+      # Character#toLowerCase('İ') is 'i'.
+      :ok = Metadata.update_workflow_def(workflow("c_f", metadata: %{"classifier" => "İ"}))
+      assert keys(ours(Metadata.get_workflow_defs("i"), & &1.name, "c_")) == [{name("c_f"), 1}]
+
       :ok = Metadata.update_workflow_def(workflow("c_e", metadata: %{"classifier" => "ß"}))
       assert ours(Metadata.get_workflow_defs("SS"), & &1.name, "c_") == []
       assert keys(ours(Metadata.get_workflow_defs("ß"), & &1.name, "c_")) == [{name("c_e"), 1}]
