@@ -448,6 +448,8 @@ defmodule Archon.Runtime.OutboxTest do
 
     test "a retry of a child that already runs is acked and leaves it running" do
       {parent, child} = parent_and_child()
+      # the child's first decide commits after its start answered the parent
+      eventually(fn -> task(child, "t1") end)
       before = workflow(child)
 
       assert {:error, {:not_found, _message}} =
