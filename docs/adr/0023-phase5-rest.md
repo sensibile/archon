@@ -140,10 +140,11 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
     실패는 500 `"Method parameter '<이름>': Failed to convert value of type 'java.lang.String' to required type '<타입>'; <원인>"`이다
     (`MethodArgumentTypeMismatchException`은 매퍼에 없다). 같은 이름이 반복되면 숫자·불리언은 첫 값, 문자열은 `,`로 합친다. `%`
     escape가 깨진 쌍은 Tomcat처럼 버린다(`Plug.Conn.fetch_query_params/1`은 요청 전체를 400으로 만든다).
-  - body 한도: 첫 JSON 값에서 배열·객체가 1000단을 넘거나 숫자가 1000자리(정수부와 소수부 자릿수, 부호와 지수 제외)를 넘으면
+  - body 한도: 첫 JSON 값에서 배열·객체가 1000단을 넘거나 숫자가 1000자리(정수부·소수부·지수부 자릿수, 부호 제외)를 넘으면
     디코딩 전에 거절한다. upstream Jackson의 `StreamReadConstraints`(`getMaxNestingDepth`, `getMaxNumberLength`)와 같은 한도와
     문구(`"JSON parse error: Document nesting depth (1001) exceeds ..."`, `"JSON parse error: Number value length (<n>) exceeds ..."`)다.
-    거대한 중첩·숫자를 만드는 데 드는 메모리·CPU를 막는다. 루트가 스칼라면 뒤에 공백이나
+    거대한 중첩·숫자를 만드는 데 드는 메모리·CPU를 막는다. body 앞의 UTF-8 BOM은 Jackson처럼 건너뛴다. upstream은 `1e<999자리>`
+    같은 큰 지수를 받지만 Archon은 실수로 만들 수 없어 500 parse error다. 루트가 스칼라면 뒤에 공백이나
     끝이 와야 한다(upstream은 `"123abc"`, `"01"`을 거절).
 
 ### 4. 오류 코드와 body
@@ -309,7 +310,8 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   주는 자리에 고정 문구(`"Temporary server error, retry the request"`, `"Internal server error"`)를 준다. Elixir 용어를 내보내지
   않기 위해서다. 400대 Plug 예외도 예외 문구 대신 HTTP 상태 문구를 준다.
 - **요청 읽기의 차이**(결정 3): JSON이 아닌 body의 Jackson 문구를 옮기지 않고, `Content-Type`을 보지 않으며(upstream은 JSON이
-  아니면 500), 8 MB 넘는 body는 413이다(upstream은 제한이 없다).
+  아니면 500), 8 MB 넘는 body는 413이다(upstream은 제한이 없다). 실수로 나타낼 수 없는 지수(`1e999`)는 500 parse error다
+  (upstream은 `BigDecimal`로 받는다).
 - JSON 객체 키 순서 등 코덱 차이는 ADR 0002의 목록 그대로다.
 
 ## 대안

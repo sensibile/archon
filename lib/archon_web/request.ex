@@ -15,7 +15,7 @@ defmodule ArchonWeb.Request do
   its last value. Upstream answers a body that is not JSON with a 500 whose message is Jackson's
   (`"JSON parse error: ..."`); Archon keeps the status and the prefix but cannot reproduce
   Jackson's wording, except for blank text and Jackson's `StreamReadConstraints` (nesting deeper
-  than 1000, a number longer than 1000 digits), whose messages are upstream's. The `Content-Type` is not checked (upstream answers a non-JSON one with a
+  than 1000, a number longer than 1000 digits), whose messages are upstream's. A leading UTF-8 byte order mark is skipped, as Jackson does. The `Content-Type` is not checked (upstream answers a non-JSON one with a
   500).
 
   ## Query values
@@ -79,6 +79,8 @@ defmodule ArchonWeb.Request do
   end
 
   defp decode("", opts, conn), do: {:error, missing_body(opts), conn}
+  # Jackson's byte-source bootstrapper skips a UTF-8 byte order mark.
+  defp decode(<<0xEF, 0xBB, 0xBF, text::binary>>, opts, conn), do: decode(text, opts, conn)
 
   defp decode(text, opts, conn) do
     with :ok <- not_blank(text),
@@ -121,8 +123,8 @@ defmodule ArchonWeb.Request do
 
   # Jackson's StreamReadConstraints, checked on the first value before :json.decode/3 builds it
   # (an 8 MB "[[[[..." takes over 1 GB, a million-digit integer seconds of CPU): nesting deeper
-  # than 1000 (getMaxNestingDepth) and a number with more than 1000 digits before its exponent
-  # (getMaxNumberLength; the sign and the exponent do not count). Text after the first value is
+  # than 1000 (getMaxNestingDepth) and a number with more than 1000 digits in its integer,
+  # fraction and exponent parts (getMaxNumberLength; signs, "." and "e" do not count). Text after the first value is
   # not looked at, as Jackson never reads it.
   defp limits(text), do: scan(text, 0)
 
@@ -160,17 +162,16 @@ defmodule ArchonWeb.Request do
   defp skip_string(<<_char, rest::binary>>), do: skip_string(rest)
   defp skip_string(<<>>), do: <<>>
 
-  # Digits of the integer and fraction parts; the exponent is skipped uncounted.
+  # Digits of the integer, fraction and exponent parts.
   defp number(<<?-, rest::binary>>, 0), do: number(rest, 0)
   defp number(<<char, rest::binary>>, length) when char in ?0..?9, do: number(rest, length + 1)
   defp number(<<?., rest::binary>>, length), do: number(rest, length)
-  defp number(<<char, rest::binary>>, length) when char in [?e, ?E], do: {length, exponent(rest)}
+
+  defp number(<<char, sign, rest::binary>>, length) when char in [?e, ?E] and sign in [?+, ?-],
+    do: number(rest, length)
+
+  defp number(<<char, rest::binary>>, length) when char in [?e, ?E], do: number(rest, length)
   defp number(rest, length), do: {length, rest}
-
-  defp exponent(<<char, rest::binary>>) when char in [?+, ?-] or char in ?0..?9,
-    do: exponent(rest)
-
-  defp exponent(rest), do: rest
 
   defp number_message(length) do
     "Number value length (#{length}) exceeds the maximum allowed (1000, from " <>

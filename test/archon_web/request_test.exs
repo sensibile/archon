@@ -83,8 +83,8 @@ defmodule ArchonWeb.RequestTest do
       assert {:ok, %{"a" => _}} = read(~s({"a": ") <> String.duplicate("[", 2000) <> ~s(\\"x"}))
     end
 
-    # StreamReadConstraints.getMaxNumberLength, observed upstream: integer and fraction digits
-    # count, the sign and the exponent do not.
+    # StreamReadConstraints.getMaxNumberLength, observed upstream: integer, fraction and exponent
+    # digits count, signs do not.
     test "a number longer than 1000 digits is refused before decoding" do
       digits = &String.duplicate("1", &1)
       assert {:ok, %{"a" => _}} = read(~s({"a": #{digits.(1000)}}))
@@ -101,7 +101,17 @@ defmodule ArchonWeb.RequestTest do
       assert read(~s({"a": [#{digits.(600)}.#{digits.(600)}]})) == message.(1200)
       assert read(~s([1, 2, #{digits.(5000)}])) == message.(5000)
       assert read(digits.(1001)) == message.(1001)
+      assert read(~s({"a": 1.0e-#{digits.(999)}})) == message.(1001)
+      assert read(~s({"a": #{digits.(1000)}e5})) == message.(1001)
+      # 1000 digits pass the limit (upstream accepts 1e<999 digits>); :json cannot build it.
+      assert {:error, {:server_error, "JSON parse error: the request body" <> _}} =
+               read(~s([1e#{digits.(999)}]))
+
       assert read(~s({"#{digits.(2000)}": "#{digits.(2000)}"})) |> elem(0) == :ok
+    end
+
+    test "a UTF-8 byte order mark is skipped" do
+      assert read(<<0xEF, 0xBB, 0xBF>> <> ~s({"a": 1})) == {:ok, %{"a" => 1}}
     end
 
     test "a body over 8 MB is a 413" do
