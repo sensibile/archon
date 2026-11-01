@@ -57,12 +57,15 @@ defmodule ArchonWeb.Request do
   @spec read_json(Plug.Conn.t(), handler: String.t()) ::
           {:ok, Archon.Domain.Codec.json(), Plug.Conn.t()} | {:error, term(), Plug.Conn.t()}
   def read_json(conn, opts \\ []) do
-    with {:ok, text, conn} <- read_all(conn, []),
-         :ok <- json_content_type(conn, text) do
-      decode(text, opts, conn)
-    else
-      {:error, reason} -> {:error, reason, conn}
-      {:error, reason, conn} -> {:error, reason, conn}
+    case read_all(conn, []) do
+      {:ok, text, conn} ->
+        case json_content_type(conn, text) do
+          :ok -> decode(text, opts, conn)
+          {:error, reason} -> {:error, reason, conn}
+        end
+
+      {:error, reason, conn} ->
+        {:error, reason, conn}
     end
   end
 

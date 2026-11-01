@@ -149,8 +149,9 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
     붙임), 헤더가 없으면 `application/octet-stream`으로 본 같은 500, `/`가 없으면 500 `Invalid mime type`, 와일드카드는 400이다(모두
     upstream 관측). 인증이 없는 MVP(ADR 0024 결정 4)에서 이 검사는 브라우저가 CORS preflight 없이 보내는 교차 출처 "단순 요청"
     (`text/plain`, 폼)이 액션에 닿지 않게 한다. `application/json` 교차 출처 요청은 preflight가 필요한데 Archon은 OPTIONS에 CORS
-    헤더 없이 404로 답하므로 브라우저가 보내지 않는다. DNS rebinding처럼 같은 출처로 위장하는 경로는 upstream과 같이 남고, 인증
-    ADR(Later)이 다룬다. body 앞의 UTF-8 BOM은 Jackson처럼 건너뛴다. upstream은 `1e<999자리>`
+    헤더 없이 404로 답하므로 브라우저가 보내지 않는다. 부작용이 있는 GET(poll, batch poll은 태스크를 꺼내 `IN_PROGRESS`로 만든다)에
+    대한 교차 출처 단순 요청(`<img src>` 등)과 DNS rebinding처럼 같은 출처로 위장하는 경로는 upstream과 같이 남고, 인증 ADR(Later)이
+    다룬다. body 앞의 UTF-8 BOM은 Jackson처럼 건너뛴다. upstream은 `1e<999자리>`
     같은 큰 지수를 받지만 Archon은 실수로 만들 수 없어 500 parse error다. 루트가 스칼라면 뒤에 공백이나
     끝이 와야 한다(upstream은 `"123abc"`, `"01"`을 거절).
 
