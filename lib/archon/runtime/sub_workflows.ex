@@ -94,6 +94,8 @@ defmodule Archon.Runtime.SubWorkflows do
   defp message({tag, %{__exception__: true} = exception}) when is_atom(tag),
     do: "#{tag}: #{Exception.message(exception)}"
 
+  # A call that exited (WorkflowServer.call/4) reads as its reason, as before ADR 0025.
+  defp message({:exit, reason}), do: message(reason)
   defp message(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp message(reason), do: inspect(reason)
 

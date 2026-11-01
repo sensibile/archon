@@ -89,25 +89,34 @@ defmodule Archon.Runtime.LifecycleCleanupTest do
     })
   end
 
-  # Holds the outbox runner of `id` at its first entry until the test sends `:release` to it.
+  # Holds the outbox runner of `id` at its first entry until the test sends `:release` to it;
+  # later entries run at once, so no runner is left waiting after the test.
   defp hold_outbox(id) do
     test = self()
+    held = :counters.new(1, [:atomics])
 
     RuntimeHooks.install(
       hook: fn
         :outbox, ^id, {_entry, effect} ->
-          send(test, {:held, self(), effect})
-
-          receive do
-            :release -> :ok
-          after
-            5_000 -> :ok
+          if :counters.get(held, 1) == 0 do
+            :counters.add(held, 1, 1)
+            hold(test, effect)
           end
 
         _point, _id, _data ->
           :ok
       end
     )
+  end
+
+  defp hold(test, effect) do
+    send(test, {:held, self(), effect})
+
+    receive do
+      :release -> :ok
+    after
+      5_000 -> :ok
+    end
   end
 
   defp removing(fun) do
@@ -212,7 +221,9 @@ defmodule Archon.Runtime.LifecycleCleanupTest do
       message = "Cannot archive workflow: #{child} with status: RUNNING"
       assert_receive {:removed, {:error, {:invalid, ^message}}}, 2_000
       assert workflow(child).status == :running
-      assert await_status(parent, :running)
+      # the parent's task follows the child that runs again (its revive_parent entry)
+      assert eventually(fn -> task(parent, "st").status == :in_progress end)
+      assert eventually(fn -> Runtime.store().pending_outbox(child) == [] end)
     end
 
     test "a child that tells its removed parent finds none and goes on" do
