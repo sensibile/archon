@@ -140,8 +140,10 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
     실패는 500 `"Method parameter '<이름>': Failed to convert value of type 'java.lang.String' to required type '<타입>'; <원인>"`이다
     (`MethodArgumentTypeMismatchException`은 매퍼에 없다). 같은 이름이 반복되면 숫자·불리언은 첫 값, 문자열은 `,`로 합친다. `%`
     escape가 깨진 쌍은 Tomcat처럼 버린다(`Plug.Conn.fetch_query_params/1`은 요청 전체를 400으로 만든다).
-  - body 중첩: 배열·객체가 1000단을 넘으면 디코딩 전에 거절한다. upstream Jackson의 `StreamReadConstraints`와 같은 한도와 문구
-    (`"JSON parse error: Document nesting depth (1001) exceeds the maximum allowed (1000, from ..."`)다. 루트가 스칼라면 뒤에 공백이나
+  - body 한도: 첫 JSON 값에서 배열·객체가 1000단을 넘거나 숫자가 1000자리(정수부와 소수부 자릿수, 부호와 지수 제외)를 넘으면
+    디코딩 전에 거절한다. upstream Jackson의 `StreamReadConstraints`(`getMaxNestingDepth`, `getMaxNumberLength`)와 같은 한도와
+    문구(`"JSON parse error: Document nesting depth (1001) exceeds ..."`, `"JSON parse error: Number value length (<n>) exceeds ..."`)다.
+    거대한 중첩·숫자를 만드는 데 드는 메모리·CPU를 막는다. 루트가 스칼라면 뒤에 공백이나
     끝이 와야 한다(upstream은 `"123abc"`, `"01"`을 거절).
 
 ### 4. 오류 코드와 body

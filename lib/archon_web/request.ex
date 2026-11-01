@@ -14,8 +14,8 @@ defmodule ArchonWeb.Request do
   Jackson does, the first JSON value is read and the rest ignored, and a repeated object key keeps
   its last value. Upstream answers a body that is not JSON with a 500 whose message is Jackson's
   (`"JSON parse error: ..."`); Archon keeps the status and the prefix but cannot reproduce
-  Jackson's wording, except for blank text and nesting deeper than 1000 (Jackson's
-  `StreamReadConstraints`), whose messages are upstream's. The `Content-Type` is not checked (upstream answers a non-JSON one with a
+  Jackson's wording, except for blank text and Jackson's `StreamReadConstraints` (nesting deeper
+  than 1000, a number longer than 1000 digits), whose messages are upstream's. The `Content-Type` is not checked (upstream answers a non-JSON one with a
   500).
 
   ## Query values
@@ -35,6 +35,7 @@ defmodule ArchonWeb.Request do
 
   @max_body 8_000_000
   @max_depth 1000
+  @max_number 1000
   @depth_message "Document nesting depth (1001) exceeds the maximum allowed (1000, from " <>
                    "`StreamReadConstraints.getMaxNestingDepth()`)"
   # Read in chunks so that a body over the limit is refused before it is all in memory.
@@ -80,20 +81,21 @@ defmodule ArchonWeb.Request do
   defp decode("", opts, conn), do: {:error, missing_body(opts), conn}
 
   defp decode(text, opts, conn) do
-    cond do
-      text =~ ~r/\A[ \t\r\n]*\z/ ->
-        {:error, parse_error("No content to map due to end-of-input"), conn}
-
-      too_deep?(text) ->
-        {:error, parse_error(@depth_message), conn}
-
-      true ->
-        case decode_first(text) do
-          {:ok, nil} -> {:error, missing_body(opts), conn}
-          {:ok, json} -> {:ok, json, conn}
-          :error -> {:error, parse_error("the request body is not valid JSON"), conn}
-        end
+    with :ok <- not_blank(text),
+         :ok <- limits(text),
+         {:ok, json} when json != nil <- decode_first(text) do
+      {:ok, json, conn}
+    else
+      {:error, detail} -> {:error, parse_error(detail), conn}
+      {:ok, nil} -> {:error, missing_body(opts), conn}
+      :error -> {:error, parse_error("the request body is not valid JSON"), conn}
     end
+  end
+
+  defp not_blank(text) do
+    if text =~ ~r/\A[ \t\r\n]*\z/,
+      do: {:error, "No content to map due to end-of-input"},
+      else: :ok
   end
 
   defp parse_error(detail), do: {:server_error, "JSON parse error: " <> detail}
@@ -117,24 +119,63 @@ defmodule ArchonWeb.Request do
     ErlangError -> :error
   end
 
-  # StreamReadConstraints.getMaxNestingDepth(): Jackson refuses an array or object nested deeper
-  # than 1000, before :json.decode/3 would build it (an 8 MB "[[[[..." takes over 1 GB).
-  # Brackets inside strings do not count.
-  defp too_deep?(text), do: depth(text, 0, false)
+  # Jackson's StreamReadConstraints, checked on the first value before :json.decode/3 builds it
+  # (an 8 MB "[[[[..." takes over 1 GB, a million-digit integer seconds of CPU): nesting deeper
+  # than 1000 (getMaxNestingDepth) and a number with more than 1000 digits before its exponent
+  # (getMaxNumberLength; the sign and the exponent do not count). Text after the first value is
+  # not looked at, as Jackson never reads it.
+  defp limits(text), do: scan(text, 0)
 
-  defp depth(_text, level, _string?) when level > @max_depth, do: true
-  defp depth(<<>>, _level, _string?), do: false
-  defp depth(<<?\\, _escaped, rest::binary>>, level, true), do: depth(rest, level, true)
-  defp depth(<<?", rest::binary>>, level, string?), do: depth(rest, level, not string?)
-  defp depth(<<_char, rest::binary>>, level, true), do: depth(rest, level, true)
+  defp scan(<<>>, _level), do: :ok
+  defp scan(<<?", rest::binary>>, level), do: rest |> skip_string() |> after_value(level)
 
-  defp depth(<<char, rest::binary>>, level, false) when char in [?[, ?{],
-    do: depth(rest, level + 1, false)
+  defp scan(<<char, rest::binary>>, level) when char in [?[, ?{] do
+    if level + 1 > @max_depth, do: {:error, @depth_message}, else: scan(rest, level + 1)
+  end
 
-  defp depth(<<char, rest::binary>>, level, false) when char in [?], ?}],
-    do: depth(rest, level - 1, false)
+  defp scan(<<char, rest::binary>>, level) when char in [?], ?}] do
+    if level <= 1, do: :ok, else: scan(rest, level - 1)
+  end
 
-  defp depth(<<_char, rest::binary>>, level, false), do: depth(rest, level, false)
+  defp scan(<<char, _rest::binary>> = text, level) when char == ?- or char in ?0..?9 do
+    {length, rest} = number(text, 0)
+
+    if length > @max_number,
+      do: {:error, number_message(length)},
+      else: after_value(rest, level)
+  end
+
+  defp scan(<<char, rest::binary>>, level) when char in [?\s, ?\t, ?\r, ?\n, ?,, ?:],
+    do: scan(rest, level)
+
+  # A keyword (true, false, null) or anything else: a root value ends here; decoding judges it.
+  defp scan(<<_char, rest::binary>>, level) when level > 0, do: scan(rest, level)
+  defp scan(_text, 0), do: :ok
+
+  defp after_value(_rest, 0), do: :ok
+  defp after_value(rest, level), do: scan(rest, level)
+
+  defp skip_string(<<?\\, _escaped, rest::binary>>), do: skip_string(rest)
+  defp skip_string(<<?", rest::binary>>), do: rest
+  defp skip_string(<<_char, rest::binary>>), do: skip_string(rest)
+  defp skip_string(<<>>), do: <<>>
+
+  # Digits of the integer and fraction parts; the exponent is skipped uncounted.
+  defp number(<<?-, rest::binary>>, 0), do: number(rest, 0)
+  defp number(<<char, rest::binary>>, length) when char in ?0..?9, do: number(rest, length + 1)
+  defp number(<<?., rest::binary>>, length), do: number(rest, length)
+  defp number(<<char, rest::binary>>, length) when char in [?e, ?E], do: {length, exponent(rest)}
+  defp number(rest, length), do: {length, rest}
+
+  defp exponent(<<char, rest::binary>>) when char in [?+, ?-] or char in ?0..?9,
+    do: exponent(rest)
+
+  defp exponent(rest), do: rest
+
+  defp number_message(length) do
+    "Number value length (#{length}) exceeds the maximum allowed (1000, from " <>
+      "`StreamReadConstraints.getMaxNumberLength()`)"
+  end
 
   # HttpMessageNotReadableException: "Required request body is missing: <handler signature>".
   defp missing_body(opts) do

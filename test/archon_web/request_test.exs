@@ -75,8 +75,33 @@ defmodule ArchonWeb.RequestTest do
       assert {:error, {:server_error, "JSON parse error: Document nesting" <> _}} =
                read(String.duplicate("[", 8_000_000))
 
+      # Only the first value is read, as Jackson does.
+      assert read("{}" <> String.duplicate("[", 1001)) == {:ok, %{}}
+      assert read("1 " <> String.duplicate("[", 1001)) == {:ok, 1}
+
       # Brackets inside strings do not count.
       assert {:ok, %{"a" => _}} = read(~s({"a": ") <> String.duplicate("[", 2000) <> ~s(\\"x"}))
+    end
+
+    # StreamReadConstraints.getMaxNumberLength, observed upstream: integer and fraction digits
+    # count, the sign and the exponent do not.
+    test "a number longer than 1000 digits is refused before decoding" do
+      digits = &String.duplicate("1", &1)
+      assert {:ok, %{"a" => _}} = read(~s({"a": #{digits.(1000)}}))
+      assert {:ok, %{"a" => _}} = read(~s({"a": -#{digits.(1000)}}))
+
+      message = fn n ->
+        {:error,
+         {:server_error,
+          "JSON parse error: Number value length (#{n}) exceeds the maximum allowed " <>
+            "(1000, from `StreamReadConstraints.getMaxNumberLength()`)"}}
+      end
+
+      assert read(~s({"a": #{digits.(1001)}})) == message.(1001)
+      assert read(~s({"a": [#{digits.(600)}.#{digits.(600)}]})) == message.(1200)
+      assert read(~s([1, 2, #{digits.(5000)}])) == message.(5000)
+      assert read(digits.(1001)) == message.(1001)
+      assert read(~s({"#{digits.(2000)}": "#{digits.(2000)}"})) |> elem(0) == :ok
     end
 
     test "a body over 8 MB is a 413" do
