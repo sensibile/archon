@@ -5,8 +5,8 @@
 #
 # Derived from conductor-oss rest/src/main/java/com/netflix/conductor/rest/controllers/MetadataResource.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
-# Modified by sensibile: Phoenix actions for the MVP handlers, and skeletons of the Phase 6
-# handlers (ADR 0025).
+# Modified by sensibile: Phoenix actions for the MVP and Phase 6 handlers (ADR 0023, ADR 0025);
+# the classifier filter of `getAll` is in `Archon.Metadata`.
 
 defmodule ArchonWeb.MetadataController do
   @moduledoc """
@@ -21,31 +21,24 @@ defmodule ArchonWeb.MetadataController do
   wording (ADR 0023, decision 4).
 
   Validation errors carry upstream's method and argument prefix (`registerTaskDef.arg0`,
-  `updateTaskDef.arg0`, `registerWorkflowDef.arg0`, `updateWorkflowDef.arg0`), seen on the
-  upstream server.
+  `updateTaskDef.arg0`, `registerWorkflowDef.arg0`, `updateWorkflowDef.arg0`,
+  `validateWorkflowDef.arg0`), seen on the upstream server.
+
+  The Phase 6 lists and deletions follow ADR 0025, decision 6: deleting a definition that is not
+  stored is upstream's 500, and a `{version}` path value that is not an `Integer` is Spring's
+  conversion 500.
   """
 
   use ArchonWeb, :controller
 
-  alias Archon.Domain.{BulkResponse, Codec, TaskDef, Validation, WorkflowDef}
+  alias Archon.Domain.{BulkResponse, Codec, TaskDef, Validation, WorkflowDef, WorkflowDefSummary}
   alias Archon.Metadata
 
-  # Phase 6 actions not implemented yet (ADR 0025, decision 7): each answers the 404 of a path
-  # without a handler, and the contract replay skips the steps that reach it. Slice 6c empties
-  # this list.
+  # Phase 6 actions not implemented yet (ADR 0025, decision 7): none since slice 6c.
   # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
   Module.register_attribute(__MODULE__, :unimplemented, persist: true)
 
-  @unimplemented [
-    :list_workflows,
-    :workflow_names_and_versions,
-    :workflow_names,
-    :latest_workflows,
-    :workflow_versions,
-    :delete_workflow,
-    :delete_task_def,
-    :validate_workflow
-  ]
+  @unimplemented []
 
   @resource "com.netflix.conductor.rest.controllers.MetadataResource"
   @task_def "com.netflix.conductor.common.metadata.tasks.TaskDef"
@@ -155,37 +148,65 @@ defmodule ArchonWeb.MetadataController do
   @spec unimplemented() :: [atom()]
   def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
 
-  @doc "`GET /api/metadata/workflow` (`getAll`, `classifier` query). Not implemented yet."
+  @doc "`GET /api/metadata/workflow` (`getAll`, `classifier` query)."
   @spec list_workflows(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def list_workflows(conn, _params), do: Errors.send_no_route(conn)
+  def list_workflows(conn, _params) do
+    definitions = Metadata.get_workflow_defs(Request.string(conn, "classifier"))
+    Response.json(conn, Enum.map(definitions, &WorkflowDef.to_json/1))
+  end
 
-  @doc "`GET /api/metadata/workflow/names-and-versions` (`getWorkflowNamesAndVersions`). Not implemented yet."
+  @doc "`GET /api/metadata/workflow/names-and-versions` (`getWorkflowNamesAndVersions`)."
   @spec workflow_names_and_versions(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def workflow_names_and_versions(conn, _params), do: Errors.send_no_route(conn)
+  def workflow_names_and_versions(conn, _params) do
+    summaries =
+      Map.new(Metadata.get_workflow_names_and_versions(), fn {name, versions} ->
+        {name, Enum.map(versions, &WorkflowDefSummary.to_json/1)}
+      end)
 
-  @doc "`GET /api/metadata/workflow/names` (`getWorkflowNames`). Not implemented yet."
+    Response.json(conn, summaries)
+  end
+
+  @doc "`GET /api/metadata/workflow/names` (`getWorkflowNames`)."
   @spec workflow_names(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def workflow_names(conn, _params), do: Errors.send_no_route(conn)
+  def workflow_names(conn, _params), do: Response.json(conn, Metadata.get_workflow_names())
 
-  @doc "`GET /api/metadata/workflow/latest-versions` (`getAllWorkflowsWithLatestVersions`). Not implemented yet."
+  @doc "`GET /api/metadata/workflow/latest-versions` (`getAllWorkflowsWithLatestVersions`)."
   @spec latest_workflows(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def latest_workflows(conn, _params), do: Errors.send_no_route(conn)
+  def latest_workflows(conn, _params),
+    do: Response.json(conn, Enum.map(Metadata.get_latest_workflow_defs(), &WorkflowDef.to_json/1))
 
-  @doc "`GET /api/metadata/workflow/{name}/versions` (`getWorkflowVersions`). Not implemented yet."
+  @doc "`GET /api/metadata/workflow/{name}/versions` (`getWorkflowVersions`)."
   @spec workflow_versions(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def workflow_versions(conn, _params), do: Errors.send_no_route(conn)
+  def workflow_versions(conn, %{"name" => name}) do
+    summaries = Metadata.get_workflow_versions(name)
+    Response.json(conn, Enum.map(summaries, &WorkflowDefSummary.to_json/1))
+  end
 
-  @doc "`DELETE /api/metadata/workflow/{name}/{version}` (`unregisterWorkflowDef`). Not implemented yet."
+  @doc "`DELETE /api/metadata/workflow/{name}/{version}` (`unregisterWorkflowDef`)."
   @spec delete_workflow(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def delete_workflow(conn, _params), do: Errors.send_no_route(conn)
+  def delete_workflow(conn, %{"name" => name, "version" => version}) do
+    with {:ok, version} <- query(conn, Request.path_integer(version, "version")) do
+      reply(conn, Metadata.unregister_workflow_def(name, version), [])
+    end
+  end
 
-  @doc "`DELETE /api/metadata/taskdefs/{tasktype}` (`unregisterTaskDef`). Not implemented yet."
+  @doc "`DELETE /api/metadata/taskdefs/{tasktype}` (`unregisterTaskDef`)."
   @spec delete_task_def(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def delete_task_def(conn, _params), do: Errors.send_no_route(conn)
+  def delete_task_def(conn, %{"tasktype" => task_type}),
+    do: reply(conn, Metadata.unregister_task_def(task_type), [])
 
-  @doc "`POST /api/metadata/workflow/validate` (`validate`). Not implemented yet."
+  @doc "`POST /api/metadata/workflow/validate` (`validate`): 200 without a body, or the errors."
   @spec validate_workflow(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def validate_workflow(conn, _params), do: Errors.send_no_route(conn)
+  def validate_workflow(conn, _params) do
+    handler = "public void #{@resource}.validate(#{@workflow_def})"
+
+    with {:ok, definition, conn} <- body(conn, handler, &one(&1, WorkflowDef)) do
+      reply(conn, Metadata.validate_workflow_def(definition),
+        path: "validateWorkflowDef.arg0",
+        value: definition
+      )
+    end
+  end
 
   # A void handler: 200 without a body, or the error.
   defp reply(conn, :ok, _opts), do: Response.empty(conn)
