@@ -22,6 +22,9 @@ defmodule ArchonWeb.ContractCase do
       (a start's text body) reaches `status`. It reads `Archon.Runtime` directly, as the script's
       wait is not a fixture.
 
+  A fixture request body is sent as JSON, except a string, which is sent as the raw text it holds
+  (the capture script stores a body that is not JSON as a string; no fixture sends a JSON string).
+
   Exchange options record the deliberate differences from upstream:
 
     * `expect: :no_route` - Archon answers the 404 of a path without a handler instead of the
@@ -48,8 +51,8 @@ defmodule ArchonWeb.ContractCase do
   ## Comparison
 
   Status, `Content-Type` and body are compared after masking only the timestamp keys
-  (`Archon.Contract.mask_times/1`, not `normalize/1`, which masks UUIDs too), so an ID that does
-  not match its binding fails. `instance` (the host) is compared as present or absent, and
+  (`Archon.Contract.mask_times/1`, not `normalize/1`, which masks UUIDs too; a `0` timestamp is
+  kept), so an ID that does not match its binding fails. `instance` (the host) is compared as present or absent, and
   `validationErrors` without order (Hibernate reports violations in no defined order). A response
   of a fixture listed in `Archon.Contract.fixture_schemas/0` is also checked against its schema.
 
@@ -67,7 +70,8 @@ defmodule ArchonWeb.ContractCase do
 
   @endpoint ArchonWeb.Endpoint
 
-  @attempts 80
+  # Polls and waits give up after 10 s.
+  @attempts 400
   @attempt_ms 25
 
   @type exchange_opts :: [expect: :no_route, ignore: [[String.t()]]]
@@ -268,8 +272,12 @@ defmodule ArchonWeb.ContractCase do
 
   defp run({:wait_status, name, status}, state) do
     %{"response" => %{"body" => captured}} = Contract.fixture(name)
-    id = Map.fetch!(state.ids, captured)
-    wait_status(name, id, status, @attempts)
+
+    case Map.fetch(state.ids, captured) do
+      {:ok, id} -> wait_status(name, id, status, @attempts)
+      :error -> flunk("#{name}: the started workflow's ID #{captured} was never bound")
+    end
+
     state
   end
 
@@ -312,7 +320,10 @@ defmodule ArchonWeb.ContractCase do
 
   # --- request ---------------------------------------------------------------------------------
 
-  defp send_fixture(fixture, state) do
+  @doc false
+  # Sends a fixture's request with the bound IDs (public for the helper's own tests).
+  @spec send_fixture(map(), state()) :: {state(), map()}
+  def send_fixture(fixture, state) do
     {state, request} = prepare_request(fixture["request"], state)
     {state, dispatch(request)}
   end
@@ -389,16 +400,24 @@ defmodule ArchonWeb.ContractCase do
 
   # --- response --------------------------------------------------------------------------------
 
-  defp check(name, fixture, actual, state, opts) do
+  @doc false
+  # Compares one response with a fixture (public for the helper's own tests): `actual` is
+  # `%{status:, content_type:, body:, path:}`.
+  @spec check(String.t(), map(), map(), state(), exchange_opts()) :: state()
+  def check(name, fixture, actual, state, opts \\ []) do
     expected = fixture["response"]
-    state = bind_response(expected["body"], actual.body, state)
 
     case Keyword.get(opts, :expect) do
-      :no_route -> assert_no_route(name, actual)
-      nil -> assert_same(name, expected, actual, state, Keyword.get(opts, :ignore, []))
-    end
+      # Upstream's answer has nothing to do with Archon's 404: no ID is bound from it.
+      :no_route ->
+        assert_no_route(name, actual)
+        state
 
-    state
+      nil ->
+        state = bind_response(expected["body"], actual.body, state)
+        assert_same(name, expected, actual, state, Keyword.get(opts, :ignore, []))
+        state
+    end
   end
 
   defp assert_no_route(name, actual) do

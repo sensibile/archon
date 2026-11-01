@@ -53,6 +53,32 @@ defmodule ArchonWeb.RequestTest do
       assert String.starts_with?(fixture_message("request_body_not_json"), "JSON parse error: ")
     end
 
+    # Observed upstream: "123abc" and "01" fail; a container root may be followed by anything.
+    test "a scalar root value must end at whitespace or the end of the body" do
+      assert {:error, {:server_error, "JSON parse error: " <> _}} = read("123abc")
+      assert {:error, {:server_error, "JSON parse error: " <> _}} = read("01")
+      assert read(~s("s" )) == {:ok, "s"}
+      assert read("[1]x") == {:ok, [1]}
+    end
+
+    # StreamReadConstraints: upstream accepts 1000 levels and refuses 1001 with this message.
+    test "nesting deeper than 1000 is refused before decoding" do
+      deep = fn n -> String.duplicate(~s({"a":), n) <> "1" <> String.duplicate("}", n) end
+      assert {:ok, _json} = read(deep.(1000))
+
+      assert read(deep.(1001)) ==
+               {:error,
+                {:server_error,
+                 "JSON parse error: Document nesting depth (1001) exceeds the maximum allowed " <>
+                   "(1000, from `StreamReadConstraints.getMaxNestingDepth()`)"}}
+
+      assert {:error, {:server_error, "JSON parse error: Document nesting" <> _}} =
+               read(String.duplicate("[", 8_000_000))
+
+      # Brackets inside strings do not count.
+      assert {:ok, %{"a" => _}} = read(~s({"a": ") <> String.duplicate("[", 2000) <> ~s(\\"x"}))
+    end
+
     test "a body over 8 MB is a 413" do
       body = ~s({"a": ") <> String.duplicate("x", 8_000_001) <> ~s("})
       assert {:error, {:payload_too_large, _message}} = read(body)
@@ -71,6 +97,7 @@ defmodule ArchonWeb.RequestTest do
       assert Request.int(conn("count=%2B2"), "count", 1) == {:ok, 2}
       assert Request.int(conn("count=-3"), "count", 1) == {:ok, -3}
       assert Request.int(conn("count=0x10"), "count", 1) == {:ok, 16}
+      assert Request.int(conn("count=-0x10"), "count", 1) == {:ok, -16}
       assert Request.int(conn("count=%2310"), "count", 1) == {:ok, 16}
       assert Request.int(conn("count=2147483647"), "count", 1) == {:ok, 2_147_483_647}
     end
@@ -93,7 +120,8 @@ defmodule ArchonWeb.RequestTest do
             {"count=--1", ~s(For input string: "--1")},
             {"count=99999999999", ~s(For input string: "99999999999")},
             {"count=%20", ~s(For input string: "")},
-            {"count=0xZZ", ~s(For input string: "ZZ" under radix 16)}
+            {"count=0xZZ", ~s(For input string: "ZZ" under radix 16)},
+            {"count=%2B0x10", ~s(For input string: "+0x10")}
           ] do
         assert Request.int(conn(query), "count", 1) == {:error, {:server_error, prefix <> detail}}
       end

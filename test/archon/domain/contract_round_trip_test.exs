@@ -7,7 +7,7 @@ defmodule Archon.Domain.ContractRoundTripTest do
   use ExUnit.Case, async: true
 
   alias Archon.Contract
-  alias Archon.Domain.{Task, TaskDef, TaskResult, Workflow, WorkflowDef}
+  alias Archon.Domain.{ErrorResponse, Task, TaskDef, TaskResult, Workflow, WorkflowDef}
 
   # Which domain model each fixture body decodes to. Every fixture is listed so that a newly
   # captured one cannot be skipped silently; [] means the exchange carries no domain object.
@@ -43,7 +43,7 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "metadata_get_taskdef_not_found" => [],
     "metadata_get_workflow_not_found" => [],
     "task_poll_empty" => [],
-    "workflow_get_not_found" => [],
+    "workflow_get_not_found" => [response: ErrorResponse],
     "workflow_get_status" => [],
     "workflow_start_fork" => [],
     "workflow_start_request_switch" => [],
@@ -74,7 +74,7 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "metadata_register_taskdefs_empty" => [],
     "metadata_register_taskdefs_no_name" => [],
     "metadata_register_taskdefs_blank_name" => [],
-    "metadata_register_taskdefs_coerced" => [],
+    "metadata_register_taskdefs_coerced" => [response: ErrorResponse],
     "metadata_register_workflow_no_tasks" => [],
     "metadata_get_workflow_version_not_found" => [],
     "metadata_update_workflows_invalid" => [],
@@ -90,9 +90,9 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "workflow_terminate_completed" => [],
     "workflow_terminate_not_found" => [],
     "task_get_not_found" => [],
-    "task_update_invalid" => [],
-    "task_update_v2_invalid" => [],
-    "route_not_found" => [],
+    "task_update_invalid" => [response: ErrorResponse],
+    "task_update_v2_invalid" => [response: ErrorResponse],
+    "route_not_found" => [response: ErrorResponse],
     "route_later_workflow_search" => [],
     "route_later_workflow_running" => [],
     "route_later_workflow_test" => [],

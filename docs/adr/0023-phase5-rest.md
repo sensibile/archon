@@ -49,7 +49,8 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
 - 모듈은 `ArchonWeb.Endpoint`, `ArchonWeb.Router`, 컨트롤러 `ArchonWeb.{Health,Metadata,Workflow,Task}Controller`,
   오류 변환 `ArchonWeb.Errors`다. 디렉터리는 `lib/archon_web/`다.
 - JSON은 내장 `JSON`이다(`config :phoenix, :json_library, JSON`). Jason은 들이지 않는다. 요청 body는 `Plug.Parsers`의
-  JSON 파서로 맵을 만들지 않고, 컨트롤러가 원문을 읽어 `JSON.decode/1`과 도메인 코덱 `from_json/2`로 바꾼다. 누락 키와
+  JSON 파서로 맵을 만들지 않고, 컨트롤러가 원문을 읽어 디코딩하고(`ArchonWeb.Request`, OTP `:json`. Jackson과 맞추는 세부는
+  결정 3) 도메인 코덱 `from_json/2`로 바꾼다. 누락 키와
   `null`을 구분하는 코덱 규칙(ADR 0002)을 지키고, 배열 body(`POST /api/metadata/taskdefs`)를 `_json` 같은 감싼 키 없이 받기
   위해서다.
 - Endpoint에는 `Plug.Head`를 둔다. Spring은 GET 매핑마다 HEAD를 body 없이 같은 응답으로 준다(upstream `curl -I /health`는 200).
@@ -139,6 +140,9 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
     실패는 500 `"Method parameter '<이름>': Failed to convert value of type 'java.lang.String' to required type '<타입>'; <원인>"`이다
     (`MethodArgumentTypeMismatchException`은 매퍼에 없다). 같은 이름이 반복되면 숫자·불리언은 첫 값, 문자열은 `,`로 합친다. `%`
     escape가 깨진 쌍은 Tomcat처럼 버린다(`Plug.Conn.fetch_query_params/1`은 요청 전체를 400으로 만든다).
+  - body 중첩: 배열·객체가 1000단을 넘으면 디코딩 전에 거절한다. upstream Jackson의 `StreamReadConstraints`와 같은 한도와 문구
+    (`"JSON parse error: Document nesting depth (1001) exceeds the maximum allowed (1000, from ..."`)다. 루트가 스칼라면 뒤에 공백이나
+    끝이 와야 한다(upstream은 `"123abc"`, `"01"`을 거절).
 
 ### 4. 오류 코드와 body
 
@@ -299,6 +303,9 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 - **SUB_WORKFLOW 태스크 갱신의 `subWorkflowId`를 반영하지 않는다**(ADR 0024 결정 1).
 - **`/api` 밖의 없는 경로도 404다.** upstream은 UI 정적 파일을 내주므로 `GET /nope`에 index HTML(200)을 준다.
 - **OPTIONS는 404다**(결정 1). upstream은 `Allow` 헤더로 200이다.
+- **500의 문구.** `TransientException`·매핑 없는 예외로 가는 런타임 오류(결정 4 표의 마지막 두 줄)는 upstream이 `th.getMessage()`를
+  주는 자리에 고정 문구(`"Temporary server error, retry the request"`, `"Internal server error"`)를 준다. Elixir 용어를 내보내지
+  않기 위해서다. 400대 Plug 예외도 예외 문구 대신 HTTP 상태 문구를 준다.
 - **요청 읽기의 차이**(결정 3): JSON이 아닌 body의 Jackson 문구를 옮기지 않고, `Content-Type`을 보지 않으며(upstream은 JSON이
   아니면 500), 8 MB 넘는 body는 413이다(upstream은 제한이 없다).
 - JSON 객체 키 순서 등 코덱 차이는 ADR 0002의 목록 그대로다.

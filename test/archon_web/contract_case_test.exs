@@ -52,20 +52,124 @@ defmodule ArchonWeb.ContractCaseTest do
       assert state.ids == %{id => id}
     end
 
-    test "an ID bound to another value is sent with that value" do
+    test "a request is sent with the bound values" do
       state = bind(new_state(), "00000000-0000-0000-0000-000000000000", @a)
+      {_state, actual} = send_fixture(Contract.fixture("route_method_put_task"), state)
+      assert actual.path == "/api/tasks/#{@a}"
+      assert actual.body["message"] == "No static resource api/tasks/#{@a}."
+    end
+  end
 
-      # The 404 names the path that was sent.
-      replay(steps("route_method_put_task", "route_method_put_task"), state)
+  # In-memory exchanges: what the comparison accepts and rejects.
+  describe "check/5" do
+    defp fixture(body),
+      do: %{
+        "response" => %{"status" => 200, "content_type" => "application/json", "body" => body}
+      }
+
+    defp actual(body),
+      do: %{status: 200, content_type: "application/json", body: body, path: "/x"}
+
+    test "binds an ID at its first appearance and accepts the same structure" do
+      state =
+        check(
+          "t",
+          fixture(%{"workflowId" => @a, "tasks" => [%{"workflowInstanceId" => @a}]}),
+          actual(%{"workflowId" => @b, "tasks" => [%{"workflowInstanceId" => @b}]}),
+          new_state()
+        )
+
+      assert state.ids == %{@a => @b}
     end
 
-    test "a response that differs from the fixture fails" do
-      # The fixture's 404 message names the captured path; with the ID bound elsewhere it differs.
-      state = bind(new_state(), "00000000-0000-0000-0000-000000000000", @a)
-
-      assert_raise ExUnit.AssertionError, ~r/workflow_get_not_found/, fn ->
-        replay(steps("workflow_get_not_found", "workflow_get_not_found"), state)
+    test "an ID that differs from its binding fails" do
+      assert_raise ExUnit.AssertionError, ~r/differs/, fn ->
+        check(
+          "t",
+          fixture(%{"workflowId" => @a, "parentWorkflowId" => @a}),
+          actual(%{"workflowId" => @b, "parentWorkflowId" => @c}),
+          new_state()
+        )
       end
+    end
+
+    test "two captured IDs answered with one value fail" do
+      assert_raise ExUnit.AssertionError, ~r/already bound/, fn ->
+        check(
+          "t",
+          fixture(%{"workflowId" => @a, "taskId" => @c}),
+          actual(%{"workflowId" => @b, "taskId" => @b}),
+          new_state()
+        )
+      end
+    end
+
+    test "timestamps are masked but a 0 (not set) is kept" do
+      check(
+        "t",
+        fixture(%{"startTime" => 1, "queueWaitTime" => 0}),
+        actual(%{"startTime" => 2, "queueWaitTime" => 5}),
+        new_state()
+      )
+
+      assert_raise ExUnit.AssertionError, ~r/differs/, fn ->
+        check(
+          "t",
+          fixture(%{"endTime" => 0}),
+          actual(%{"endTime" => 1_793_502_389_691}),
+          new_state()
+        )
+      end
+    end
+
+    test "instance is compared as present or absent, validation errors without order" do
+      errors = [%{"path" => "a", "message" => "x"}, %{"path" => "b", "message" => "y"}]
+
+      check(
+        "t",
+        fixture(%{"instance" => "<redacted-hostname>", "validationErrors" => errors}),
+        actual(%{"instance" => "host", "validationErrors" => Enum.reverse(errors)}),
+        new_state()
+      )
+
+      assert_raise ExUnit.AssertionError, fn ->
+        check(
+          "t",
+          fixture(%{"status" => 400}),
+          actual(%{"status" => 400, "instance" => "host"}),
+          new_state()
+        )
+      end
+    end
+
+    test "ignored keys are left out of both bodies" do
+      opts = [ignore: [["message"]]]
+
+      check(
+        "t",
+        fixture(%{"message" => "Jackson"}),
+        actual(%{"message" => "Archon"}),
+        new_state(),
+        opts
+      )
+    end
+
+    test "a no-route step binds nothing from upstream's body" do
+      upstream = fixture(%{"results" => [%{"workflowId" => @a}]})
+
+      no_route = %{
+        status: 404,
+        content_type: "application/json",
+        path: "/api/workflow/search",
+        body: %{
+          "status" => 404,
+          "message" => "No static resource api/workflow/search.",
+          "instance" => "h",
+          "retryable" => false
+        }
+      }
+
+      assert check("t", upstream, no_route, new_state(), expect: :no_route) == new_state()
     end
   end
 end

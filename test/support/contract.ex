@@ -172,14 +172,20 @@ defmodule Archon.Contract do
   def normalize(string) when is_binary(string), do: Regex.replace(uuid_regex(), string, "<uuid>")
   def normalize(other), do: other
 
+  # Durations derived from the clock: any value, 0 included, may differ between runs.
+  @duration_keys ~w(queueWaitTime executionTime)
+
   @doc """
-  Like `normalize/1` but masks only the timestamp keys and keeps UUIDs, for comparisons that
-  check IDs too (the replay of `ArchonWeb.ContractCase`).
+  Like `normalize/1` but for comparisons that check IDs too (the replay of
+  `ArchonWeb.ContractCase`): UUIDs are kept, and a timestamp of `0` (upstream's "not set") is kept
+  as well, so a time written where upstream has none still differs. Other timestamps and every
+  duration become `"<volatile>"`.
   """
   @spec mask_times(json()) :: json()
   def mask_times(map) when is_map(map) do
     Map.new(map, fn
-      {key, value} when key in @volatile_keys and not is_nil(value) -> {key, "<volatile>"}
+      {key, value} when key in @duration_keys and not is_nil(value) -> {key, "<volatile>"}
+      {key, value} when key in @volatile_keys and value not in [nil, 0] -> {key, "<volatile>"}
       {key, value} -> {key, mask_times(value)}
     end)
   end

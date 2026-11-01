@@ -14,7 +14,8 @@ defmodule ArchonWeb.Request do
   Jackson does, the first JSON value is read and the rest ignored, and a repeated object key keeps
   its last value. Upstream answers a body that is not JSON with a 500 whose message is Jackson's
   (`"JSON parse error: ..."`); Archon keeps the status and the prefix but cannot reproduce
-  Jackson's wording. The `Content-Type` is not checked (upstream answers a non-JSON one with a
+  Jackson's wording, except for blank text and nesting deeper than 1000 (Jackson's
+  `StreamReadConstraints`), whose messages are upstream's. The `Content-Type` is not checked (upstream answers a non-JSON one with a
   500).
 
   ## Query values
@@ -33,6 +34,9 @@ defmodule ArchonWeb.Request do
   """
 
   @max_body 8_000_000
+  @max_depth 1000
+  @depth_message "Document nesting depth (1001) exceeds the maximum allowed (1000, from " <>
+                   "`StreamReadConstraints.getMaxNestingDepth()`)"
   # Read in chunks so that a body over the limit is refused before it is all in memory.
   @chunk 1_000_000
 
@@ -76,36 +80,61 @@ defmodule ArchonWeb.Request do
   defp decode("", opts, conn), do: {:error, missing_body(opts), conn}
 
   defp decode(text, opts, conn) do
-    if text =~ ~r/\A[ \t\r\n]*\z/ do
-      {:error, {:server_error, "JSON parse error: No content to map due to end-of-input"}, conn}
-    else
-      case first_value(text) do
-        {:ok, nil} ->
-          {:error, missing_body(opts), conn}
+    cond do
+      text =~ ~r/\A[ \t\r\n]*\z/ ->
+        {:error, parse_error("No content to map due to end-of-input"), conn}
 
-        {:ok, json} ->
-          {:ok, json, conn}
+      too_deep?(text) ->
+        {:error, parse_error(@depth_message), conn}
 
-        :error ->
-          {:error, {:server_error, "JSON parse error: the request body is not valid JSON"}, conn}
-      end
+      true ->
+        case decode_first(text) do
+          {:ok, nil} -> {:error, missing_body(opts), conn}
+          {:ok, json} -> {:ok, json, conn}
+          :error -> {:error, parse_error("the request body is not valid JSON"), conn}
+        end
     end
   end
 
+  defp parse_error(detail), do: {:server_error, "JSON parse error: " <> detail}
+
   # Jackson reads the first value and ignores what follows it, and a repeated object key keeps
-  # its last value (JSON.decode/1 keeps the first).
-  defp first_value(text) do
+  # its last value (JSON.decode/1 keeps the first). A scalar root value must be followed by
+  # whitespace or the end ("123abc" and "01" fail upstream).
+  defp decode_first(text) do
     decoders = %{
       null: nil,
       object_push: fn key, value, acc -> [{key, value} | acc] end,
       object_finish: fn acc, old_acc -> {acc |> Enum.reverse() |> Map.new(), old_acc} end
     }
 
-    {value, :ok, _rest} = :json.decode(text, :ok, decoders)
-    {:ok, value}
+    {value, :ok, rest} = :json.decode(text, :ok, decoders)
+
+    if is_map(value) or is_list(value) or rest == "" or rest =~ ~r/\A[ \t\r\n]/,
+      do: {:ok, value},
+      else: :error
   rescue
     ErlangError -> :error
   end
+
+  # StreamReadConstraints.getMaxNestingDepth(): Jackson refuses an array or object nested deeper
+  # than 1000, before :json.decode/3 would build it (an 8 MB "[[[[..." takes over 1 GB).
+  # Brackets inside strings do not count.
+  defp too_deep?(text), do: depth(text, 0, false)
+
+  defp depth(_text, level, _string?) when level > @max_depth, do: true
+  defp depth(<<>>, _level, _string?), do: false
+  defp depth(<<?\\, _escaped, rest::binary>>, level, true), do: depth(rest, level, true)
+  defp depth(<<?", rest::binary>>, level, string?), do: depth(rest, level, not string?)
+  defp depth(<<_char, rest::binary>>, level, true), do: depth(rest, level, true)
+
+  defp depth(<<char, rest::binary>>, level, false) when char in [?[, ?{],
+    do: depth(rest, level + 1, false)
+
+  defp depth(<<char, rest::binary>>, level, false) when char in [?], ?}],
+    do: depth(rest, level - 1, false)
+
+  defp depth(<<_char, rest::binary>>, level, false), do: depth(rest, level, false)
 
   # HttpMessageNotReadableException: "Required request body is missing: <handler signature>".
   defp missing_body(opts) do
@@ -150,13 +179,8 @@ defmodule ArchonWeb.Request do
         rest -> {1, rest}
       end
 
-    {digits, radix} =
-      case rest do
-        "0x" <> hex -> {hex, 16}
-        "0X" <> hex -> {hex, 16}
-        "#" <> hex -> {hex, 16}
-        decimal -> {decimal, 10}
-      end
+    # NumberUtils.isHexNumber takes a hexadecimal prefix only after no sign or "-".
+    {digits, radix} = if sign == -1 or text == rest, do: radix(rest), else: {rest, 10}
 
     # Integer.valueOf and Integer.decode reject a second sign and an empty number.
     with true <- digits != "" and not String.starts_with?(digits, ["-", "+"]),
@@ -168,6 +192,11 @@ defmodule ArchonWeb.Request do
       _other -> {:error, number_format(text, digits, radix)}
     end
   end
+
+  defp radix("0x" <> hex), do: {hex, 16}
+  defp radix("0X" <> hex), do: {hex, 16}
+  defp radix("#" <> hex), do: {hex, 16}
+  defp radix(decimal), do: {decimal, 10}
 
   # NumberFormatException.forInputString: Integer.decode reports the digits after the prefix.
   defp number_format(text, _digits, 10), do: ~s(For input string: "#{text}")

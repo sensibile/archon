@@ -105,11 +105,24 @@ defmodule ArchonWeb.ErrorsTest do
   end
 
   describe "exception_response/2" do
-    test "a Plug exception below 500 keeps its status" do
-      response =
-        Errors.exception_response(:error, %Plug.Conn.InvalidQueryError{message: "bad query"})
+    test "a Plug exception below 500 keeps its status, not its message" do
+      capture_log(fn ->
+        query = %Plug.Conn.InvalidQueryError{message: "bad query"}
 
-      assert %ErrorResponse{status: 400, message: "bad query", retryable: false} = response
+        assert %ErrorResponse{status: 400, message: "Bad Request", retryable: false} =
+                 Errors.exception_response(:error, query)
+
+        # Its message would show the params and the module.
+        clause = %Phoenix.ActionClauseError{
+          module: ArchonWeb.TaskController,
+          function: :get,
+          arity: 2,
+          args: [%Plug.Conn{}, %{"secret" => "1"}]
+        }
+
+        assert %ErrorResponse{status: 400, message: "Bad Request"} =
+                 Errors.exception_response(:error, clause)
+      end)
     end
 
     test "other exceptions, exits and throws are 500" do

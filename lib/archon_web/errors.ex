@@ -48,6 +48,7 @@ defmodule ArchonWeb.Errors do
   require Logger
 
   alias Archon.Domain.{ErrorResponse, ValidationError}
+  alias Plug.Conn.Status
 
   @transient_tags [:env, :pre_effect, :commit, :post_effect]
 
@@ -126,13 +127,18 @@ defmodule ArchonWeb.Errors do
 
   @doc """
   The response for an exception raised while handling a request: a `Plug.Exception` status
-  below 500 (a malformed query string is 400) keeps its status, anything else is a 500.
+  below 500 keeps its status with the HTTP reason phrase as the message (an exception message
+  can carry Elixir terms, such as `Phoenix.ActionClauseError`'s params), anything else is a 500.
   """
   @spec exception_response(:error | :exit | :throw, term()) :: ErrorResponse.t()
   def exception_response(:error, exception) when is_exception(exception) do
     case Plug.Exception.status(exception) do
-      status when status < 500 -> application(status, Exception.message(exception))
-      _status -> error_response(exception)
+      status when status < 500 ->
+        Logger.warning("REST request failed: #{Exception.message(exception)}")
+        application(status, Status.reason_phrase(status))
+
+      _status ->
+        error_response(exception)
     end
   end
 
@@ -186,7 +192,7 @@ defmodule ArchonWeb.Errors do
   defp lookup(value, []), do: value
 
   defp lookup(%module{} = struct, [{:name, name} | rest]) do
-    if function_exported?(module, :__fields__, 0) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :__fields__, 0) do
       case List.keyfind(module.__fields__(), name, 1) do
         {key, _name, _type, _opts} -> struct |> Map.fetch!(key) |> lookup(rest)
         nil -> nil
