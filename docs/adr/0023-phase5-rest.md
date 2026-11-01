@@ -221,13 +221,6 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   컨트롤러 인자에 `@Valid`가 붙어 있어 서비스 메서드 검증보다 먼저 Spring `MethodArgumentNotValidException`이 나고, 매퍼에 없는
   클래스라 500이다. 문구는 Spring이 쓰는 긴 문자열(`"Validation failed for argument [0] in public ... updateTaskV2(...): [Field error
   ...]] "`)이다. `POST /api/tasks`의 같은 실패는 서비스 검증이라 400 `validationErrors`다.
-- **코덱 타입 오류(조각 5c).** body가 JSON이지만 도메인 코덱이 바꾸지 못하는 값(`"retryCount": "abc"`, 객체 자리의 배열)은
-  upstream처럼 500이고 문구는 `"JSON parse error: "`로 시작한다. 그 뒤는 Jackson 문구(``Cannot deserialize value of type `int`
-  from String "abc": not a valid `int` value``, Java 타입 이름과 원래 값) 대신 코덱의 첫 오류로 쓴다:
-  `"JSON parse error: <경로> <이유>"`(경로가 비면 이유만, 예 `JSON parse error: [0].retryCount must be integer`). 아래 5e의
-  `TaskResult` 규칙과 같은 모양이고 5d도 따른다. Jackson 문구를 옮기려면 필드마다 Java 타입과 Jackson의 값 표기를 다시 만들어야 해서
-  맞추지 않는다. 지금 이 경우의 픽스처는 없고(5a가 관측만 함), 5f가 캡처하면 재생에서 `ignore: [["message"]]`로 둔다.
-  숫자 문자열은 Jackson처럼 숫자 필드로 받는다(`"retryCount": "7"`은 7, upstream 관측, 코덱의 스칼라 강제 변환은 ADR 0002).
   **조각 5e는 이 문구를 그대로 만든다**(재생에서 `ignore`하지 않는다). `TaskResult`의 제약은 `String` 필드 두 개의 `@NotEmpty`뿐이라
   문구가 오류 목록과 거부 값만으로 정해지기 때문이다. 모양은 Spring 6 `MethodArgumentNotValidException#getMessage`와
   `FieldError#toString`이다: `"Validation failed for argument [0] in <handler 시그니처>"`, 오류가 둘 이상이면 `" with <n> errors"`,
@@ -242,6 +235,13 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   바꾸지 않는다. 같은 태스크 ID가 다른 워크플로우에 있으면 upstream은 그 태스크를 찾지만 Archon은 워크플로우 프로세스 안에서만 찾으므로
   태스크 문구 404다(ADR 0024의 신뢰 모델과 무관한 기존 차이). `extendLease`도 같은 이유로 `workflowInstanceId`가 틀리거나 없으면 태스크 문구 404다(upstream은 `taskId`만으로
   리스를 늘린다). 워크플로우를 다시 읽다 저장소 오류가 나면 예외가 올라가 500(`retryable` 참)이다.
+- **코덱 타입 오류(조각 5c).** body가 JSON이지만 도메인 코덱이 바꾸지 못하는 값(`"retryCount": "abc"`, 객체 자리의 배열)은
+  upstream처럼 500이고 문구는 `"JSON parse error: "`로 시작한다. 그 뒤는 Jackson 문구(``Cannot deserialize value of type `int`
+  from String "abc": not a valid `int` value``, Java 타입 이름과 원래 값) 대신 코덱의 첫 오류로 쓴다:
+  `"JSON parse error: <경로> <이유>"`(경로가 비면 이유만, 예 `JSON parse error: [0].retryCount must be integer`). 아래 5e의
+  `TaskResult` 규칙과 같은 모양이고 5d도 따른다. Jackson 문구를 옮기려면 필드마다 Java 타입과 Jackson의 값 표기를 다시 만들어야 해서
+  맞추지 않는다. 지금 이 경우의 픽스처는 없고(5a가 관측만 함), 5f가 캡처하면 재생에서 `ignore: [["message"]]`로 둔다.
+  숫자 문자열은 Jackson처럼 숫자 필드로 받는다(`"retryCount": "7"`은 7, upstream 관측, 코덱의 스칼라 강제 변환은 ADR 0002).
 - **`TaskResult` 코덱 타입 오류(조각 5e).** 필드 타입이 맞지 않는 body(`status: "BAD"`, 배열 body)는 upstream처럼 500이고 문구는
   `"JSON parse error: "`로 시작하지만 그 뒤는 Jackson 문구가 아니라 코덱 오류의 경로와 이유다(결정 3의 JSON이 아닌 body와 같은 방식).
   관측한 upstream 문구 예: `"JSON parse error: Cannot deserialize value of type `com.netflix.conductor.common.metadata.tasks.TaskResult$Status`
