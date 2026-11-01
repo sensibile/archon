@@ -234,9 +234,10 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   `correlation_id`, `create_time` 컬럼과 조회 색인을 새 마이그레이션으로 더하고, 기존 행은 `json_data`에서 채운다. 커밋이 이 컬럼을
   함께 쓴다. 컨트롤러가 부를 API는 `Archon.Runtime`의 함수다.
 - **조각 6b 구현에서 정한 것.**
-  - 저장소 콜백은 셋이다. `correlated_workflows(name, correlationId, includeClosed, includeTasks)`(상태 거르기와 태스크 읽기를
-    한 문장에서), `pending_workflow_ids(name)`(`RUNNING`·`PAUSED`, 버전 무시), `workflow_ids_created_between(name, version,
-    start, end)`(양끝 포함, 모든 상태). `Archon.Runtime`의 `correlated_workflows/4`와 `running_workflow_ids/4`가 이것을 부른다.
+  - 저장소 콜백은 셋이다. `correlated_workflows(name, correlationIds, includeClosed, includeTasks)`(ID 목록을 한 번에 읽고,
+    상태 거르기와 태스크 읽기도 같은 한 문장에서. POST의 ID가 많아도 저장소 호출은 하나다. upstream은 ID마다 읽지만 응답은
+    같다), `pending_workflow_ids(name)`(`RUNNING`·`PAUSED`, 버전 무시), `workflow_ids_created_between(name, version, start,
+    end)`(양끝 포함, 모든 상태). `Archon.Runtime`의 `correlated_workflows/4`와 `running_workflow_ids/4`가 이것을 부른다.
   - 새 열은 조회만 읽는다. 그래서 열이 담을 수 없는 값(NUL이 든 이름·correlationId, 열 범위를 넘는 버전·`createTime`)은 커밋을
     거절하지 않고 열을 `NULL`로 둔다. 그런 이름·correlationId로 묻는 조회는 두 저장소 모두 빈 결과다(메모리 저장소도 같은 규칙).
   - 기존 행 채우기는 SQL JSON 연산자가 아니라 마이그레이션 안의 Elixir 디코드로 한다. Postgres `json`·`jsonb` 연산자는 escape된

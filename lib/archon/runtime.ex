@@ -125,14 +125,22 @@ defmodule Archon.Runtime do
     do: store().get_workflow(id, include_tasks?)
 
   @doc """
-  Upstream `getWorkflowInstances`: the workflows of the definition `name` (any version) with this
-  correlation ID, only the `RUNNING` ones unless `include_closed?` (`PAUSED` is closed here), with
-  their tasks when `include_tasks?`. Ordered by create time and then workflow ID.
+  Upstream `getWorkflowInstances` for each of `correlation_ids`, in one store read: a map from
+  each ID to the workflows of the definition `name` (any version) with that correlation ID, only
+  the `RUNNING` ones unless `include_closed?` (`PAUSED` is closed here), with their tasks when
+  `include_tasks?`, ordered by create time and then workflow ID (`[]` for an ID without one).
   """
-  @spec correlated_workflows(String.t(), String.t(), boolean(), boolean()) :: [Workflow.t()]
-  def correlated_workflows(name, correlation_id, include_closed?, include_tasks?)
-      when is_binary(name) and is_binary(correlation_id),
-      do: store().correlated_workflows(name, correlation_id, include_closed?, include_tasks?)
+  @spec correlated_workflows(String.t(), [String.t()], boolean(), boolean()) ::
+          %{optional(String.t()) => [Workflow.t()]}
+  def correlated_workflows(name, correlation_ids, include_closed?, include_tasks?)
+      when is_binary(name) and is_list(correlation_ids) do
+    found =
+      name
+      |> store().correlated_workflows(correlation_ids, include_closed?, include_tasks?)
+      |> Enum.group_by(& &1.correlation_id)
+
+    Map.new(correlation_ids, &{&1, Map.get(found, &1, [])})
+  end
 
   @doc """
   Upstream `getRunningWorkflows`: with `start_ms` and `end_ms` both given and not 0, the IDs of the

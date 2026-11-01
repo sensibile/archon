@@ -120,10 +120,10 @@ defmodule ArchonWeb.WorkflowQueryController do
 
       Response.json(
         conn,
-        Enum.map(
-          Runtime.correlated_workflows(name, correlation_id, closed?, tasks?),
-          &Workflow.to_json(&1, now)
-        )
+        name
+        |> Runtime.correlated_workflows([correlation_id], closed?, tasks?)
+        |> Map.fetch!(correlation_id)
+        |> Enum.map(&Workflow.to_json(&1, now))
       )
     end
   end
@@ -143,12 +143,11 @@ defmodule ArchonWeb.WorkflowQueryController do
          :ok <- check_ids(conn, ids) do
       now = System.system_time(:millisecond)
 
-      # One query per distinct ID: a repeated one is one key of the answer anyway.
+      # Every ID in one store read; a repeated ID is one key, as in upstream's HashMap.
       result =
-        ids
-        |> Enum.uniq()
-        |> Map.new(fn id ->
-          workflows = Runtime.correlated_workflows(name, id, closed?, tasks?)
+        name
+        |> Runtime.correlated_workflows(Enum.uniq(ids), closed?, tasks?)
+        |> Map.new(fn {id, workflows} ->
           {id, Enum.map(workflows, &Workflow.to_json(&1, now))}
         end)
 

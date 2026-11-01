@@ -85,22 +85,24 @@ defmodule Archon.Runtime.Store.Memory do
     do: GenServer.call(server, :running_workflow_ids)
 
   @impl Store
-  @spec correlated_workflows(GenServer.server(), String.t(), String.t(), boolean(), boolean()) ::
+  @spec correlated_workflows(GenServer.server(), String.t(), [String.t()], boolean(), boolean()) ::
           [Workflow.t()]
   def correlated_workflows(
         server \\ __MODULE__,
         name,
-        correlation_id,
+        correlation_ids,
         include_closed?,
         include_tasks?
       )
-      when is_binary(name) and is_binary(correlation_id) and is_boolean(include_closed?) and
+      when is_binary(name) and is_list(correlation_ids) and is_boolean(include_closed?) and
              is_boolean(include_tasks?) do
-    if storable?(name) and storable?(correlation_id),
+    ids = correlation_ids |> Enum.filter(&(is_binary(&1) and storable?(&1))) |> MapSet.new()
+
+    if storable?(name) and MapSet.size(ids) > 0,
       do:
         GenServer.call(
           server,
-          {:correlated_workflows, name, correlation_id, include_closed?, include_tasks?}
+          {:correlated_workflows, name, ids, include_closed?, include_tasks?}
         ),
       else: []
   end
@@ -294,12 +296,12 @@ defmodule Archon.Runtime.Store.Memory do
     {:reply, Enum.sort(ids), state}
   end
 
-  def handle_call({:correlated_workflows, name, correlation_id, closed?, tasks?}, _from, state) do
+  def handle_call({:correlated_workflows, name, ids, closed?, tasks?}, _from, state) do
     workflows =
       state
       |> by_name(name)
       |> Enum.filter(
-        &(&1.correlation_id == correlation_id and (closed? or &1.status == :running))
+        &(MapSet.member?(ids, &1.correlation_id) and (closed? or &1.status == :running))
       )
       |> Enum.map(&if(tasks?, do: %{&1 | tasks: tasks_of(state, &1.workflow_id)}, else: &1))
 

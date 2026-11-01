@@ -174,19 +174,21 @@ defmodule Archon.Runtime.Store.Postgres do
   end
 
   @impl Store
-  @spec correlated_workflows(Postgres.t(), String.t(), String.t(), boolean(), boolean()) ::
+  @spec correlated_workflows(Postgres.t(), String.t(), [String.t()], boolean(), boolean()) ::
           [Workflow.t()]
   def correlated_workflows(
         instance \\ Postgres.runtime(),
         name,
-        correlation_id,
+        correlation_ids,
         include_closed?,
         include_tasks?
       )
-      when is_binary(name) and is_binary(correlation_id) and is_boolean(include_closed?) and
+      when is_binary(name) and is_list(correlation_ids) and is_boolean(include_closed?) and
              is_boolean(include_tasks?) do
-    if storable?(name) and storable?(correlation_id),
-      do: read_correlated(instance, name, correlation_id, include_closed?, include_tasks?),
+    ids = correlation_ids |> Enum.filter(&(is_binary(&1) and storable?(&1))) |> Enum.uniq()
+
+    if storable?(name) and ids != [],
+      do: read_correlated(instance, name, ids, include_closed?, include_tasks?),
       else: []
   end
 
@@ -713,7 +715,7 @@ defmodule Archon.Runtime.Store.Postgres do
   end
 
   # One statement, as read_workflow/3: the workflows and their tasks come from one snapshot.
-  defp read_correlated(instance, name, correlation_id, include_closed?, include_tasks?) do
+  defp read_correlated(instance, name, correlation_ids, include_closed?, include_tasks?) do
     tasks =
       if include_tasks? do
         "ARRAY(SELECT t.json_data FROM #{table(instance, "task")} t " <>
@@ -728,9 +730,9 @@ defmodule Archon.Runtime.Store.Postgres do
       query!(
         instance,
         "SELECT w.workflow_id, w.json_data, #{tasks} FROM #{table(instance, "workflow")} w " <>
-          "WHERE w.workflow_name = $1 AND w.correlation_id = $2 #{status}" <>
+          "WHERE w.workflow_name = $1 AND w.correlation_id = ANY($2) #{status}" <>
           "ORDER BY w.create_time, w.workflow_id",
-        [name, correlation_id]
+        [name, correlation_ids]
       )
 
     Enum.map(rows, fn [id, json, tasks] ->

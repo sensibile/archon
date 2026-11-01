@@ -488,14 +488,21 @@ defmodule Archon.Runtime.StoreContract do
           create(ctx, named("c-corr2", "flow", 1, correlation_id: "corr2"))
           create(ctx, named("c-none", "flow", 1, correlation_id: nil))
 
-          assert ids(s(ctx, :correlated_workflows, ["flow", "corr", false, false])) ==
+          assert ids(s(ctx, :correlated_workflows, ["flow", ["corr"], false, false])) ==
                    ["c-B", "c-a", "c-v2"]
 
-          assert ids(s(ctx, :correlated_workflows, ["flow", "corr", true, false])) ==
+          assert ids(s(ctx, :correlated_workflows, ["flow", ["corr"], true, false])) ==
                    ["c-paused", "c-B", "c-a", "c-v2", "c-done"]
 
-          assert s(ctx, :correlated_workflows, ["flow", "missing", true, false]) == []
-          assert s(ctx, :correlated_workflows, ["missing", "corr", true, false]) == []
+          # Several IDs in one read, ordered as one list; an empty list or unknown IDs: none.
+          assert ids(
+                   s(ctx, :correlated_workflows, ["flow", ["corr2", "corr", "corr"], false, false])
+                 ) ==
+                   ["c-B", "c-a", "c-v2", "c-corr2"]
+
+          assert s(ctx, :correlated_workflows, ["flow", [], true, false]) == []
+          assert s(ctx, :correlated_workflows, ["flow", ["missing"], true, false]) == []
+          assert s(ctx, :correlated_workflows, ["missing", ["corr"], true, false]) == []
         end
 
         test "correlated_workflows reads the tasks in seq order only when asked", ctx do
@@ -503,10 +510,10 @@ defmodule Archon.Runtime.StoreContract do
           create(ctx, named("c1", "flow", 1, correlation_id: "corr", tasks: tasks))
 
           assert [%Workflow{tasks: []} = found] =
-                   s(ctx, :correlated_workflows, ["flow", "corr", false, false])
+                   s(ctx, :correlated_workflows, ["flow", ["corr"], false, false])
 
           assert [%Workflow{tasks: [%Task{seq: 1}, %Task{seq: 2}]} = with_tasks] =
-                   s(ctx, :correlated_workflows, ["flow", "corr", false, true])
+                   s(ctx, :correlated_workflows, ["flow", ["corr"], false, true])
 
           assert {:ok, with_tasks} == s(ctx, :get_workflow, ["c1", true])
           assert {:ok, found} == s(ctx, :get_workflow, ["c1", false])
@@ -602,8 +609,8 @@ defmodule Archon.Runtime.StoreContract do
 
           assert s(ctx, :commit, ["u1", %Commit{workflow: updated}]) == :ok
 
-          assert s(ctx, :correlated_workflows, ["flow", "corr", true, false]) == []
-          assert ids(s(ctx, :correlated_workflows, ["flow2", "corr2", true, false])) == ["u1"]
+          assert s(ctx, :correlated_workflows, ["flow", ["corr"], true, false]) == []
+          assert ids(s(ctx, :correlated_workflows, ["flow2", ["corr2"], true, false])) == ["u1"]
           assert s(ctx, :pending_workflow_ids, ["flow"]) == []
           assert s(ctx, :pending_workflow_ids, ["flow2"]) == ["u1"]
           assert s(ctx, :workflow_ids_created_between, ["flow2", 4, 50, 50]) == ["u1"]
@@ -622,12 +629,26 @@ defmodule Archon.Runtime.StoreContract do
                 {"flow", <<0xFF>>},
                 {<<0xFF>>, "corr"}
               ],
-              do: assert(s(ctx, :correlated_workflows, [name, correlation_id, true, true]) == [])
+              do:
+                assert(s(ctx, :correlated_workflows, [name, [correlation_id], true, true]) == [])
+
+          # Left out of a list, the other IDs are still read.
+          create(ctx, named("n3", "flow", 1, correlation_id: "corr"))
+
+          assert ids(
+                   s(ctx, :correlated_workflows, [
+                     "flow",
+                     ["c\u0000rr", <<0xFF>>, "corr"],
+                     true,
+                     true
+                   ])
+                 ) ==
+                   ["n3"]
 
           assert s(ctx, :pending_workflow_ids, ["fl\u0000ow"]) == []
           assert s(ctx, :pending_workflow_ids, [<<0xFF>>]) == []
           assert s(ctx, :workflow_ids_created_between, ["fl\u0000ow", 1, 0, 1_000]) == []
-          assert s(ctx, :pending_workflow_ids, ["flow"]) == ["n1"]
+          assert s(ctx, :pending_workflow_ids, ["flow"]) == ["n1", "n3"]
         end
       end
     end

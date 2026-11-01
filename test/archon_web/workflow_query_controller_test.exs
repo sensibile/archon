@@ -148,19 +148,26 @@ defmodule ArchonWeb.WorkflowQueryControllerTest do
                Enum.sort([tag, "1", "true"])
     end
 
-    test "a repeated ID is read once", %{tag: tag} do
+    test "every ID is read in one store call, a repeated one once", %{tag: tag} do
+      id = start("archon_simple", 1, tag)
       test_pid = self()
 
       Archon.FaultyStore.install(fn
-        :correlated_workflows, [_name, id | _rest] -> send(test_pid, {:read, id})
+        :correlated_workflows, [_name, ids | _rest] -> send(test_pid, {:read, ids})
         _callback, _args -> :ok
       end)
 
-      body = JSON.encode!(List.duplicate(tag, 50) ++ ["other-" <> tag])
-      assert map_size(json(post_json("/api/workflow/archon_simple/correlated", body), 200)) == 2
-      assert_received {:read, ^tag}
-      refute_received {:read, ^tag}
-      assert_received {:read, "other-" <> _}
+      others = for n <- 1..50, do: "other-#{n}-" <> tag
+      body = JSON.encode!(List.duplicate(tag, 50) ++ others)
+
+      assert %{^tag => [%{"workflowId" => ^id}]} =
+               result = json(post_json("/api/workflow/archon_simple/correlated", body), 200)
+
+      assert map_size(result) == 51
+      assert Enum.all?(others, &(result[&1] == []))
+      assert_received {:read, ids}
+      assert ids == [tag | others]
+      refute_received {:read, _ids}
     end
 
     test "a null ID is upstream's 500, a missing body names the handler" do

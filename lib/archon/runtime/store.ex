@@ -34,10 +34,11 @@ defmodule Archon.Runtime.Store do
       (upstream `getWorkflow(id, true)`), otherwise with `tasks: []`.
     * `c:get_task/1` - the task and the ID of its workflow.
     * `c:running_workflow_ids/0` - workflows whose status is not terminal (`RUNNING`, `PAUSED`).
-    * `c:correlated_workflows/4` - workflows of a definition name (any version) with a
-      correlation ID (upstream `getWorkflowsByCorrelationId` and `getWorkflowInstances`), only the
-      `RUNNING` ones unless `include_closed?`, with their tasks ordered by `seq` when
-      `include_tasks?` (else `tasks: []`).
+    * `c:correlated_workflows/4` - workflows of a definition name (any version) whose
+      correlation ID is one of `correlation_ids` (upstream `getWorkflowsByCorrelationId` and
+      `getWorkflowInstances` for each ID, read at once), only the `RUNNING` ones unless
+      `include_closed?`, with their tasks ordered by `seq` when `include_tasks?` (else
+      `tasks: []`).
     * `c:pending_workflow_ids/1` - IDs of the workflows of a definition name (any version) whose
       status is not terminal (upstream `getRunningWorkflowIds`, which does not use the version).
     * `c:workflow_ids_created_between/4` - IDs of the workflows of a definition name and version,
@@ -95,7 +96,7 @@ defmodule Archon.Runtime.Store do
   @callback running_workflow_ids() :: [String.t()]
   @callback correlated_workflows(
               name :: String.t(),
-              correlation_id :: String.t(),
+              correlation_ids :: [String.t()],
               include_closed? :: boolean(),
               include_tasks? :: boolean()
             ) :: [Workflow.t()]
