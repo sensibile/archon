@@ -123,18 +123,13 @@ defmodule ArchonWeb.TaskController do
       {:ok, json, conn} ->
         case TaskResult.from_json(json) do
           {:ok, result} -> fun.(conn, result)
-          {:error, errors} -> Errors.send_error(conn, {:server_error, parse_error(errors)})
+          {:error, errors} -> Errors.send_error(conn, Request.codec_error(errors))
         end
 
       {:error, reason, conn} ->
         Errors.send_error(conn, reason)
     end
   end
-
-  # Jackson's type errors are 500 "JSON parse error: ..." upstream; the prefix and status are
-  # kept, the rest of Jackson's message is not reproduced (ADR 0023, decisions 3 and 4).
-  defp parse_error([{path, message} | _rest]),
-    do: "JSON parse error: " <> String.trim("#{path} #{message}")
 
   defp send_update_error(conn, :not_found, result),
     do: Errors.send_error(conn, {:not_found, not_found_message(result, workflow_exists?(result))})
