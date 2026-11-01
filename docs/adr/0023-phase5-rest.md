@@ -130,7 +130,7 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
     `updateWorkflowDef.arg0[i].<list element>`, 문구 `WorkflowDef cannot be null`)이다. `POST /api/metadata/taskdefs`는 `@Valid`가
     `null`을 건너뛰어 검증을 통과하고, 앞 원소를 저장한 뒤 그 원소에서 upstream의 `NullPointerException` 문구로 500이다
     (`Cannot invoke "...TaskDef.setCreatedBy(String)" because "taskDefinition" is null`). 둘 다 upstream 관측 그대로다.
-  - 일괄 갱신에서 정의 하나의 저장이 예외나 exit(호출 timeout, 멈춘 저장소 서버)를 내면(Postgres의 NUL 이름, 펜스) upstream처럼 그 정의만 실패로 넣고 나머지를
+  - 일괄 갱신에서 정의 하나의 저장이 예외(Postgres의 NUL 이름, 펜스)나 exit(호출 timeout, 멈춘 저장소 서버)를 내면 upstream처럼 그 정의만 실패로 넣고 나머지를
     저장한다. 문구는 Elixir 용어를 내보내지 않도록 고정 문구 `"Internal server error"`이고 자세한 내용은 로그에 남긴다.
 - 컨트롤러는 런타임 API와 `Archon.Metadata`만 부른다. 저장소·큐·`WorkflowServer`를 직접 부르지 않는다. ADR 0018 결정 7은
   REST가 부를 API를 `Archon.Runtime`·`Archon.Runtime.Tasks`로 정했으나 정의 등록 API가 없었으므로, 이 결정이 그 경계에

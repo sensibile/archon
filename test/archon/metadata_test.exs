@@ -148,7 +148,12 @@ defmodule Archon.MetadataTest do
         capture_log(fn ->
           with_metadata(Archon.MetadataTest.RaisingMetadata, fn ->
             assert {:ok, response} =
-                     Metadata.update_workflow_defs([workflow("raise"), refused, workflow("ok2")])
+                     Metadata.update_workflow_defs([
+                       workflow("raise"),
+                       refused,
+                       workflow("exit"),
+                       workflow("ok2")
+                     ])
 
             send(self(), {:response, response})
           end)
@@ -160,6 +165,7 @@ defmodule Archon.MetadataTest do
                bulk_successful_results: [name("ok2")],
                bulk_error_results: %{
                  name("raise") => "Internal server error",
+                 name("exit") => "Internal server error",
                  name("refused") =>
                    "Schema validation is not supported yet: #{name("refused")} outputSchema"
                }
@@ -264,7 +270,7 @@ defmodule Archon.MetadataTest do
 
   defmodule RaisingMetadata do
     @moduledoc false
-    # The runtime's metadata, except that storing a definition named "..._raise" raises. Other
+    # The runtime's metadata, except that storing "..._raise" raises and "..._exit" exits. Other
     # processes may read the configuration while it is swapped, so every callback delegates.
     @behaviour Archon.Runtime.Metadata
 
@@ -274,6 +280,7 @@ defmodule Archon.MetadataTest do
     def update_workflow_def(%WorkflowDef{name: "archon_metadata_test_raise"}),
       do: raise("store down")
 
+    def update_workflow_def(%WorkflowDef{name: "archon_metadata_test_exit"}), do: exit(:timeout)
     def update_workflow_def(definition), do: @real.update_workflow_def(definition)
 
     @impl true
