@@ -154,8 +154,15 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   `callbackAfterSeconds`를 0으로 저장한다. archon의 내부 필드 `callback_after_ms`(`wire: false`)도 같은 의미이므로 함께 0으로 한다.
   지연 없애기는 `postpone`(지우고 다시 넣음)이나 "있는지 읽은 뒤 postpone"으로 하지 않는다. 그 사이 메시지가 poll·ack로
   사라지면 메시지를 되살리기 때문이다. upstream `resetOffsetTime`처럼 있는 메시지만 갱신하고 갱신했는지를 돌려주는 큐 콜백
-  `reset_offset/2`를 `Archon.Runtime.Queue`에 더하고(메모리·Postgres 구현과 큐 계약 시험), `WorkflowServer.env/2`가 이 이벤트의 환경을
-  만들 때 태스크마다 부른 결과를 규칙에 넘긴다(ADR 0018의 Env 방식). 규칙은 참인 태스크만 `callbackAfterSeconds`를 0으로 커밋한다.
+  `reset_offset/2`를 `Archon.Runtime.Queue`에 더한다(메모리·Postgres 구현과 큐 계약 시험). 의미는 SQLite `resetOffsetTime`과 같다:
+  메시지가 있으면 전달 시각(`deliver_on`)만 지금(애플리케이션 시계)으로 바꾸고 우선순위·순번·꺼냄 표시(`popped`)·`unack_on`은
+  그대로 두며, 메시지가 있으면(지연이 이미 0이어도) 참이다. push처럼 꺼냄 표시를 지우지 않는다. `queue.ex` moduledoc의 "`deliver_on`을
+  바꾸는 연산"에 이 콜백을 더한다.
+  `WorkflowServer.env/2`가 이 이벤트의 환경을 만들 때, 워크플로우가 끝나지 않았으면 위 거르기에 드는 태스크마다 `reset_offset/2`를
+  부르고 그 결과를 규칙에 넘긴다. 끝났으면 부르지 않으므로 upstream처럼 409가 큐보다 먼저다. 규칙은 참인 태스크만
+  `callbackAfterSeconds`를 0으로 커밋한다. Env는 읽기만 한다는 ADR 0018 결정 2의 의도적 예외다: 결과가 규칙의 커밋 내용을 정하는데,
+  규칙 뒤에 도는 pre-effect로는 그 결과를 규칙에 돌려줄 수 없기 때문이다. 중간에 실패해 다시 부르면 `reset_offset/2`가 다시 참이므로
+  멱등이다.
   큐 갱신과 커밋은 한 트랜잭션이 아니다(upstream도 큐 갱신 뒤 태스크를 따로 저장한다). 성공은 204다.
 - 새 이벤트 셋은 `Archon.Runtime.Step.Lifecycle`(규칙)과 `Archon.Runtime.Lifecycle`(API), `WorkflowServer`(메시지)에 더한다.
   ADR 0018 결정 9의 방식(이벤트 하나가 커밋 하나, 답은 커밋과 그 뒤 결정이 저장된 뒤)을 따른다.
@@ -344,7 +351,7 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
 
 - **병렬로 진행할 수 있는 묶음.**
   - 1차: 6a.
-  - 2차: 6b, 6c, 6d, 6e. 런타임 파일(저장소, metadata, 생명주기·`WorkflowServer`, `Tasks`)과 컨트롤러 파일이 서로 겹치지 않는다.
+  - 2차: 6b, 6c, 6d, 6e. 런타임 파일(저장소, metadata, 생명주기·`WorkflowServer`·큐(6d), `Tasks`)과 컨트롤러 파일이 서로 겹치지 않는다.
     6a가 컨트롤러 골격, 라우터, 라우터 시험, 픽스처 등록을 모두 만들었으므로 이 파일들도 고치지 않는다. 함께 고칠 수 있는 파일은
     `contract_case.ex`의 자기 단계 옵션 줄뿐이다(아래).
   - 3차: 6f(6d 뒤, 같은 생명주기 파일)와 6g(6d 뒤, 단건 remove·terminate-remove를 부름).
