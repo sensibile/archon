@@ -75,10 +75,18 @@ defmodule Archon.Runtime.PostgresTest do
            correlation_id: "c\u0000rr",
            create_time: 5
          }},
-        {"w-3", %Workflow{workflow_id: "w-3", status: :running}}
+        {"w-3", %Workflow{workflow_id: "w-3", status: :running}},
+        # The first ID in order: no page bound may skip it.
+        {"",
+         %Workflow{
+           workflow_id: "",
+           status: :running,
+           workflow_definition: %WorkflowDef{name: "flow", version: 1},
+           create_time: 1
+         }}
       ]
 
-      # More rows than one page of the migration (500), after the three above.
+      # More rows than one page of the migration (500), after the four above.
       rows =
         rows ++
           for n <- 1..600 do
@@ -106,8 +114,9 @@ defmodule Archon.Runtime.PostgresTest do
 
       assert Repo.query!(
                "SELECT workflow_id, workflow_name, workflow_version, correlation_id, create_time " <>
-                 ~s|FROM "#{@scratch}".workflow WHERE workflow_id LIKE 'w-%' ORDER BY workflow_id|
+                 ~s|FROM "#{@scratch}".workflow WHERE workflow_id NOT LIKE 'x-%' ORDER BY workflow_id|
              ).rows == [
+               ["", "flow", 1, nil, 1],
                ["w-1", "flow", 2, "corr", 1_793_571_042_687],
                ["w-2", "fl\\u0000ow", 1, nil, 5],
                ["w-3", nil, nil, nil, 0]

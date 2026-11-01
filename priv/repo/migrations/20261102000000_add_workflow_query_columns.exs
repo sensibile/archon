@@ -24,7 +24,7 @@ defmodule Archon.Repo.Migrations.AddWorkflowQueryColumns do
     # Decoded here, not with Postgres JSON operators, which fail on a string holding an escaped
     # NUL; the values follow the commit's rules.
     table = qualified("workflow")
-    execute(fn -> fill(table, "") end)
+    execute(fn -> fill(table, nil) end)
 
     create index(:workflow, [:workflow_name, :correlation_id])
     create index(:workflow, [:workflow_name, :create_time])
@@ -44,13 +44,16 @@ defmodule Archon.Repo.Migrations.AddWorkflowQueryColumns do
     end
   end
 
-  # Keyset pages in workflow ID order (COLLATE "C").
+  # Keyset pages in workflow ID order (COLLATE "C"); the first page has no lower bound, so an
+  # empty ID is filled too.
   defp fill(table, after_id) do
+    {where, params} =
+      if after_id == nil, do: {"", [@page]}, else: {"WHERE workflow_id > $2 ", [@page, after_id]}
+
     %{rows: rows} =
       repo().query!(
-        "SELECT workflow_id, json_data FROM #{table} WHERE workflow_id > $1 " <>
-          "ORDER BY workflow_id LIMIT $2",
-        [after_id, @page]
+        "SELECT workflow_id, json_data FROM #{table} #{where}ORDER BY workflow_id LIMIT $1",
+        params
       )
 
     unless rows == [] do

@@ -148,6 +148,21 @@ defmodule ArchonWeb.WorkflowQueryControllerTest do
                Enum.sort([tag, "1", "true"])
     end
 
+    test "a repeated ID is read once", %{tag: tag} do
+      test_pid = self()
+
+      Archon.FaultyStore.install(fn
+        :correlated_workflows, [_name, id | _rest] -> send(test_pid, {:read, id})
+        _callback, _args -> :ok
+      end)
+
+      body = JSON.encode!(List.duplicate(tag, 50) ++ ["other-" <> tag])
+      assert map_size(json(post_json("/api/workflow/archon_simple/correlated", body), 200)) == 2
+      assert_received {:read, ^tag}
+      refute_received {:read, ^tag}
+      assert_received {:read, "other-" <> _}
+    end
+
     test "a null ID is upstream's 500, a missing body names the handler" do
       path = "/api/workflow/archon_simple/correlated"
       assert message(post_json(path, ~s(["a", null])), 500) == "correlationId cannot be null"

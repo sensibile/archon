@@ -143,8 +143,11 @@ defmodule ArchonWeb.WorkflowQueryController do
          :ok <- check_ids(conn, ids) do
       now = System.system_time(:millisecond)
 
+      # One query per distinct ID: a repeated one is one key of the answer anyway.
       result =
-        Map.new(ids, fn id ->
+        ids
+        |> Enum.uniq()
+        |> Map.new(fn id ->
           workflows = Runtime.correlated_workflows(name, id, closed?, tasks?)
           {id, Enum.map(workflows, &Workflow.to_json(&1, now))}
         end)
