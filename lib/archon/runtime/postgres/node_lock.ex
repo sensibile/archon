@@ -14,7 +14,9 @@ defmodule Archon.Runtime.Postgres.NodeLock do
   server yet) and then failing with
   `{:stop, :another_node_holds_the_database}`. A database it cannot reach is tried again for
   the same time on new connections (a restart or failover), then fails the start with
-  `{:stop, {:node_lock_connection, reason}}`. With the lock it raises the epoch in
+  `{:stop, {:node_lock_connection, reason}}`. Each step of an attempt (connecting, taking the
+  lock, raising the epoch) is bounded by the time left, but gets at least 250 ms, so a start
+  may fail a few hundred milliseconds after `retry_timeout`. With the lock it raises the epoch in
   `node_lease` on its connection (`Archon.Runtime.Postgres.advance_epoch/3`) and publishes it
   (`Archon.Runtime.Postgres.put_epoch/1`), which lets the runtime's writes pass the fence.
 
@@ -54,6 +56,10 @@ defmodule Archon.Runtime.Postgres.NodeLock do
                       migration_source migration_lock migration_primary_key
                       migration_timestamps migration_default_prefix migration_repo priv
                       start_apps_before_migration)a
+
+  # The least time each step of an attempt has to connect, take the lock and raise the epoch
+  # (ADR 0021, decision 7), so the start may end a few times this much after the retry deadline.
+  @min_attempt_timeout 250
 
   defmodule State do
     @moduledoc false
@@ -106,8 +112,10 @@ defmodule Archon.Runtime.Postgres.NodeLock do
   # cannot be reached (a restart or failover), on a new connection after a failed one. A failure
   # to raise the epoch releases the lock (closing the connection) and is tried again too.
   defp acquire(%State{instance: instance} = state, {deadline, interval, overrides} = retry) do
-    # Each attempt waits at most until the deadline, also on a connection that stalls.
-    timeout = max(deadline - System.monotonic_time(:millisecond), 1)
+    # Each step of an attempt waits at most until the deadline, also on a connection that
+    # stalls, but at least @min_attempt_timeout: the last attempt may start a few milliseconds before the
+    # deadline, too short to connect and see whether the lock is held.
+    timeout = max(deadline - System.monotonic_time(:millisecond), @min_attempt_timeout)
 
     result =
       case connect(instance, overrides, timeout) do
