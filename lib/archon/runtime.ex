@@ -9,7 +9,8 @@
 # (lookupForWorkflowDefinition, populateTaskDefinitions) at commit
 # 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the caller resolves the definition and builds the workflow, and the
-# workflow's own process creates and decides it (ADR 0018, decisions 1 and 7).
+# workflow's own process creates and decides it (ADR 0018, decisions 1 and 7); a definition
+# enforcing a schema that cannot be checked is refused (ADR 0023, decision 5).
 
 defmodule Archon.Runtime do
   @moduledoc """
@@ -78,8 +79,11 @@ defmodule Archon.Runtime do
   decide is saved.
 
   Errors: `{:error, {:not_found, message}}` without a definition, `{:error, {:invalid, message}}`
-  for a `nil` input, `{:error, {:terminate, message}}` when a `SUB_WORKFLOW` task names a workflow
-  that has no definition, `{:error, :conflict}` when the ID exists, or `{:error, reason}` when the
+  for a `nil` input or a definition that enforces a schema Archon cannot check
+  (`Archon.Domain.WorkflowDef.check_schema/1` on the definition with its task definitions
+  embedded: an inline `:definition`, a registered one, and the task definitions they get;
+  ADR 0023, decision 5), `{:error, {:terminate, message}}` when a `SUB_WORKFLOW` task names a
+  workflow that has no definition, `{:error, :conflict}` when the ID exists, or `{:error, reason}` when the
   start failed (nothing is left in the store).
   """
   @spec start_workflow(start_input()) :: {:ok, String.t()} | {:error, term()}
@@ -128,7 +132,8 @@ defmodule Archon.Runtime do
   defp new_workflow(input, id) do
     with {:ok, definition} <- definition(input),
          {:ok, definition} <- populate(definition),
-         :ok <- validate_input(Map.get(input, :input)) do
+         :ok <- validate_input(Map.get(input, :input)),
+         :ok <- WorkflowDef.check_schema(definition) do
       {:ok,
        %Workflow{
          workflow_id: id,

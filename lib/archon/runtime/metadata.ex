@@ -7,7 +7,7 @@
 # sqlite-persistence/src/main/java/com/netflix/conductor/sqlite/dao/metadata/SqliteMetadataDAO.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: reduced to the operations the MVP runtime and metadata REST use (ADR 0018,
-# decision 3); results are tagged tuples instead of exceptions and `Optional`.
+# decision 3; ADR 0023, decision 2); results are tagged tuples instead of exceptions and `Optional`.
 
 defmodule Archon.Runtime.Metadata do
   @moduledoc """
@@ -18,6 +18,8 @@ defmodule Archon.Runtime.Metadata do
     * `c:create_task_def/1`, `c:update_task_def/1` - insert or replace the task definition with
       that name (upstream both do `insertOrUpdateTaskDef`).
     * `c:get_task_def/1` - by name.
+    * `c:get_all_task_defs/0` - every task definition, ordered by name (byte order). Upstream's
+      `getAllTaskDefs` has no defined order (SQLite answers in insertion order).
     * `c:create_workflow_def/1` - adds a workflow definition; `{:error, :conflict}` if that name and
       version exist (upstream `Workflow with <name>.<version> already exists!`).
     * `c:update_workflow_def/1` - inserts or replaces that name and version.
@@ -33,6 +35,7 @@ defmodule Archon.Runtime.Metadata do
   @callback create_task_def(TaskDef.t()) :: :ok
   @callback update_task_def(TaskDef.t()) :: :ok
   @callback get_task_def(name :: String.t()) :: {:ok, TaskDef.t()} | {:error, :not_found}
+  @callback get_all_task_defs() :: [TaskDef.t()]
   @callback create_workflow_def(WorkflowDef.t()) :: :ok | {:error, :conflict}
   @callback update_workflow_def(WorkflowDef.t()) :: :ok
   @callback get_workflow_def(name :: String.t(), version :: integer()) ::

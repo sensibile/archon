@@ -24,5 +24,6 @@ defmodule Archon.Runtime.MetadataTest do
     assert Memory.create_task_def(%TaskDef{name: "metadata-test-t"}) == :ok
     assert Memory.update_task_def(%TaskDef{name: "metadata-test-t"}) == :ok
     assert Memory.get_task_def("metadata-test-t") == {:ok, %TaskDef{name: "metadata-test-t"}}
+    assert %TaskDef{name: "metadata-test-t"} in Memory.get_all_task_defs()
   end
 end

@@ -133,6 +133,22 @@ defmodule Archon.Runtime.MetadataContract do
           assert m(ctx, :get_task_def, ["taskA"]) == {:ok, replaced}
         end
 
+        test "all task definitions, ordered by name", ctx do
+          assert m(ctx, :get_all_task_defs, []) == []
+
+          for name <- ["b", "a", "B", "a0"],
+              do: m(ctx, :create_task_def, [%TaskDef{name: name, description: name}])
+
+          m(ctx, :update_task_def, [%TaskDef{name: "a", description: "updated"}])
+
+          assert m(ctx, :get_all_task_defs, []) == [
+                   %TaskDef{name: "B", description: "B"},
+                   %TaskDef{name: "a", description: "updated"},
+                   %TaskDef{name: "a0", description: "a0"},
+                   %TaskDef{name: "b", description: "b"}
+                 ]
+        end
+
         test "a missing task definition is not found", ctx do
           assert m(ctx, :get_task_def, ["absent"]) == {:error, :not_found}
         end

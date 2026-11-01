@@ -92,6 +92,7 @@ defmodule Archon.Runtime.MetadataPostgresTest do
       # Reads are not fenced.
       assert PgMetadata.get_task_def(fenced, "t") == {:error, :not_found}
       assert PgMetadata.get_latest_workflow_def(fenced, "w") == {:error, :not_found}
+      assert PgMetadata.get_all_task_defs(fenced) == []
     end
 
     test "writes with the published epoch", %{fenced: fenced} do

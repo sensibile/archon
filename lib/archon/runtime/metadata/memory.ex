@@ -49,6 +49,10 @@ defmodule Archon.Runtime.Metadata.Memory do
   def get_task_def(server \\ __MODULE__, name), do: GenServer.call(server, {:get_task_def, name})
 
   @impl Metadata
+  @spec get_all_task_defs(GenServer.server()) :: [TaskDef.t()]
+  def get_all_task_defs(server \\ __MODULE__), do: GenServer.call(server, :get_all_task_defs)
+
+  @impl Metadata
   @spec create_workflow_def(GenServer.server(), WorkflowDef.t()) :: :ok | {:error, :conflict}
   def create_workflow_def(
         server \\ __MODULE__,
@@ -92,6 +96,10 @@ defmodule Archon.Runtime.Metadata.Memory do
 
   def handle_call({:get_task_def, name}, _from, state) do
     {:reply, fetch(state.task_defs, name), state}
+  end
+
+  def handle_call(:get_all_task_defs, _from, state) do
+    {:reply, state.task_defs |> Enum.sort_by(&elem(&1, 0)) |> Enum.map(&elem(&1, 1)), state}
   end
 
   def handle_call({:create_workflow_def, definition}, _from, state) do
