@@ -3,6 +3,8 @@
 - 상태: 승인 (PR #5 머지, 2026-10-25)
 - 날짜: 2026-10-25
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
+- 비고: 2026-11-01 [ADR 0025](0025-phase6-workflow-operations-rest.md)가 Phase 6에서 열 Later 경로 33개의 비고에 "Phase 6"을 적었다.
+  분류는 구현이 끝날 때 바꾼다(결과 절).
 
 ## 맥락
 
@@ -98,20 +100,20 @@ Archon은 기존 Conductor 워커·SDK·UI가 그대로 붙는 REST/JSON 호환 
 | 분류 | 메서드 | 경로 | 핸들러 | 비고 |
 |---|---|---|---|---|
 | MVP | `POST` | `/api/metadata/workflow` | `create` | WorkflowDef 등록(`overwrite` 쿼리) |
-| Later | `POST` | `/api/metadata/workflow/validate` | `validate` |  |
+| Later | `POST` | `/api/metadata/workflow/validate` | `validate` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | MVP | `PUT` | `/api/metadata/workflow` | `update` | SDK의 일괄 등록·갱신 경로. `BulkResponse` 반환 |
 | MVP | `GET` | `/api/metadata/workflow/{name}` | `get` | WorkflowDef 조회(`version` 쿼리) |
-| Later | `GET` | `/api/metadata/workflow` | `getAll` | 목록·UI용(`classifier` 쿼리) |
-| Later | `GET` | `/api/metadata/workflow/names-and-versions` | `getWorkflowNamesAndVersions` |  |
-| Later | `GET` | `/api/metadata/workflow/names` | `getWorkflowNames` |  |
-| Later | `GET` | `/api/metadata/workflow/{name}/versions` | `getWorkflowVersions` |  |
-| Later | `GET` | `/api/metadata/workflow/latest-versions` | `getAllWorkflowsWithLatestVersions` |  |
-| Later | `DELETE` | `/api/metadata/workflow/{name}/{version}` | `unregisterWorkflowDef` |  |
+| Later | `GET` | `/api/metadata/workflow` | `getAll` | 목록·UI용(`classifier` 쿼리). Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `GET` | `/api/metadata/workflow/names-and-versions` | `getWorkflowNamesAndVersions` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `GET` | `/api/metadata/workflow/names` | `getWorkflowNames` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `GET` | `/api/metadata/workflow/{name}/versions` | `getWorkflowVersions` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `GET` | `/api/metadata/workflow/latest-versions` | `getAllWorkflowsWithLatestVersions` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `DELETE` | `/api/metadata/workflow/{name}/{version}` | `unregisterWorkflowDef` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | MVP | `POST` | `/api/metadata/taskdefs` | `registerTaskDef` | TaskDef 일괄 등록(배열 body) |
 | MVP | `PUT` | `/api/metadata/taskdefs` | `registerTaskDef` | TaskDef 단건 갱신 |
 | MVP | `GET` | `/api/metadata/taskdefs` | `getTaskDefs` | 워커 SDK가 시작 시 조회 |
 | MVP | `GET` | `/api/metadata/taskdefs/{tasktype}` | `getTaskDef` |  |
-| Later | `DELETE` | `/api/metadata/taskdefs/{tasktype}` | `unregisterTaskDef` |  |
+| Later | `DELETE` | `/api/metadata/taskdefs/{tasktype}` | `unregisterTaskDef` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 
 ### QueueAdminResource
 
@@ -136,10 +138,10 @@ Archon은 기존 Conductor 워커·SDK·UI가 그대로 붙는 REST/JSON 호환 
 | MVP | `GET` | `/api/tasks/poll/batch/{tasktype}` | `batchPoll` | task 없으면 빈 배열 |
 | MVP | `POST` | `/api/tasks` | `updateTask` | `TaskResult` body, taskId를 text/plain으로 반환 |
 | MVP | `POST` | `/api/tasks/update-v2` | `updateTaskV2` | 갱신 후 같은 타입 다음 task 반환, 없으면 204 |
-| Later | `POST` | `/api/tasks/{workflowId}/{taskRefName}/{status}` | `updateTask` | ref name 기반 갱신 |
-| Later | `POST` | `/api/tasks/{workflowId}/{taskRefName}/{status}/sync` | `updateTaskSync` |  |
-| Later | `POST` | `/api/tasks/{workflowId}/{status}/signal` | `signalWorkflowTaskAsync` | signal 계열 |
-| Later | `POST` | `/api/tasks/{workflowId}/{status}/signal/sync` | `signalWorkflowTaskSync` |  |
+| Later | `POST` | `/api/tasks/{workflowId}/{taskRefName}/{status}` | `updateTask` | ref name 기반 갱신. Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `POST` | `/api/tasks/{workflowId}/{taskRefName}/{status}/sync` | `updateTaskSync` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `POST` | `/api/tasks/{workflowId}/{status}/signal` | `signalWorkflowTaskAsync` | signal 계열. Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `POST` | `/api/tasks/{workflowId}/{status}/signal/sync` | `signalWorkflowTaskSync` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | Later | `POST` | `/api/tasks/{taskId}/log` | `log` | task 실행 로그 |
 | Later | `GET` | `/api/tasks/{taskId}/log` | `getTaskLogs` |  |
 | MVP | `GET` | `/api/tasks/{taskId}` | `getTask` | task 단건 조회 |
@@ -159,13 +161,13 @@ Archon은 기존 Conductor 워커·SDK·UI가 그대로 붙는 REST/JSON 호환 
 
 | 분류 | 메서드 | 경로 | 핸들러 | 비고 |
 |---|---|---|---|---|
-| Later | `PUT` | `/api/workflow/bulk/pause` | `pauseWorkflow` | bulk 계열은 단건 lifecycle 이후 |
-| Later | `PUT` | `/api/workflow/bulk/resume` | `resumeWorkflow` |  |
-| Later | `POST` | `/api/workflow/bulk/restart` | `restart` |  |
-| Later | `POST` | `/api/workflow/bulk/retry` | `retry` |  |
-| Later | `POST` | `/api/workflow/bulk/terminate` | `terminate` |  |
-| Later | `DELETE` | `/api/workflow/bulk/remove` | `deleteWorkflow` |  |
-| Later | `DELETE` | `/api/workflow/bulk/terminate-remove` | `terminateRemove` |  |
+| Later | `PUT` | `/api/workflow/bulk/pause` | `pauseWorkflow` | bulk 계열은 단건 lifecycle 이후. Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `PUT` | `/api/workflow/bulk/resume` | `resumeWorkflow` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `POST` | `/api/workflow/bulk/restart` | `restart` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `POST` | `/api/workflow/bulk/retry` | `retry` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `POST` | `/api/workflow/bulk/terminate` | `terminate` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `DELETE` | `/api/workflow/bulk/remove` | `deleteWorkflow` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `DELETE` | `/api/workflow/bulk/terminate-remove` | `terminateRemove` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | Later | `POST` | `/api/workflow/bulk/search` | `searchWorkflow` |  |
 
 ### WorkflowMessageQueueResource
@@ -180,24 +182,24 @@ Archon은 기존 Conductor 워커·SDK·UI가 그대로 붙는 REST/JSON 호환 
 |---|---|---|---|---|
 | MVP | `POST` | `/api/workflow` | `startWorkflow` | `StartWorkflowRequest` body, workflowId를 text/plain으로 반환 |
 | MVP | `POST` | `/api/workflow/{name}` | `startWorkflow` | input map body, `version`·`correlationId`·`priority` 쿼리 |
-| Later | `POST` | `/api/workflow/execute/{name}/{version}` | `executeWorkflow` | 동기 실행. GenServer 구조에 잘 맞지만 MVP 이후 |
-| Later | `GET` | `/api/workflow/{name}/correlated/{correlationId}` | `getWorkflows` |  |
-| Later | `GET` | `/api/workflow/{workflowId}/tasks` | `getExecutionStatusTaskList` |  |
-| Later | `POST` | `/api/workflow/{name}/correlated` | `getWorkflows` |  |
+| Later | `POST` | `/api/workflow/execute/{name}/{version}` | `executeWorkflow` | 동기 실행. GenServer 구조에 잘 맞지만 MVP 이후. Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `GET` | `/api/workflow/{name}/correlated/{correlationId}` | `getWorkflows` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `GET` | `/api/workflow/{workflowId}/tasks` | `getExecutionStatusTaskList` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `POST` | `/api/workflow/{name}/correlated` | `getWorkflows` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | MVP | `GET` | `/api/workflow/{workflowId}` | `getExecutionStatus` | `includeTasks` 쿼리(기본 true) |
 | MVP | `GET` | `/api/workflow/{workflowId}/status` | `getWorkflowStatusSummary` | 같은 상태에서 만드는 요약 |
-| Later | `DELETE` | `/api/workflow/{workflowId}/remove` | `delete` |  |
-| Later | `GET` | `/api/workflow/running/{name}` | `getRunningWorkflow` |  |
+| Later | `DELETE` | `/api/workflow/{workflowId}/remove` | `delete` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `GET` | `/api/workflow/running/{name}` | `getRunningWorkflow` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | Unsupported | `PUT` | `/api/workflow/decide/{workflowId}` | `decide` | 외부에서 decide를 트리거하는 sweeper 전제 API. Archon은 프로세스가 스스로 결정 |
-| Later | `PUT` | `/api/workflow/{workflowId}/pause` | `pauseWorkflow` | lifecycle |
-| Later | `PUT` | `/api/workflow/{workflowId}/resume` | `resumeWorkflow` |  |
-| Later | `PUT` | `/api/workflow/{workflowId}/skiptask/{taskReferenceName}` | `skipTaskFromWorkflow` |  |
-| Later | `POST` | `/api/workflow/{workflowId}/rerun` | `rerun` |  |
-| Later | `POST` | `/api/workflow/{workflowId}/restart` | `restart` |  |
-| Later | `POST` | `/api/workflow/{workflowId}/retry` | `retry` |  |
-| Later | `POST` | `/api/workflow/{workflowId}/resetcallbacks` | `resetWorkflow` |  |
+| Later | `PUT` | `/api/workflow/{workflowId}/pause` | `pauseWorkflow` | lifecycle. Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `PUT` | `/api/workflow/{workflowId}/resume` | `resumeWorkflow` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `PUT` | `/api/workflow/{workflowId}/skiptask/{taskReferenceName}` | `skipTaskFromWorkflow` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `POST` | `/api/workflow/{workflowId}/rerun` | `rerun` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `POST` | `/api/workflow/{workflowId}/restart` | `restart` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `POST` | `/api/workflow/{workflowId}/retry` | `retry` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
+| Later | `POST` | `/api/workflow/{workflowId}/resetcallbacks` | `resetWorkflow` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | MVP | `DELETE` | `/api/workflow/{workflowId}` | `terminate` | terminate(`reason` 쿼리) |
-| Later | `DELETE` | `/api/workflow/{workflowId}/terminate-remove` | `terminateRemove` |  |
+| Later | `DELETE` | `/api/workflow/{workflowId}/terminate-remove` | `terminateRemove` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | Later | `GET` | `/api/workflow/search` | `search` | 인덱싱 백엔드 필요 |
 | Later | `GET` | `/api/workflow/search-v2` | `searchV2` |  |
 | Later | `GET` | `/api/workflow/search-by-tasks` | `searchWorkflowsByTasks` |  |
