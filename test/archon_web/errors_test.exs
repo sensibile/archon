@@ -66,6 +66,8 @@ defmodule ArchonWeb.ErrorsTest do
         {:commit, {:limit, "x"}},
         {:post_effect, :boom},
         {:exit, {:timeout, {GenServer, :call, []}}},
+        {:exit, :unavailable},
+        :outbox_pending,
         %DBConnection.ConnectionError{message: "down"},
         %Postgrex.Error{message: "failed"}
       ]

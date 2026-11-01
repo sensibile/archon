@@ -6,8 +6,8 @@
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/dao/QueueDAO.java and
 # sqlite-persistence/src/main/java/com/netflix/conductor/sqlite/dao/SqliteQueueDAO.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
-# Modified by sensibile: reduced to the operations the MVP runtime uses (ADR 0018, decision 3);
-# delays are milliseconds instead of seconds.
+# Modified by sensibile: reduced to the operations the runtime uses (ADR 0018, decision 3, and
+# resetOffsetTime, ADR 0025, decision 2); delays are milliseconds instead of seconds.
 
 defmodule Archon.Runtime.Queue do
   @moduledoc """
@@ -32,6 +32,10 @@ defmodule Archon.Runtime.Queue do
     * `c:remove/2` - deletes a message.
     * `c:postpone/4` - deletes and pushes again with a new priority and delay (upstream
       `QueueDAO#postpone` default), so the message also goes behind its equals.
+    * `c:reset_offset/2` - makes the message's delivery time now, keeping its priority, its place
+      among equals, its popped mark and its unack time; `true` if it was there, even when it was
+      already due (`SqliteQueueDAO#resetOffsetTime`, ADR 0025, decision 2). The operations that
+      change `deliver_on` are push, postpone and this one.
     * `c:contains?/2` - whether the ID is in the queue, popped or not.
     * `c:size/1` - messages in the queue, popped or not (`SqliteQueueDAO#getSize`).
 
@@ -55,6 +59,7 @@ defmodule Archon.Runtime.Queue do
               priority :: integer(),
               delay_ms :: integer()
             ) :: :ok
+  @callback reset_offset(queue :: String.t(), id :: String.t()) :: boolean()
   @callback contains?(queue :: String.t(), id :: String.t()) :: boolean()
   @callback size(queue :: String.t()) :: non_neg_integer()
 end

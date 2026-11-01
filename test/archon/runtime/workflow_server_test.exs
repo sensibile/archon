@@ -187,7 +187,8 @@ defmodule Archon.Runtime.WorkflowServerTest do
         end
       )
 
-      assert {:error, :killed} =
+      # ADR 0025, decision 3: an exit of the call is {:exit, reason}, a retryable error.
+      assert {:error, {:exit, :killed}} =
                Runtime.start_workflow(%{name: "archon_simple", workflow_id: id, input: %{}})
 
       RuntimeHooks.reset()

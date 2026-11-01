@@ -8,7 +8,8 @@
 # Modified by sensibile: an in-memory GenServer (ADR 0018, decision 3); a waiting pop is a deferred
 # reply woken by pushes and visibility timers instead of a 100 ms polling loop, and the unack
 # timeout counts from the pop instead of the original delivery time; `apply_ops/2` applies the
-# queue operations of a store commit at once (ADR 0021, decision 3).
+# queue operations of a store commit at once (ADR 0021, decision 3); resetOffsetTime is
+# `reset_offset/3` (ADR 0025, decision 2).
 
 defmodule Archon.Runtime.Queue.Memory do
   @moduledoc """
@@ -113,6 +114,11 @@ defmodule Archon.Runtime.Queue.Memory do
   end
 
   @impl Queue
+  @spec reset_offset(GenServer.server(), String.t(), String.t()) :: boolean()
+  def reset_offset(server \\ __MODULE__, queue, id) when is_binary(queue) and is_binary(id),
+    do: GenServer.call(server, {:reset_offset, queue, id})
+
+  @impl Queue
   @spec contains?(GenServer.server(), String.t(), String.t()) :: boolean()
   def contains?(server \\ __MODULE__, queue, id),
     do: GenServer.call(server, {:contains?, queue, id})
@@ -126,7 +132,7 @@ defmodule Archon.Runtime.Queue.Memory do
     state = %{
       clock: Keyword.get(opts, :clock, fn -> System.system_time(:millisecond) end),
       unack_timeout: Keyword.get(opts, :unack_timeout, @unack_timeout),
-      # queue => id => %{priority, deliver_at, visible_at, seq}
+      # queue => id => %{priority, deliver_at, visible_at, seq, popped?}
       queues: %{},
       seq: 0,
       # queue => waiter refs in arrival order; ref => waiter
@@ -193,6 +199,22 @@ defmodule Archon.Runtime.Queue.Memory do
     {:reply, found?, delete(state, queue, id)}
   end
 
+  # SqliteQueueDAO#resetOffsetTime: only the delivery time moves; a popped message stays hidden
+  # until its unack time.
+  def handle_call({:reset_offset, queue, id}, _from, state) do
+    case state.queues do
+      %{^queue => %{^id => message}} ->
+        now = state.clock.()
+        message = %{message | deliver_at: now}
+        message = if message.popped?, do: message, else: %{message | visible_at: now}
+        state = put_message(state, queue, id, message)
+        {:reply, true, state |> serve(queue) |> schedule_tick()}
+
+      %{} ->
+        {:reply, false, state}
+    end
+  end
+
   def handle_call({:contains?, queue, id}, _from, state) do
     {:reply, match?(%{^queue => %{^id => _}}, state.queues), state}
   end
@@ -236,7 +258,7 @@ defmodule Archon.Runtime.Queue.Memory do
   defp push_at(state, queue, id, priority, at) do
     case state.queues do
       %{^queue => %{^id => message}} ->
-        put_message(state, queue, id, %{message | deliver_at: at, visible_at: at})
+        put_message(state, queue, id, %{message | deliver_at: at, visible_at: at, popped?: false})
 
       %{} ->
         insert(state, queue, id, priority, at)
@@ -247,7 +269,14 @@ defmodule Archon.Runtime.Queue.Memory do
     do: state |> delete(queue, id) |> insert(queue, id, priority, at)
 
   defp insert(state, queue, id, priority, at) do
-    message = %{priority: priority, deliver_at: at, visible_at: at, seq: state.seq}
+    message = %{
+      priority: priority,
+      deliver_at: at,
+      visible_at: at,
+      seq: state.seq,
+      popped?: false
+    }
+
     put_message(%{state | seq: state.seq + 1}, queue, id, message)
   end
 
@@ -287,7 +316,7 @@ defmodule Archon.Runtime.Queue.Memory do
 
     state =
       Enum.reduce(ids, state, fn id, state ->
-        put_message(state, queue, id, %{messages[id] | visible_at: hidden_until})
+        put_message(state, queue, id, %{messages[id] | visible_at: hidden_until, popped?: true})
       end)
 
     {ids, state}
