@@ -154,6 +154,13 @@ defmodule ArchonWeb.ContractCase do
   @after_ref_update [requires: [{@signal, :update_by_ref}]]
   @after_ref_updates [requires: [{@signal, :update_by_ref}, {@signal, :update_by_ref_sync}]]
   @bulk_chain [{@bulk, :pause}, {@bulk, :resume}, {@bulk, :terminate}, {@bulk, :retry}]
+  # The ref workflow it removes was completed by reference updates.
+  @bulk_terminate_remove [
+    {@bulk, :restart},
+    {@bulk, :remove},
+    {@signal, :update_by_ref},
+    {@signal, :update_by_ref_sync} | @bulk_chain
+  ]
   @child_started [until: [{["tasks", 0, "subWorkflowId"], :present}]]
   @one_task [until: [{["tasks"], {:length, 1}}]]
   @two_tasks [until: [{["tasks"], {:length, 2}}]]
@@ -571,11 +578,9 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "workflow_bulk_remove", requires: [{@bulk, :restart} | @bulk_chain]},
     {:exchange, "workflow_get_bulk_removed", requires: [{@bulk, :remove}]},
     {:exchange, "workflow_get_bulk_terminate_remove", @after_ref_updates},
-    {:exchange, "workflow_bulk_terminate_remove",
-     requires:
-       [{@bulk, :restart}, {@bulk, :remove}, {@signal, :update_by_ref}] ++
-         [{@signal, :update_by_ref_sync} | @bulk_chain]},
-    {:exchange, "workflow_get_bulk_terminate_removed", requires: [{@bulk, :terminate_remove}]},
+    {:exchange, "workflow_bulk_terminate_remove", requires: @bulk_terminate_remove},
+    {:exchange, "workflow_get_bulk_terminate_removed",
+     requires: [{@bulk, :terminate_remove} | @bulk_terminate_remove]},
     # deleting definitions
     {:exchange, "metadata_delete_workflow"},
     {:exchange, "metadata_get_workflow_deleted", requires: [{@meta, :delete_workflow}]},
@@ -999,12 +1004,20 @@ defmodule ArchonWeb.ContractCase do
 
   defp drop_paths(body, paths) when is_map(body) do
     Enum.reduce(paths, body, fn path, body ->
-      {_value, body} = pop_in(body, Enum.map(path, &access/1))
-      body
+      # A path through a value that is not there (an error body) is left for the comparison.
+      if container?(at(body, Enum.drop(path, -1)), List.last(path)) do
+        {_value, body} = pop_in(body, Enum.map(path, &access/1))
+        body
+      else
+        body
+      end
     end)
   end
 
   defp drop_paths(body, _paths), do: body
+
+  defp container?(list, index) when is_integer(index), do: is_list(list)
+  defp container?(map, _key), do: is_map(map)
 
   defp access(index) when is_integer(index), do: Access.at(index)
   defp access(key), do: Access.key(key)

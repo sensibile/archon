@@ -95,7 +95,8 @@ defmodule ArchonWeb.Router do
     get "/:workflowId/tasks", WorkflowQueryController, :tasks
     delete "/:workflowId", WorkflowController, :terminate
 
-    # Unsupported (ADR 0001); PUT /api/workflow/decide/pause is decide's in Spring.
+    # Unsupported (ADR 0001). Spring sends PUT /api/workflow/decide/pause to decide (the longer
+    # pattern); decide/resume ties with {workflowId}/resume. Both are 404s here.
     put "/decide/:workflowId", Errors, :no_route
     put "/:workflowId/pause", WorkflowLifecycleController, :pause
     put "/:workflowId/resume", WorkflowLifecycleController, :resume

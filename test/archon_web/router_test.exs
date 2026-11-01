@@ -116,7 +116,8 @@ defmodule ArchonWeb.RouterTest do
     {"GET", "/api/tasks/search-v2"},
     {"GET", "/api/tasks/externalstoragelocation"},
     {"GET", "/api/tasks/external-storage-location"},
-    # Unsupported decide is `{workflowId}/pause` and `/resume` in shape.
+    # Unsupported decide has the shape of `{workflowId}/pause` and `/resume` (Spring sends
+    # decide/pause to decide; decide/resume ties with resume upstream).
     {"PUT", "/api/workflow/decide/#{@id}"},
     {"PUT", "/api/workflow/decide/pause"},
     {"PUT", "/api/workflow/decide/resume"},
@@ -226,13 +227,32 @@ defmodule ArchonWeb.RouterTest do
     end
   end
 
+  # route_later_workflow_running and route_later_metadata_names became Phase 6 queries: they
+  # need the scenario's workflows and definitions, so the full replay has them.
   test "the routing fixtures replay: Later routes and other methods are 404s, not upstream's answers" do
-    replay(steps("route_not_found", "route_method_put_task"))
+    names = ~w(route_not_found route_later_workflow_search route_later_workflow_test
+               route_later_tasks_search route_method_patch_workflow route_method_put_task
+               route_unsupported_workflow_decide route_later_tasks_requeue
+               route_later_workflow_bulk_search route_later_task_log)
 
-    replay(
-      for name <- ~w(route_unsupported_workflow_decide route_later_tasks_requeue
-                     route_later_workflow_bulk_search route_later_task_log),
-          do: {:exchange, name, expect: :no_route}
-    )
+    replay(Enum.filter(scenario(), &(elem(&1, 1) in names)))
+  end
+
+  # A slice that implements an action and forgets its list would skip its fixtures silently.
+  test "every action listed as not implemented still answers the 404 of a path without a handler" do
+    for controller <- [
+          WorkflowLifecycleController,
+          WorkflowQueryController,
+          SignalController,
+          WorkflowBulkController,
+          MetadataController
+        ],
+        action <- controller.unimplemented() do
+      conn = apply(controller, action, [build_conn(:get, "/api/archon/x"), %{}])
+
+      assert {conn.status, JSON.decode!(conn.resp_body)["message"]} ==
+               {404, "No static resource api/archon/x."},
+             "#{inspect(controller)}.#{action}"
+    end
   end
 end
