@@ -441,8 +441,10 @@ ADR 0023의 목록에 더해 다음이 생긴다.
   ADR 0023 결정 3의 JSON `Content-Type` 검사를 거치지 않고, 브라우저가 preflight 없이 다른 사이트에서 POST할 수 있다(폼,
   body 없는 `no-cors` `fetch`, `<a ping>`). 브라우저가 교차 출처로 표시한 요청(`Sec-Fetch-Site`가 `same-origin`·`none`이 아님, 그
   헤더가 없으면 `Origin`의 호스트·포트가 `Host`와 다름)을 403 `"Cross-origin request refused"`로 거절한다. 두 헤더를 보내지 않는
-  클라이언트(SDK, curl)는 upstream과 같다. 인증 없는 MVP의 나머지 위험(같은 호스트의 다른 프로세스, DNS rebinding)은 ADR 0024
-  결정 4대로 인증 ADR이 다룬다.
+  클라이언트(SDK, curl)는 upstream과 같다. `Sec-Fetch-Site`를 보내지 않는 오래된 브라우저가 TLS를 끝내거나 `Host`를 바꾸는
+  프록시 뒤에서 같은 출처로 부르면 `Origin`과 `Host`의 포트·이름이 달라 403이 될 수 있다(upstream도 다른 출처의 UI를 지원하지
+  않는다). 인증 없는 MVP의 나머지 위험(같은 호스트의 다른 프로세스, 이 검사로 막지 못하는 DNS rebinding)은 ADR 0024 결정 4대로
+  인증 ADR이 다룬다.
 - **task 실행 로그**(결정 1): Later. `TaskResult.logs`를 저장하지 않는다(Phase 5와 같음).
 
 ## 대안

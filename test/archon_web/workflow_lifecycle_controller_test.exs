@@ -72,6 +72,18 @@ defmodule ArchonWeb.WorkflowLifecycleControllerTest do
         assert response(conn, 204)
       end
 
+      # the Host header a server receives, not the adapter's host
+      on_host = fn conn, origin ->
+        conn
+        |> put_req_header("host", "Archon.Local:8080")
+        |> put_req_header("origin", origin)
+        |> post("/api/workflow/#{id}/resetcallbacks")
+      end
+
+      assert response(on_host.(build_conn(), "http://archon.local:8080"), 204)
+      assert json_response(on_host.(build_conn(), "http://archon.local:9090"), 403)
+      assert json_response(on_host.(build_conn(), "http://www.example.com"), 403)
+
       # running: retry's own 404
       assert %{"status" => 404} =
                build_conn()
