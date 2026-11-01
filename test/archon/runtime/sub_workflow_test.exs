@@ -885,6 +885,70 @@ defmodule Archon.Runtime.SubWorkflowTest do
     end
   end
 
+  # Observed on the upstream server at 1488804170 with the same three workflows: a GET answers
+  # each task through `TaskModel#toTask`, whose bean copy puts the task's own child ID under an
+  # output `subWorkflowId` key, and `terminate(workflow, TerminateWorkflowException)` saves the
+  # failed task (indexing `toTask()` changes it in memory) before `terminateWorkflow` takes the
+  # workflow output from it. `completeWorkflow` reads the output first, so the leaf's ID stays.
+  describe "a child whose output has a subWorkflowId (top, mid and leaf)" do
+    setup do
+      :ok = Runtime.metadata().update_task_def(%TaskDef{name: "nest_leaf_task", retry_count: 0})
+
+      define(~S"""
+      {"name": "nest_leaf", "version": 1, "tasks": [
+        {"name": "nest_leaf_task", "taskReferenceName": "leaf_ref", "type": "SIMPLE"}]}
+      """)
+
+      for {name, child} <- [{"nest_mid", "nest_leaf"}, {"nest_top", "nest_mid"}] do
+        define(~s"""
+        {"name": "#{name}", "version": 1, "tasks": [
+          {"name": "nest_sub", "taskReferenceName": "sub_ref", "type": "SUB_WORKFLOW",
+           "subWorkflowParam": {"name": "#{child}", "version": 1}}]}
+        """)
+      end
+
+      top = start("nest_top", %{})
+      mid = nested_child(top)
+      %{top: top, mid: mid, leaf: nested_child(mid)}
+    end
+
+    test "a completed chain answers the task with its own child, the output keeps the leaf",
+         %{top: top, mid: mid, leaf: leaf} do
+      complete(leaf, "leaf_ref", %{"r" => 1})
+
+      assert await_status(top, :completed).output == %{"subWorkflowId" => leaf, "r" => 1}
+      sub_task = task(top, "sub_ref")
+      assert sub_task.output_data == %{"subWorkflowId" => leaf, "r" => 1}
+      assert Task.to_json(sub_task)["outputData"] == %{"subWorkflowId" => mid, "r" => 1}
+    end
+
+    test "a failed chain ends with its own child in the output", %{top: top, mid: mid, leaf: leaf} do
+      fail(leaf, "leaf_ref", "failed")
+
+      assert await_status(top, :failed).output == %{"subWorkflowId" => mid}
+      sub_task = task(top, "sub_ref")
+      assert sub_task.output_data == %{"subWorkflowId" => leaf}
+      assert Task.to_json(sub_task)["outputData"] == %{"subWorkflowId" => mid}
+    end
+
+    test "a terminated chain ends with its own child in the output",
+         %{top: top, mid: mid, leaf: leaf} do
+      poll(leaf, "leaf_ref")
+      assert Runtime.terminate_workflow(leaf, "terminated") == :ok
+
+      assert await_status(top, :terminated).output == %{"subWorkflowId" => mid}
+      assert Task.to_json(task(top, "sub_ref"))["outputData"] == %{"subWorkflowId" => mid}
+    end
+  end
+
+  defp nested_child(id) do
+    eventually(fn ->
+      match?({:ok, _workflow}, Runtime.get_workflow(id)) and
+        match?(%Task{sub_workflow_id: child} when is_binary(child), task(id, "sub_ref")) and
+        task(id, "sub_ref").sub_workflow_id
+    end)
+  end
+
   defp start_with_child_named(subwf) do
     input = %{"param1" => "p1 value", "param2" => "p2 value", "subwf" => subwf}
     id = start("integration_test_wf_with_sub_wf", input)

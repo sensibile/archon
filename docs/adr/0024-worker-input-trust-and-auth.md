@@ -4,6 +4,8 @@
 - 날짜: 2026-11-01
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 2026-11-01 BOSS가 추천안(런타임 소유권 규칙으로 L7·L8을 닫고, MVP REST는 인증 없이 기본 `127.0.0.1`)을 골랐다.
+- 비고: 2026-11-02 결정 6을 보충했다. Phase 6 조각 6a 캡처(`workflow_get_top_failed`)에서 찾은 의도하지 않은 차이를 upstream에
+  맞추는 결정이다.
 
 ## 맥락
 
@@ -146,6 +148,26 @@ L7은 서로를 자식으로 가리키는 워크플로우가 생길 수 없으�
   읽기는 그대로)와 `step/terminate.ex`(취소 대상 선택은 그대로, 확인은 `terminate_child/4`가 함)는 고치지 않는다. Effect·outbox 항목 모양을 바꾸지 않으므로 `Store.Postgres`의 인코딩과 `outbox.ex`도
   고치지 않는다.
 
+### 6. 출력의 `subWorkflowId` 키는 upstream `toTask`처럼 태스크 자기 자식의 ID다 (2026-11-02 보충)
+
+upstream `TaskModel#toTask`는 Spring `BeanUtils.copyProperties`로 `Task`를 만들면서 `setSubWorkflowId(getSubWorkflowId())`를
+부르고, 이 setter는 `outputData`에 `"subWorkflowId"` 키가 있으면 그 값을 태스크 자기 ID로 바꾼다. 복사본은 출력 맵을 공유하므로
+원래 `TaskModel`도 바뀐다. 그래서 SUB_WORKFLOW 태스크가 `SubWorkflow#updateTaskStatus`에서 자식의 출력(`{"subWorkflowId": <손자>}`)을
+합쳐도 다음 두 곳에서는 자기 자식의 ID가 보인다. 기준 SHA 빌드 서버에서 최상위→중간→자식 사슬로 관측했고(완료, 자식 실패, 자식
+종료 요청, 중간 종료 요청, 자식 시간 초과), 기준 SHA의 `TaskModel` jar로도 같은 결과를 확인했다.
+
+- **REST 응답.** 워크플로우·태스크 응답은 태스크마다 `toTask`를 거친다. `Archon.Domain.Task.to_json/2`가
+  `Task.with_own_sub_workflow_id/1`로 같은 일을 한다. 태스크 타입과 관계없다. 키가 없으면 더하지 않고, 저장된 ID가 비면
+  `sub_workflow_id/1`의 대체값(출력, 그다음 입력)을 쓴다.
+- **Decider 종료의 워크플로우 출력.** `terminate(workflow, TerminateWorkflowException)`는 실패한 태스크를 `updateTask`로 저장한 뒤
+  색인용 `toTask()`로 메모리의 태스크를 바꾸고, 그다음 `terminateWorkflow`가 그 태스크에서 워크플로우 출력을 읽는다.
+  `Step.Terminate.by_decider/2`가 같은 순서로 저장한 뒤 메모리의 태스크에만 같은 변환을 한다. 저장된 태스크는 upstream처럼 합친
+  출력 그대로다. 실패·종료·시간 초과한 자식이 모두 이 경로라서 최상위 출력은 중간의 ID다.
+- **완료는 바꾸지 않는다.** `completeWorkflow`는 같은 결정에서 `toTask`보다 먼저 출력을 읽으므로 upstream 최상위 출력은 손자의
+  ID다. 태스크 응답만 자기 자식의 ID다. archon도 같다.
+- upstream의 그 밖의 `toTask` 호출(이벤트 처리, 리스너, 색인의 다른 경로)이 메모리 태스크를 바꾸는 일은 옮기지 않는다. 관측한
+  계약 차이가 없고, 그 출력을 참조하는 다음 태스크 입력 같은 경우는 시험 범위 밖이다.
+
 ## upstream과 의도적으로 다른 점
 
 - **SUB_WORKFLOW 태스크 갱신의 `subWorkflowId`를 반영하지 않는다**(결정 1). upstream은 값을 그대로 저장하고, 비어 있으면 출력·입력의
@@ -171,4 +193,6 @@ L7은 서로를 자식으로 가리키는 워크플로우가 생길 수 없으�
 
 - 조각 5b가 머지되면 `승인`으로 바꾸고, ADR 0018의 목록 상태에 "일부 0024가 대체"(결과 절의 `subWorkflowId` 신뢰 결정)를 적는다.
 - ADR 0021의 L6 남은 부분, L7, L8은 이 ADR과 조각 5b로 닫힌다.
+- 결정 6(보충)은 그 결정을 담은 PR이 구현한다. `workflow_get_top_failed` 재생이 두 경로를 다시 비교하고,
+  `test/archon/runtime/sub_workflow_test.exs`가 완료·실패·종료 사슬을 시험한다.
 - 아직 범위 밖: REST 인증·인가(Later ADR), worker가 다른 워크플로우의 태스크를 taskId로 갱신하는 일(upstream과 같은 신뢰 모델 안).

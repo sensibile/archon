@@ -538,11 +538,7 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "task_update_child_second"},
     {:wait_status, "workflow_start_top", "FAILED"},
     {:exchange, "workflow_get_mid_failed"},
-    # Not a deliberate difference (found in slice 6a, left for a fix of its own): Archon merges
-    # the failed child's output (`{"subWorkflowId": <its own child>}`) into the SUB_WORKFLOW
-    # task, upstream's task keeps the ID of the child it started.
-    {:exchange, "workflow_get_top_failed",
-     ignore: [["output", "subWorkflowId"], ["tasks", 0, "outputData", "subWorkflowId"]]},
+    {:exchange, "workflow_get_top_failed"},
     {:exchange, "workflow_rerun_retried_child"},
     {:exchange, "workflow_get_rerun_top", @after_rerun},
     {:exchange, "workflow_get_rerun_mid", [until: [{["status"], "FAILED"}]] ++ @after_rerun},
