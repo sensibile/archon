@@ -275,8 +275,9 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   - 대기는 시간 초과 값과 상관없이 30초를 넘지 않는다. upstream은 Spring MVC 비동기 요청으로 답하고 Tomcat 기본 비동기 시간 제한
     (30초, `spring.mvc.async.request-timeout` 설정 없음)이 끝내므로, 30초 넘게 기다리는 `execute`(`waitForSeconds=45`)와
     `signal/sync`(`timeoutMillis=40000`)는 30초에 500(`message` 없음, `AsyncRequestTimeoutException`)이다(upstream 관측). archon도
-    같은 응답이고, 그래서 요청 하나가 연결 프로세스를 잡고 저장소를 읽는 시간은 클라이언트가 떠나도 30초까지다. 읽기가 마감 뒤에
-    끝나면 마감의 응답이다(upstream의 타이머가 읽는 중에도 울림).
+    같은 응답이고, 그래서 요청 하나가 연결 프로세스를 잡고 저장소를 읽는 시간은 클라이언트가 떠나도 30초까지다. upstream의
+    타이머는 읽는 중에도 울리므로, 읽기는 별도 프로세스에서 하고 마감까지 끝나지 않으면 죽이고 마감의 응답을 한다(느린
+    데이터베이스). 마감 뒤의 대체 읽기도 30초 상한이 끊고, 시간 초과가 30초와 같으면 대체 읽기에 한 틱(100ms)을 준다.
   - 변환 실패는 Spring 문구 그대로 500이다. `status` 경로 값은 `TaskResult.Status` 상수(앞뒤 공백 무시)이고, 공백뿐이면
     `"Required URI template variable 'status' for method parameter type Status is present but converted to null"`이다.
     `returnStrategy`가 공백뿐이면 기본값, 반복되면 첫 값을 바꾸고 문구의 원래 형이 `java.lang.String[]`이다. 값은 100자에서

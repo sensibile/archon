@@ -206,6 +206,43 @@ defmodule ArchonWeb.SignalResponderTest do
                SignalResponder.await(id, [], :target_workflow, "r", 250)
     end
 
+    test "a store read still running at the limit does not hold the answer" do
+      Application.put_env(:archon, SignalResponder, async_timeout_ms: 300)
+      on_exit(fn -> Application.delete_env(:archon, SignalResponder) end)
+      id = start("archon_ops_idle")
+
+      Archon.FaultyStore.install(fn
+        :get_workflow, [^id, true] -> Process.sleep(2_000)
+        _callback, _args -> :ok
+      end)
+
+      {ms, result} =
+        elapsed_ms(fn -> SignalResponder.await(id, [], :target_workflow, "r", 60_000) end)
+
+      assert result == {:error, :async_timeout}
+      assert ms < 1_000
+
+      # The fallback read after the deadline is bounded by the limit too.
+      {ms, result} =
+        elapsed_ms(fn -> SignalResponder.await(id, [], :target_workflow, "r", 50) end)
+
+      assert result == {:error, :async_timeout}
+      assert ms < 1_000
+    end
+
+    test "a store read that raises fails the wait as it would in the request" do
+      id = start("archon_ops_idle")
+
+      Archon.FaultyStore.install(fn
+        :get_workflow, [^id, true] -> raise "store down"
+        _callback, _args -> :ok
+      end)
+
+      assert_raise RuntimeError, "store down", fn ->
+        SignalResponder.await(id, [], :target_workflow, "r", 5_000)
+      end
+    end
+
     test "a child removed from the store is passed over" do
       parent = start("archon_ops_signal_parent")
       child = child(parent)

@@ -85,11 +85,15 @@ defmodule ArchonWeb.SignalResponder do
       finished(wait)
     else
       sleep_until(at)
+      read_tick(wait, n)
+    end
+  end
 
-      case check(wait) do
-        :waiting -> tick(wait, n + 1)
-        answer -> unless_finished(wait, answer)
-      end
+  defp read_tick(wait, n) do
+    case within(finish(wait), fn -> check(wait) end, :finished) do
+      :waiting -> tick(wait, n + 1)
+      :finished -> finished(wait)
+      answer -> unless_finished(wait, answer)
     end
   end
 
@@ -98,10 +102,59 @@ defmodule ArchonWeb.SignalResponder do
 
   defp finish(%{deadline: deadline, limit: limit}), do: min(deadline, limit)
 
-  defp finished(%{deadline: deadline, limit: limit} = wait) when deadline <= limit,
-    do: timed_out(wait.id, wait.strategy, wait.request_id)
+  # Reactor's fallback read after the deadline, which the asynchronous request's limit still
+  # ends; a deadline at the limit gives the read one tick, so that it answers as a timeout.
+  defp finished(%{deadline: deadline, limit: limit} = wait) when deadline <= limit do
+    within(
+      max(limit, deadline + @tick_ms),
+      fn -> timed_out(wait.id, wait.strategy, wait.request_id) end,
+      {:error, :async_timeout}
+    )
+  end
 
   defp finished(_wait), do: {:error, :async_timeout}
+
+  # Runs the reads of `fun` in a process of their own until `at` at most: upstream's timers fire
+  # while a read is stuck (a slow database), so a read still running then is killed and `late`
+  # answers. A read that raises or exits fails the request as it would in the request's process.
+  # The reader is not linked, and runs at most one store read past a request that went away.
+  defp within(at, fun, late) do
+    caller = self()
+    ref = make_ref()
+    {pid, monitor} = spawn_monitor(fn -> send(caller, {ref, run(fun)}) end)
+
+    receive do
+      {^ref, result} ->
+        Process.demonitor(monitor, [:flush])
+        unwrap(result)
+
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        exit(reason)
+    after
+      max(at - now(), 0) ->
+        Process.demonitor(monitor, [:flush])
+        Process.exit(pid, :kill)
+
+        # The answer may have arrived in between.
+        receive do
+          {^ref, _result} -> late
+        after
+          0 -> late
+        end
+    end
+  end
+
+  defp run(fun) do
+    {:ok, fun.()}
+  rescue
+    exception -> {:raise, exception, __STACKTRACE__}
+  catch
+    :exit, reason -> {:exit, reason}
+  end
+
+  defp unwrap({:ok, result}), do: result
+  defp unwrap({:raise, exception, stacktrace}), do: reraise(exception, stacktrace)
+  defp unwrap({:exit, reason}), do: exit(reason)
 
   defp async_timeout_ms,
     do:
