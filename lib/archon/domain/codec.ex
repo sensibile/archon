@@ -296,9 +296,10 @@ defmodule Archon.Domain.Codec do
   @max_errors 100
 
   @doc """
-  Runs `fun` over `items`, returning all values or the errors. It stops at the item that brings
-  the errors to #{@max_errors}: a request body chooses how many items fail, and upstream's Jackson
-  stops at the first. The error lists are gathered in reverse and joined once, since appending
+  Runs `fun` over `items`, returning all values or the errors. It stops after the item that
+  brings the errors to #{@max_errors} or more (that item's errors are all kept, so a few more can
+  be returned): a request body chooses how many items fail, and upstream's Jackson stops at the
+  first. The error lists are gathered in reverse and joined once, since appending
   each to the whole is quadratic in the number of failing items.
   """
   @spec collect(Enumerable.t(), (term() -> result(term()))) :: result([term()])

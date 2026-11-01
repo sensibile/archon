@@ -149,7 +149,9 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   - 코덱 오류 수 한도(조각 5e): 도메인 코덱의 목록·맵 디코딩(`Archon.Domain.Codec.collect/2`)은 오류가 100개에 이르면 나머지
     원소를 보지 않고, 오류 목록은 한 번에 잇는다. 원소마다 전체 목록에 덧붙이던 방식은 실패 원소 수의 제곱이라, 8 MB 안의
     `{"logs":[1,1,...]}` 같은 작은 body로 갱신 경로에서 CPU를 오래 잡을 수 있었다(Codex 보안 리뷰, 8만 원소 42초). 코덱 오류는 REST에서
-    첫 오류만 500 문구에 쓰이고(결정 4), upstream Jackson도 첫 오류에서 멈추므로 응답은 바뀌지 않는다.
+    첫 오류만 500 문구에 쓰이고(결정 4), upstream Jackson도 첫 오류에서 멈추므로 응답은 바뀌지 않는다. REST 밖에서 오류 목록 전체가 보이는 곳은 인라인
+    `subWorkflowDefinition`의 디코딩 실패 사유(`Archon.Runtime.Step.SubWorkflow`, `inspect` 문자열)뿐이고, 원소 100개 넘게 실패하면 그 문자열이 짧아진다.
+    upstream은 이때도 첫 오류만 쓰므로 원래 다른 문자열이었다.
   - `Content-Type`: 비어 있지 않은 body는 Spring의 JSON 변환기처럼 `application/json`이나 `application/*+json`(대소문자·매개변수
     무관)이어야 한다. 그 밖의 타입은 500 `"Content-Type '<타입>;<매개변수>' is not supported"`(charset이 없으면 `charset=UTF-8`을
     붙임), 헤더가 없으면 `application/octet-stream`으로 본 같은 500, `/`가 없으면 500 `Invalid mime type`, 와일드카드는 400이다(모두
