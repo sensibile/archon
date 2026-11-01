@@ -1275,6 +1275,56 @@ defmodule Archon.Runtime.LifecycleTest do
       assert await_status(root, :completed)
     end
 
+    # WorkflowExecutorOps#updateAndPushParents: a CANCELED sibling that is not a JOIN or DO_WHILE
+    # is scheduled again in place (retryCount + 1) and queued for its worker.
+    test "a canceled sibling task is scheduled again and queued when a child revives the parent" do
+      root =
+        start("hierarchical_fork_join_swf", Map.put(@input, "subwf", "integration_test_wf"))
+
+      await_statuses(root, [
+        {"FORK", :completed},
+        {"SUB_WORKFLOW", :in_progress},
+        {"integration_task_2", :scheduled},
+        {"JOIN", :in_progress}
+      ])
+
+      sibling = last(root, "t2")
+      child = child_of(root, "st1")
+      await_statuses(child, [{"integration_task_1", :scheduled}])
+      fail(child, "t1")
+
+      assert [
+               {"FORK", :completed},
+               {"SUB_WORKFLOW", :failed},
+               {"integration_task_2", :canceled},
+               {"JOIN", :canceled}
+             ] = statuses(await_status(root, :failed))
+
+      # cancelNonTerminalTasks leaves the old message; drop it so the revival must queue again
+      Runtime.queue().remove("integration_task_2", sibling.task_id)
+
+      assert :ok = Lifecycle.retry(child)
+
+      root_wf =
+        await_statuses(root, [
+          {"FORK", :completed},
+          {"SUB_WORKFLOW", :in_progress},
+          {"integration_task_2", :scheduled},
+          {"JOIN", :in_progress}
+        ])
+
+      assert root_wf.status == :running
+      revived = last(root, "t2")
+      assert revived.task_id == sibling.task_id
+      assert revived.retry_count == sibling.retry_count + 1
+      assert Runtime.queue().contains?("integration_task_2", sibling.task_id)
+
+      complete(root, "t2", %{"op" => "task2.done"})
+      complete(child, "t1")
+      complete(child, "t2", %{"uuid" => "u"})
+      assert await_status(root, :completed)
+    end
+
     test "a child retried after its parent was terminated is not terminated again" do
       root =
         start("integration_test_wf_with_sub_wf", Map.put(@input, "subwf", "integration_test_wf"))
