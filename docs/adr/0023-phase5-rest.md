@@ -8,6 +8,8 @@
 - 갱신: 2026-11-01 조각 5a가 upstream 서버에서 확인한 사실로 결정 1(HEAD), 결정 2(404 문구, 끝 슬래시), 결정 3(요청 body·쿼리 변환,
   `ArchonWeb.Request`), 결정 4(검증 오류의 `instance`, `update-v2`의 검증 실패 500, 오류 종류 두 개), 결정 6(캡처 결과와
   재생 도우미 세부), 결정 7(5a 파일 목록, 5e의 선행 조건)과 "upstream과 의도적으로 다른 점"을 보강했다.
+- 갱신: 2026-11-01 조각 5e가 결정 4(`update-v2` 검증 실패 문구를 Spring 문구 그대로 만듦, 태스크 갱신의 404 문구 구분, 코덱 타입
+  오류)와 결정 7(5e의 재생 선행 조건을 실제로 한 방식)을 upstream 서버 관측으로 보강했다.
 
 ## 맥락
 
@@ -189,6 +191,23 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   컨트롤러 인자에 `@Valid`가 붙어 있어 서비스 메서드 검증보다 먼저 Spring `MethodArgumentNotValidException`이 나고, 매퍼에 없는
   클래스라 500이다. 문구는 Spring이 쓰는 긴 문자열(`"Validation failed for argument [0] in public ... updateTaskV2(...): [Field error
   ...]] "`)이다. `POST /api/tasks`의 같은 실패는 서비스 검증이라 400 `validationErrors`다.
+  **조각 5e는 이 문구를 그대로 만든다**(재생에서 `ignore`하지 않는다). `TaskResult`의 제약은 `String` 필드 두 개의 `@NotEmpty`뿐이라
+  문구가 오류 목록과 거부 값만으로 정해지기 때문이다. 모양은 Spring 6 `MethodArgumentNotValidException#getMessage`와
+  `FieldError#toString`이다: `"Validation failed for argument [0] in <handler 시그니처>"`, 오류가 둘 이상이면 `" with <n> errors"`,
+  `": "`, 오류마다 `"[Field error in object 'taskResult' on field '<필드>': rejected value [<값 또는 null>]; codes [...]; arguments
+  [...]; default message [<문구>]] "`. 둘 다 실패하면 upstream 서버는 `taskId`를 먼저 썼다(`{}`, `""` body로 여러 번 관측).
+  Hibernate가 정하지 않는 순서이므로 관측한 순서로 고정한다. `ArchonWeb.TaskController.spring_validation_message/2`가 만들고,
+  두 오류 문구는 upstream 응답을 그대로 시험에 둔다.
+- **태스크 갱신의 404 문구(조각 5e).** `Archon.Runtime.Tasks.update/1`은 없는 워크플로우와 없는 태스크를 모두 `:not_found`로
+  돌려준다. upstream `WorkflowExecutorOps.updateTask`는 워크플로우를 먼저 읽고(`"No such workflow found by id: <id>"`) 그다음 태스크를
+  읽는다(`"No such task found by id: <id>"`). `extendLease`는 태스크만 읽는다(`extendLease`). 그래서 컨트롤러는 `:not_found`를 받으면
+  `extendLease`가 아니고 `Runtime.get_workflow/2`가 `:not_found`일 때만 워크플로우 문구를, 나머지는 태스크 문구를 쓴다. 런타임 API는
+  바꾸지 않는다. 같은 태스크 ID가 다른 워크플로우에 있으면 upstream은 그 태스크를 찾지만 Archon은 워크플로우 프로세스 안에서만 찾으므로
+  태스크 문구 404다(ADR 0024의 신뢰 모델과 무관한 기존 차이).
+- **`TaskResult` 코덱 타입 오류(조각 5e).** 필드 타입이 맞지 않는 body(`status: "BAD"`, 배열 body)는 upstream처럼 500이고 문구는
+  `"JSON parse error: "`로 시작하지만 그 뒤는 Jackson 문구가 아니라 코덱 오류의 경로와 이유다(결정 3의 JSON이 아닌 body와 같은 방식).
+  관측한 upstream 문구 예: `"JSON parse error: Cannot deserialize value of type `com.netflix.conductor.common.metadata.tasks.TaskResult$Status`
+  from String \"BAD\": ..."`.
 - 문구가 없는 오류(`:not_found`, `:conflict`)는 컨트롤러가 upstream 서비스·실행기의 문구를 붙인다. 예: 조회
   `"No such workflow found by id: <id>"`(픽스처), 정의 `"No such workflow found by name: %s, version: %d"`, 태스크 정의
   `"No such taskType found by name: %s"`, 등록 충돌 `"Workflow with %s already exists!"`(`key()`는 `name.version`). 문구는
@@ -300,6 +319,10 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   5a와 5f만 고친다. 재생 도우미(`contract_case.ex`)의 단계 옵션은 각 조각이 자기 픽스처에 맞게 고칠 수 있다.
 - **5e의 재생 선행 조건.** 태스크 픽스처는 정의 등록(5c)과 워크플로우 시작(5d) 뒤의 상태다. 5d보다 먼저 끝나는 5e는 정의와
   워크플로우를 `Archon.Metadata`·`Archon.Runtime`으로 직접 만들고 `bind/3`으로 캡처 ID에 묶은 뒤 태스크 단계만 재생한다.
+  5e는 5c와 동시에 진행했으므로 `Archon.Metadata` 대신 런타임 저장소(`Archon.Runtime.metadata/0`)에 캡처된 정의(`Archon.RuntimeCase.register_definitions/0`,
+  `metadata_get_workflow_{switch,fork}`, 갱신된 `archon_task_c`인 `metadata_get_taskdef_updated`)를 넣고,
+  `Archon.Runtime.start_workflow/1`로 시작한 워크플로우를 시작 픽스처의 캡처 ID에 묶는다. 시나리오의 `metadata_*`·`workflow_*` 교환은
+  빼고 대기(`wait_status`)는 남긴다. 태스크 큐는 다른 시험과 공유되므로 `Archon.RuntimeCase.isolate_queues/1`로 비운다.
 - 각 조각은 이 ADR의 결정 번호와 조각 이름을 PR에 적는다. 조각 중에 결정이 바뀌면 이 ADR의 해당 결정과 날짜 줄에 갱신
   사실을 적는다(ADR 0018·0021과 같은 방식).
 
