@@ -1,7 +1,7 @@
 defmodule Archon.Domain.CodecTest do
   use ExUnit.Case, async: true
 
-  alias Archon.Domain.{Codec, Task, TaskDef, Workflow, WorkflowDef, WorkflowTask}
+  alias Archon.Domain.{Codec, Task, TaskDef, TaskResult, Workflow, WorkflowDef, WorkflowTask}
 
   describe "missing keys and explicit null (Jackson defaults)" do
     test "a missing key keeps the field initializer" do
@@ -75,6 +75,16 @@ defmodule Archon.Domain.CodecTest do
   end
 
   describe "errors" do
+    test "a list of failing items stops at 100 errors, in order" do
+      json = %{"logs" => List.duplicate(1, 1_000_000)}
+      {micros, result} = :timer.tc(fn -> TaskResult.from_json(json) end)
+
+      assert {:error, errors} = result
+      assert errors == for(i <- 0..99, do: {"logs[#{i}]", "must be object"})
+      # Appending every item's errors to the whole took minutes here (quadratic).
+      assert micros < 2_000_000
+    end
+
     test "a non-object body is rejected" do
       assert {:error, [{"", "must be object"}]} = TaskDef.from_json([1])
     end

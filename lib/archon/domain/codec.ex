@@ -209,7 +209,7 @@ defmodule Archon.Domain.Codec do
 
   defp cast_nested({:list, type}, value, path, codec_opts) when is_list(value) do
     value
-    |> Enum.with_index()
+    |> Stream.with_index()
     |> collect(fn {item, index} -> cast(type, item, path ++ [index], codec_opts) end)
   end
 
@@ -292,21 +292,33 @@ defmodule Archon.Domain.Codec do
     end)
   end
 
-  @doc "Runs `fun` over `items`, returning all values or every error."
+  # How many errors `collect/2` gathers before it stops.
+  @max_errors 100
+
+  @doc """
+  Runs `fun` over `items`, returning all values or the errors. It stops at the item that brings
+  the errors to #{@max_errors}: a request body chooses how many items fail, and upstream's Jackson
+  stops at the first. The error lists are gathered in reverse and joined once, since appending
+  each to the whole is quadratic in the number of failing items.
+  """
   @spec collect(Enumerable.t(), (term() -> result(term()))) :: result([term()])
   def collect(items, fun) do
-    {values, errors} =
-      Enum.reduce(items, {[], []}, fn item, {values, errors} ->
-        case fun.(item) do
-          {:ok, value} -> {[value | values], errors}
-          {:error, more} -> {values, errors ++ more}
-        end
-      end)
+    {values, errors, _count} =
+      Enum.reduce_while(items, {[], [], 0}, &collect_item(fun.(&1), &2))
 
     case errors do
       [] -> {:ok, Enum.reverse(values)}
-      errors -> {:error, errors}
+      errors -> {:error, errors |> Enum.reverse() |> Enum.concat()}
     end
+  end
+
+  defp collect_item({:ok, value}, {values, errors, count}),
+    do: {:cont, {[value | values], errors, count}}
+
+  defp collect_item({:error, more}, {values, errors, count}) do
+    count = count + length(more)
+    step = if count >= @max_errors, do: :halt, else: :cont
+    {step, {values, [more | errors], count}}
   end
 
   @doc "A single type error at `path`."
