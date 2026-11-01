@@ -1,0 +1,40 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_ops_noop",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "route",
+          "taskReferenceName": "noop_ref",
+          "type": "SWITCH",
+          "evaluatorType": "value-param",
+          "expression": "route",
+          "inputParameters": {
+            "route": "${workflow.input.route}"
+          },
+          "decisionCases": {
+            "x": [
+              {
+                "name": "archon_ops_idle",
+                "taskReferenceName": "noop_idle_ref",
+                "type": "SIMPLE"
+              }
+            ]
+          },
+          "defaultCase": []
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

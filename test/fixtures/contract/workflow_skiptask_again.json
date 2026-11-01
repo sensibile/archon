@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/workflow/2974ed5d-ea12-4aaf-862b-b9bf3869f999/skiptask/ops_b_ref",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "The task referenced ops_b_ref has already been processed, cannot be skipped",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

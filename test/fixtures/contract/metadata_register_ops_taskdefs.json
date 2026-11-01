@@ -1,0 +1,69 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/taskdefs",
+    "body": [
+      {
+        "name": "archon_ops_a",
+        "retryCount": 0,
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600
+      },
+      {
+        "name": "archon_ops_b",
+        "retryCount": 0,
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600
+      },
+      {
+        "name": "archon_ops_c",
+        "retryCount": 0,
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600
+      },
+      {
+        "name": "archon_ops_cb",
+        "retryCount": 0,
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600
+      },
+      {
+        "name": "archon_ops_idle",
+        "retryCount": 0,
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600
+      },
+      {
+        "name": "archon_ops_sub",
+        "retryCount": 1,
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600
+      },
+      {
+        "name": "archon_ops_sub_once",
+        "retryCount": 0,
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

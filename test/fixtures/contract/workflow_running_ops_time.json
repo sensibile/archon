@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/running/archon_ops?version=2&startTime=1&endTime=4102444800000",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": [
+      "12c4f271-3028-4598-a268-60faa602d419",
+      "4aadb4e4-212a-4ff1-9ff2-59ff70ff4fdc"
+    ]
+  }
+}

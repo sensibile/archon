@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/workflow/decide/00000000-0000-0000-0000-000000000000",
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "content_type": "application/json",
+    "body": {
+      "status": 404,
+      "message": "No such workflow found by id: 00000000-0000-0000-0000-000000000000",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/bulk/terminate?reason=archon-bulk",
+    "body": [
+      "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01",
+      "c5096c5d-404c-4dca-ba2a-1f9d533ec29e",
+      "00000000-0000-0000-0000-000000000000"
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "bulkErrorResults": {
+        "c5096c5d-404c-4dca-ba2a-1f9d533ec29e": "Cannot terminate a COMPLETED workflow.",
+        "00000000-0000-0000-0000-000000000000": "No such workflow found by id: 00000000-0000-0000-0000-000000000000"
+      },
+      "bulkSuccessfulResults": [
+        "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01"
+      ]
+    }
+  }
+}

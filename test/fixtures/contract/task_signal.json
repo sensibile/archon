@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks/ee01c4e0-9724-4384-83b0-d7de88674d53/COMPLETED/signal",
+    "body": {
+      "s": 8
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

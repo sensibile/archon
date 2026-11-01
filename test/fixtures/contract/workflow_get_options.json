@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/workflow/b2b4709d-9cd0-401f-9c2a-0d307758483e?includeTasks=false",
+    "path": "/api/workflow/c5b33dfa-c42e-4f16-a186-8ea31355fa14?includeTasks=false",
     "body": null
   },
   "response": {
@@ -9,11 +9,11 @@
     "content_type": "application/json",
     "body": {
       "ownerApp": "",
-      "createTime": 1793520130459,
-      "updateTime": 1793520130462,
+      "createTime": 1793571048370,
+      "updateTime": 1793571048373,
       "status": "RUNNING",
       "endTime": 0,
-      "workflowId": "b2b4709d-9cd0-401f-9c2a-0d307758483e",
+      "workflowId": "c5b33dfa-c42e-4f16-a186-8ea31355fa14",
       "tasks": [],
       "input": {
         "x": 7
@@ -24,7 +24,7 @@
       "failedReferenceTaskNames": [],
       "workflowDefinition": {
         "createTime": 0,
-        "updateTime": 1793520127606,
+        "updateTime": 1793571045240,
         "name": "archon_simple",
         "description": "Overwritten",
         "version": 1,
@@ -43,7 +43,7 @@
             "joinOn": [],
             "optional": false,
             "taskDefinition": {
-              "createTime": 1793520124583,
+              "createTime": 1793571042099,
               "updateTime": 0,
               "createdBy": "",
               "name": "archon_task_a",
@@ -91,7 +91,7 @@
             "joinOn": [],
             "optional": false,
             "taskDefinition": {
-              "createTime": 1793520124626,
+              "createTime": 1793571042141,
               "updateTime": 0,
               "createdBy": "",
               "name": "archon_task_b",
@@ -145,9 +145,9 @@
       "failedTaskNames": [],
       "history": [],
       "rateLimited": false,
-      "startTime": 1793520130459,
       "workflowName": "archon_simple",
-      "workflowVersion": 1
+      "workflowVersion": 1,
+      "startTime": 1793571048370
     }
   }
 }

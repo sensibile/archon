@@ -1,5 +1,8 @@
 defmodule ArchonWeb.ContractCaseTest do
-  @moduledoc "The replay helper itself (ADR 0023, decision 6): scenario coverage and the ID mapping."
+  @moduledoc """
+  The replay helper itself (ADR 0023 decision 6, ADR 0025 decision 7): scenario coverage, the ID
+  mapping, the step options and the skipping of Phase 6 actions not implemented yet.
+  """
 
   use ArchonWeb.ContractCase, async: true
 
@@ -16,10 +19,51 @@ defmodule ArchonWeb.ContractCaseTest do
   end
 
   test "a wait follows the start it names" do
-    for {{:wait_status, start, _status}, index} <- Enum.with_index(scenario()) do
+    for {step, index} <- Enum.with_index(scenario()), elem(step, 0) == :wait_status do
+      start = elem(step, 1)
       start_index = Enum.find_index(scenario(), &(&1 == {:exchange, start}))
       assert start_index && start_index < index, start
     end
+  end
+
+  # ADR 0025, decision 7: the Phase 6 steps come after every MVP step.
+  test "the Phase 6 steps come last" do
+    first = Enum.find_index(scenario(), &(&1 == {:exchange, "metadata_register_ops_taskdefs"}))
+    assert {:exchange, "workflow_get_options"} == Enum.at(scenario(), first - 1)
+  end
+
+  describe "skip?/1" do
+    test "a step reaching an action its controller has not implemented is skipped" do
+      assert :pause in ArchonWeb.WorkflowLifecycleController.unimplemented()
+      assert skip?({:exchange, "workflow_pause"})
+      refute skip?({:exchange, "workflow_get_paused"})
+      refute skip?({:exchange, "route_unsupported_workflow_decide", expect: :no_route})
+    end
+
+    test "a step requiring an action not implemented yet is skipped, waits too" do
+      requires = [requires: [{ArchonWeb.WorkflowLifecycleController, :pause}]]
+      assert skip?({:exchange, "workflow_get_paused", requires})
+      assert skip?({:wait_status, "workflow_start_life", "PAUSED", requires})
+      refute skip?({:wait_status, "workflow_start_life", "RUNNING"})
+      refute skip?({:exchange, "health", requires: [{ArchonWeb.HealthController, :check}]})
+    end
+
+    test "every requirement names a Phase 6 action of the router" do
+      routes = MapSet.new(ArchonWeb.Router.__routes__(), &{&1.plug, &1.plug_opts})
+
+      for step <- scenario(),
+          opts = List.last(Tuple.to_list(step)),
+          is_list(opts),
+          action <- Keyword.get(opts, :requires, []) do
+        assert action in routes, inspect(step)
+      end
+    end
+  end
+
+  test "until: repeats the request until the conditions hold" do
+    replay([
+      {:exchange, "health", until: [{["healthy"], true}, {["healthResults"], {:length, 0}}]}
+    ])
   end
 
   test "steps/2 cuts the scenario from one fixture through another" do
@@ -151,6 +195,83 @@ defmodule ArchonWeb.ContractCaseTest do
         actual(%{"message" => "Archon"}),
         new_state(),
         opts
+      )
+    end
+
+    test "ignored paths may hold list indexes" do
+      check(
+        "t",
+        fixture(%{"tasks" => [%{"pollCount" => 3}, %{"pollCount" => 1}]}),
+        actual(%{"tasks" => [%{"pollCount" => 2}, %{"pollCount" => 1}]}),
+        new_state(),
+        ignore: [["tasks", 0, "pollCount"]]
+      )
+    end
+
+    test "only: :expected_names keeps the names of a list of strings and of a map's keys" do
+      opts = [only: :expected_names]
+      check("t", fixture(["a", "b"]), actual(["a", "x", "b"]), new_state(), opts)
+      check("t", fixture(%{"a" => [1]}), actual(%{"a" => [1], "x" => [2]}), new_state(), opts)
+
+      check(
+        "t",
+        fixture([%{"name" => "a"}]),
+        actual([%{"name" => "x"}, %{"name" => "a"}]),
+        new_state(),
+        opts
+      )
+    end
+
+    test "only: :bound_ids keeps the workflows this replay bound" do
+      state = bind(new_state(), @a, @b)
+      opts = [only: :bound_ids]
+      check("t", fixture([@a]), actual([@c, @b]), state, opts)
+
+      check(
+        "t",
+        fixture([%{"workflowId" => @a}]),
+        actual([%{"workflowId" => @c}, %{"workflowId" => @b}]),
+        state,
+        opts
+      )
+
+      check(
+        "t",
+        fixture(%{"k" => [%{"workflowId" => @a}]}),
+        actual(%{"k" => [%{"workflowId" => @b}, %{"workflowId" => @c}]}),
+        state,
+        opts
+      )
+
+      assert_raise ExUnit.AssertionError, ~r/differs/, fn ->
+        check("t", fixture([@a]), actual([@c]), state, opts)
+      end
+    end
+
+    test "unordered: true compares lists without order and binds nothing" do
+      state = new_state() |> bind(@a, @a) |> bind(@b, @b)
+      opts = [unordered: true]
+      assert check("t", fixture([@a, @b]), actual([@b, @a]), state, opts) == state
+      check("t", fixture(%{"k" => [1, 2]}), actual(%{"k" => [2, 1]}), state, opts)
+
+      # An ID no earlier step bound is not bound here: it differs.
+      assert_raise ExUnit.AssertionError, ~r/differs/, fn ->
+        check("t", fixture([@c]), actual([@b]), new_state(), opts)
+      end
+
+      assert_raise ExUnit.AssertionError, ~r/differs/, fn ->
+        check("t", fixture([@a, @b]), actual([@a, @a]), state, opts)
+      end
+    end
+
+    test "map keys holding captured IDs are compared with their bindings" do
+      state = bind(new_state(), @a, @b)
+
+      check(
+        "t",
+        fixture(%{"bulkErrorResults" => %{@a => "x"}, "bulkSuccessfulResults" => [@a]}),
+        actual(%{"bulkErrorResults" => %{@b => "x"}, "bulkSuccessfulResults" => [@b]}),
+        state
       )
     end
 

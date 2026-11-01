@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow/validate",
+    "body": {
+      "name": "archon_ops",
+      "version": 1,
+      "tasks": []
+    }
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Validation failed, check below errors for detail.",
+      "retryable": false,
+      "validationErrors": [
+        {
+          "path": "validateWorkflowDef.arg0.tasks",
+          "message": "WorkflowTask list cannot be empty"
+        }
+      ]
+    }
+  }
+}

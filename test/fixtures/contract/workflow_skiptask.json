@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/workflow/2974ed5d-ea12-4aaf-862b-b9bf3869f999/skiptask/ops_b_ref",
+    "body": {
+      "taskInput": {
+        "ignored": true
+      },
+      "taskOutput": {
+        "ignored": true
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

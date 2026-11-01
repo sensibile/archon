@@ -22,14 +22,14 @@
       "retryable": false,
       "validationErrors": [
         {
-          "path": "registerTaskDef.arg0[1].retryCount",
-          "message": "TaskDef retryCount: 0 must be >= 0",
-          "invalidValue": "-1"
-        },
-        {
           "path": "registerTaskDef.arg0[0].responseTimeoutSeconds",
           "message": "TaskDef responseTimeoutSeconds: 0 should be minimum 1 second",
           "invalidValue": "0"
+        },
+        {
+          "path": "registerTaskDef.arg0[1].retryCount",
+          "message": "TaskDef retryCount: 0 must be >= 0",
+          "invalidValue": "-1"
         }
       ]
     }

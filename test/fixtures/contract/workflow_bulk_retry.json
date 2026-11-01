@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/bulk/retry",
+    "body": [
+      "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01",
+      "97fc2f6c-86d6-4785-855b-dc522f3d545c"
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "bulkErrorResults": {
+        "97fc2f6c-86d6-4785-855b-dc522f3d545c": "Workflow is still running.  status=PAUSED"
+      },
+      "bulkSuccessfulResults": [
+        "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01"
+      ]
+    }
+  }
+}

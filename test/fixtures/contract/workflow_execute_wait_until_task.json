@@ -1,0 +1,39 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/execute/archon_ops_noop/1?requestId=archon-request-7&returnStrategy=BLOCKING_TASK&waitUntilTaskRef=noop_ref",
+    "body": {}
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "responseType": "BLOCKING_TASK",
+      "targetWorkflowId": "95755c31-7ec6-4a06-a158-e2fe3ac31efe",
+      "targetWorkflowStatus": "COMPLETED",
+      "requestId": "archon-request-7",
+      "workflowId": "95755c31-7ec6-4a06-a158-e2fe3ac31efe",
+      "input": {
+        "case": "null",
+        "route": null
+      },
+      "output": {
+        "evaluationResult": [
+          "null"
+        ],
+        "selectedCase": "null"
+      },
+      "signalTimeout": false,
+      "taskType": "SWITCH",
+      "taskId": "0aa1dcf3-9ff4-4fc9-b99a-c397a37b06e9",
+      "referenceTaskName": "noop_ref",
+      "retryCount": 0,
+      "taskDefName": "SWITCH",
+      "workflowType": "archon_ops_noop",
+      "priority": 0,
+      "createTime": 1793571052268,
+      "updateTime": 1793571052269,
+      "status": "COMPLETED"
+    }
+  }
+}

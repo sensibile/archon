@@ -5,7 +5,8 @@
 #
 # Derived from conductor-oss rest/src/main/java/com/netflix/conductor/rest/controllers/MetadataResource.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
-# Modified by sensibile: Phoenix actions for the MVP handlers only.
+# Modified by sensibile: Phoenix actions for the MVP handlers, and skeletons of the Phase 6
+# handlers (ADR 0025).
 
 defmodule ArchonWeb.MetadataController do
   @moduledoc """
@@ -28,6 +29,23 @@ defmodule ArchonWeb.MetadataController do
 
   alias Archon.Domain.{BulkResponse, Codec, TaskDef, Validation, WorkflowDef}
   alias Archon.Metadata
+
+  # Phase 6 actions not implemented yet (ADR 0025, decision 7): each answers the 404 of a path
+  # without a handler, and the contract replay skips the steps that reach it. Slice 6c empties
+  # this list.
+  # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
+  Module.register_attribute(__MODULE__, :unimplemented, persist: true)
+
+  @unimplemented [
+    :list_workflows,
+    :workflow_names_and_versions,
+    :workflow_names,
+    :latest_workflows,
+    :workflow_versions,
+    :delete_workflow,
+    :delete_task_def,
+    :validate_workflow
+  ]
 
   @resource "com.netflix.conductor.rest.controllers.MetadataResource"
   @task_def "com.netflix.conductor.common.metadata.tasks.TaskDef"
@@ -132,6 +150,42 @@ defmodule ArchonWeb.MetadataController do
       {:error, reason} -> Errors.send_error(conn, reason)
     end
   end
+
+  @doc "The Phase 6 actions not implemented yet (see `@unimplemented`)."
+  @spec unimplemented() :: [atom()]
+  def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
+
+  @doc "`GET /api/metadata/workflow` (`getAll`, `classifier` query). Not implemented yet."
+  @spec list_workflows(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def list_workflows(conn, _params), do: Errors.send_no_route(conn)
+
+  @doc "`GET /api/metadata/workflow/names-and-versions` (`getWorkflowNamesAndVersions`). Not implemented yet."
+  @spec workflow_names_and_versions(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def workflow_names_and_versions(conn, _params), do: Errors.send_no_route(conn)
+
+  @doc "`GET /api/metadata/workflow/names` (`getWorkflowNames`). Not implemented yet."
+  @spec workflow_names(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def workflow_names(conn, _params), do: Errors.send_no_route(conn)
+
+  @doc "`GET /api/metadata/workflow/latest-versions` (`getAllWorkflowsWithLatestVersions`). Not implemented yet."
+  @spec latest_workflows(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def latest_workflows(conn, _params), do: Errors.send_no_route(conn)
+
+  @doc "`GET /api/metadata/workflow/{name}/versions` (`getWorkflowVersions`). Not implemented yet."
+  @spec workflow_versions(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def workflow_versions(conn, _params), do: Errors.send_no_route(conn)
+
+  @doc "`DELETE /api/metadata/workflow/{name}/{version}` (`unregisterWorkflowDef`). Not implemented yet."
+  @spec delete_workflow(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def delete_workflow(conn, _params), do: Errors.send_no_route(conn)
+
+  @doc "`DELETE /api/metadata/taskdefs/{tasktype}` (`unregisterTaskDef`). Not implemented yet."
+  @spec delete_task_def(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def delete_task_def(conn, _params), do: Errors.send_no_route(conn)
+
+  @doc "`POST /api/metadata/workflow/validate` (`validate`). Not implemented yet."
+  @spec validate_workflow(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def validate_workflow(conn, _params), do: Errors.send_no_route(conn)
 
   # A void handler: 200 without a body, or the error.
   defp reply(conn, :ok, _opts), do: Response.empty(conn)

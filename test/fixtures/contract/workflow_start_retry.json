@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_ops",
+    "body": {
+      "x": 4
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "38be90d0-c74e-49ad-bbc0-e4181bf257ab"
+  }
+}

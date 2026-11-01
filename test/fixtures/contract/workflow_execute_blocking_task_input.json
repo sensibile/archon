@@ -1,0 +1,35 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/execute/archon_ops_waits/1?requestId=archon-request-4&returnStrategy=BLOCKING_TASK_INPUT",
+    "body": {
+      "input": {
+        "k": 4
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "responseType": "BLOCKING_TASK_INPUT",
+      "targetWorkflowId": "b132853b-3e1d-4df3-b427-1d6b0fa2c43f",
+      "targetWorkflowStatus": "RUNNING",
+      "requestId": "archon-request-4",
+      "workflowId": "b132853b-3e1d-4df3-b427-1d6b0fa2c43f",
+      "input": {},
+      "output": {},
+      "signalTimeout": false,
+      "taskType": "WAIT",
+      "taskId": "6c5dd46a-8f71-4318-a916-ff12d0f859f6",
+      "referenceTaskName": "wait1_ref",
+      "retryCount": 0,
+      "taskDefName": "archon_wait",
+      "workflowType": "archon_ops_waits",
+      "priority": 0,
+      "createTime": 1793571051825,
+      "updateTime": 0,
+      "status": "IN_PROGRESS"
+    }
+  }
+}

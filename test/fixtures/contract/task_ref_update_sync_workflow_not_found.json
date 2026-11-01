@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks/00000000-0000-0000-0000-000000000000/task_a_ref/COMPLETED/sync",
+    "body": {}
+  },
+  "response": {
+    "status": 404,
+    "content_type": "application/json",
+    "body": {
+      "status": 404,
+      "message": "Found no running task task_a_ref of workflow 00000000-0000-0000-0000-000000000000 to update",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

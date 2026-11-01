@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/c5b33dfa-c42e-4f16-a186-8ea31355fa14/retry",
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "content_type": "application/json",
+    "body": {
+      "status": 404,
+      "message": "Workflow is still running.  status=RUNNING",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

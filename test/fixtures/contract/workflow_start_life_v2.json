@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_ops?version=2&correlationId=archon-ops-life",
+    "body": {
+      "x": 2
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "12c4f271-3028-4598-a268-60faa602d419"
+  }
+}

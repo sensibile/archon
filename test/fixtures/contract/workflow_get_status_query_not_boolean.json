@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/workflow/1a03ebb0-f036-4108-9455-b17405104628/status?includeOutput=abc",
+    "path": "/api/workflow/c5096c5d-404c-4dca-ba2a-1f9d533ec29e/status?includeOutput=abc",
     "body": null
   },
   "response": {

@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/workflow/fa96e64b-1502-4f57-8eb8-f3e604136068/remove",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

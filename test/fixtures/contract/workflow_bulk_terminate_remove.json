@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/workflow/bulk/terminate-remove?reason=archon-bulk",
+    "body": [
+      "97fc2f6c-86d6-4785-855b-dc522f3d545c",
+      "4aadb4e4-212a-4ff1-9ff2-59ff70ff4fdc",
+      "00000000-0000-0000-0000-000000000000"
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "bulkErrorResults": {
+        "4aadb4e4-212a-4ff1-9ff2-59ff70ff4fdc": "Cannot terminate a COMPLETED workflow.",
+        "00000000-0000-0000-0000-000000000000": "No such workflow found by id: 00000000-0000-0000-0000-000000000000"
+      },
+      "bulkSuccessfulResults": [
+        "97fc2f6c-86d6-4785-855b-dc522f3d545c",
+        "97fc2f6c-86d6-4785-855b-dc522f3d545c",
+        "4aadb4e4-212a-4ff1-9ff2-59ff70ff4fdc"
+      ]
+    }
+  }
+}

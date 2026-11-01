@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/workflow/bulk/pause",
+    "body": ""
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Required request body is missing: public com.netflix.conductor.common.model.BulkResponse<java.lang.String> com.netflix.conductor.rest.controllers.WorkflowBulkResource.pauseWorkflow(java.util.List<java.lang.String>)",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

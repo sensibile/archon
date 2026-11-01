@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/running/archon_simple?version=2",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": [
+      "c5b33dfa-c42e-4f16-a186-8ea31355fa14",
+      "d8309bfd-2cdf-40a0-ab9f-be50f474bdc1"
+    ]
+  }
+}

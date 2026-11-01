@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_ops",
+      "version": 2,
+      "schemaVersion": 2,
+      "description": "Version 2",
+      "inputParameters": [
+        "x"
+      ],
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_ops_a",
+          "taskReferenceName": "ops_a_ref",
+          "type": "SIMPLE",
+          "inputParameters": {
+            "x": "${workflow.input.x}"
+          }
+        },
+        {
+          "name": "archon_ops_b",
+          "taskReferenceName": "ops_b_ref",
+          "type": "SIMPLE"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

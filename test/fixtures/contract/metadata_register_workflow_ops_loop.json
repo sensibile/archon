@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_ops_loop",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "loop",
+          "taskReferenceName": "loop_ref",
+          "type": "DO_WHILE",
+          "inputParameters": {
+            "value": 2
+          },
+          "loopCondition": "if ($.loop_ref['iteration'] < $.value) { true; } else { false; }",
+          "loopOver": [
+            {
+              "name": "archon_ops_b",
+              "taskReferenceName": "loop_b_ref",
+              "type": "SIMPLE"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

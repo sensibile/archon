@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/workflow/bulk/resume",
+    "body": [
+      "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01",
+      "c5096c5d-404c-4dca-ba2a-1f9d533ec29e"
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "bulkErrorResults": {
+        "c5096c5d-404c-4dca-ba2a-1f9d533ec29e": "The workflow c5096c5d-404c-4dca-ba2a-1f9d533ec29e is not PAUSED so cannot resume. Current status is COMPLETED"
+      },
+      "bulkSuccessfulResults": [
+        "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01"
+      ]
+    }
+  }
+}

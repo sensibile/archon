@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/bulk/search",
+    "body": [
+      "00000000-0000-0000-0000-000000000000"
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "bulkErrorResults": {
+        "00000000-0000-0000-0000-000000000000": "No such workflow found by id: 00000000-0000-0000-0000-000000000000"
+      },
+      "bulkSuccessfulResults": []
+    }
+  }
+}
