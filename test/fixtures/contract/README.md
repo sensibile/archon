@@ -120,8 +120,9 @@ GET이 답한 태스크 ID로 갱신한다. 상태를 바꾸지 않는 오류를
 캡처해 비교했다.
 
 Phase 6 단계 중 아직 구현하지 않은 액션으로 가는 단계와 그 액션의 결과에 기대는 단계(`requires:`)는 재생에서 건너뛴다. 각 조각이
-자기 컨트롤러의 `unimplemented/0` 목록을 비우면 그 단계가 돈다. 6a가 캡처하면서 찾은 Archon의 차이 하나는 의도한 차이가 아니므로
-따로 고친다(`workflow_get_top_failed`: 실패한 자식의 출력을 SUB_WORKFLOW 태스크 출력에 합치는 것. 재생은 그 두 경로를 뺀다).
+자기 컨트롤러의 `unimplemented/0` 목록을 비우면 그 단계가 돈다. 6a가 캡처하면서 찾은 Archon의 차이 하나(`workflow_get_top_failed`:
+실패한 자식의 출력을 합친 SUB_WORKFLOW 태스크의 `subWorkflowId`)는 upstream `toTask`처럼 맞췄고(ADR 0024 결정 6), 재생은 그
+경로도 비교한다.
 
 Archon이 일부러 다르게 답하는 픽스처(Later 경로와 405는 404, Jackson 문구)는 재생 도우미
 `test/support/archon_web/contract_case.ex`의 시나리오에 단계 옵션으로 적혀 있다.

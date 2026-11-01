@@ -4,6 +4,8 @@
 - 날짜: 2026-11-01
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 2026-11-01 BOSS가 추천안(런타임 소유권 규칙으로 L7·L8을 닫고, MVP REST는 인증 없이 기본 `127.0.0.1`)을 골랐다.
+- 비고: 2026-11-02 결정 6을 보충했다. Phase 6 조각 6a 캡처(`workflow_get_top_failed`)에서 찾은 의도하지 않은 차이를 upstream에
+  맞추는 결정이다.
 
 ## 맥락
 
@@ -146,6 +148,36 @@ L7은 서로를 자식으로 가리키는 워크플로우가 생길 수 없으�
   읽기는 그대로)와 `step/terminate.ex`(취소 대상 선택은 그대로, 확인은 `terminate_child/4`가 함)는 고치지 않는다. Effect·outbox 항목 모양을 바꾸지 않으므로 `Store.Postgres`의 인코딩과 `outbox.ex`도
   고치지 않는다.
 
+### 6. 출력의 `subWorkflowId` 키는 upstream `toTask`처럼 태스크 자기 자식의 ID다 (2026-11-02 보충)
+
+upstream `TaskModel#toTask`는 Spring `BeanUtils.copyProperties`로 `Task`를 만들면서 `setSubWorkflowId(getSubWorkflowId())`를
+부르고, 이 setter는 `outputData`에 `"subWorkflowId"` 키가 있으면 그 값을 태스크 자기 ID로 바꾼다. 복사본은 출력 맵을 공유하므로
+원래 `TaskModel`도 바뀐다. 그래서 SUB_WORKFLOW 태스크가 `SubWorkflow#updateTaskStatus`에서 자식의 출력(`{"subWorkflowId": <손자>}`)을
+합쳐도 다음 두 곳에서는 자기 자식의 ID가 보인다. 기준 SHA 빌드 서버에서 최상위→중간→자식 사슬로 관측했고(완료, 자식 실패, 자식
+종료 요청, 중간 종료 요청, 자식 시간 초과), 기준 SHA의 `TaskModel` jar로도 같은 결과를 확인했다.
+
+- **REST 응답.** 워크플로우·태스크 응답은 태스크마다 `toTask`를 거친다. `Archon.Domain.Task.to_json/2`가
+  `Task.with_own_sub_workflow_id/1`로 같은 일을 한다. 태스크 타입과 관계없다. 키가 없으면 더하지 않고, 저장된 ID가 비면
+  `sub_workflow_id/1`의 대체값(출력, 그다음 입력)을 쓴다.
+- **Decider 종료의 워크플로우 출력.** `terminate(workflow, TerminateWorkflowException)`는 실패한 태스크를 `updateTask`로 저장한 뒤
+  색인용 `toTask()`로 메모리의 태스크를 바꾸고, 그다음 `terminateWorkflow`가 그 태스크에서 워크플로우 출력을 읽는다.
+  `Step.Terminate.by_decider/2`가 같은 순서로 저장한 뒤 메모리의 태스크에만 같은 변환을 한다. 저장된 태스크는 upstream처럼 합친
+  출력 그대로다. 실패·종료·시간 초과한 자식이 모두 이 경로라서 최상위 출력은 중간의 ID다.
+- **완료는 바꾸지 않는다.** 자식이 끝난 결정 한 번에 완료까지 가면 upstream은 SUB_WORKFLOW 태스크를 저장(`updateTask`)하지 않고
+  `completeWorkflow`로 간다. 출력 맵은 태스크와 공유되지만 `updateWorkflow`가 `toWorkflow()`의 덮어쓰기 전에 저장하므로 최상위
+  출력은 손자의 ID다. 태스크 응답만 자기 자식의 ID다. archon도 같다. 부모 갱신(`updateParentWorkflowTask`)의 `updateTask`는 따로
+  읽은 태스크 객체를 바꾸므로 부모의 다음 결정에 닿지 않는다. 그래서 `State.save_task/2` 전체에 변환을 넣지 않는다.
+- 옮기지 않는 upstream 동작(관측하지 않았고 소스로만 확인한 차이). 둘 다 시험 범위 밖이다.
+  - 결정 루프가 SUB_WORKFLOW 태스크를 `updateTasks`로 저장한 뒤 같은 결정에서 다시 돌면(뒤에 동기 시스템 태스크가 있는 경우 등)
+    upstream은 메모리 태스크가 바뀐 채로 다음 반복을 한다. 그 반복에서 `outputParameters`나 새 태스크 입력이
+    `${<ref>.output.subWorkflowId}`를 읽으면 upstream은 자기 자식의 ID, archon은 합친 값이다.
+  - `terminateWorkflow`의 `updateWorkflow`→`toWorkflow()`는 워크플로우 출력과 맵을 공유하는 마지막 태스크도 바꾼다. 실패한 태스크가
+    아닌 마지막 태스크가 SUB_WORKFLOW이고 실패 워크플로우가 있으면, upstream은 다시 저장하는 출력과 `failedWorkflow.output`에 자기
+    자식의 ID를 쓰고 archon은 합친 값이다. `failedWorkflow.tasks[*].outputData`는 `Task.to_json/2`를 거치므로 upstream과 같다.
+  - 이벤트 처리·리스너 같은 그 밖의 `toTask` 호출은 메모리 태스크를 바꿔도 관측한 계약 차이가 없다.
+- 이 동작은 upstream 기본 설정(`taskIndexingEnabled` 켜짐, `asyncIndexingEnabled` 꺼짐)에서 색인이 `updateTask` 안에서 돌 때의
+  것이다. 관측한 서버가 이 기본 설정이고, 픽스처도 같은 결과다.
+
 ## upstream과 의도적으로 다른 점
 
 - **SUB_WORKFLOW 태스크 갱신의 `subWorkflowId`를 반영하지 않는다**(결정 1). upstream은 값을 그대로 저장하고, 비어 있으면 출력·입력의
@@ -171,4 +203,7 @@ L7은 서로를 자식으로 가리키는 워크플로우가 생길 수 없으�
 
 - 조각 5b가 머지되면 `승인`으로 바꾸고, ADR 0018의 목록 상태에 "일부 0024가 대체"(결과 절의 `subWorkflowId` 신뢰 결정)를 적는다.
 - ADR 0021의 L6 남은 부분, L7, L8은 이 ADR과 조각 5b로 닫힌다.
+- 결정 6(보충)은 그 결정을 담은 PR이 구현한다. `workflow_get_top_failed` 재생이 두 경로를 다시 비교하고,
+  `test/archon/runtime/sub_workflow_test.exs`가 완료·자식 실패·자식 종료·중간 종료·자식 시간 초과 사슬을 시험한다. 결정 6의
+  옮기지 않는 두 동작은 남은 차이다.
 - 아직 범위 밖: REST 인증·인가(Later ADR), worker가 다른 워크플로우의 태스크를 taskId로 갱신하는 일(upstream과 같은 신뢰 모델 안).

@@ -4,8 +4,9 @@
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
 #
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/WorkflowExecutorOps.java
-# (terminate, terminateWorkflow, cancelNonTerminalTasks, completeWorkflow) and
-# core/.../execution/tasks/SubWorkflow.java (cancel, terminateSubWorkflow)
+# (terminate, terminateWorkflow, cancelNonTerminalTasks, completeWorkflow),
+# core/.../execution/tasks/SubWorkflow.java (cancel, terminateSubWorkflow) and
+# core/.../dal/ExecutionDAOFacade.java (updateTask)
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the child termination, queue clean-up, parent notification and failure
 # workflow start became effects around one commit (ADR 0018, decision 8).
@@ -43,7 +44,7 @@ defmodule Archon.Runtime.Step.Terminate do
     state =
       case termination.task do
         nil -> state
-        task -> State.save_task(state, State.task(state, task.task_id) || task)
+        task -> save_termination_task(state, State.task(state, task.task_id) || task)
       end
 
     definition = wf.workflow_definition
@@ -54,6 +55,14 @@ defmodule Archon.Runtime.Step.Terminate do
       failure_workflow(definition.failure_workflow, wf),
       definition.failure_workflow_version
     )
+  end
+
+  # `ExecutionDAOFacade#updateTask` saves the task, then indexes `toTask()`, which changes the
+  # output of the task in memory (`Task.with_own_sub_workflow_id/1`): the workflow output that
+  # `terminateWorkflow` takes from it has the task's own `subWorkflowId`, the saved task does not.
+  defp save_termination_task(state, task) do
+    state = State.save_task(state, task)
+    State.put_task(state, Task.with_own_sub_workflow_id(State.task(state, task.task_id)))
   end
 
   # A failure workflow name starting with `$` names a workflow input parameter
