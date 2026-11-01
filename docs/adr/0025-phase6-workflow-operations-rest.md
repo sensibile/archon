@@ -285,8 +285,8 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
     `version == 0`에서 NPE 500, 인라인 정의의 `_systemMetadata`가 맵이 아니면 JVM의 `ClassCastException` 문구 500이다. 인라인
     정의 없이 이름이 공백이면 `POST /api/workflow`처럼 400 `"Workflow name must be specified when searching for a definition"`이다.
   - sync ref 갱신의 메서드 검증(`@Valid TaskResult`)은 따로 하지 않는다. 대기 태스크에서 만든 결과는 두 ID가 늘 있다.
-  - 그래서 `lib/archon_web/request.ex`(결정 8의 6e 파일 목록 밖)에 `convert_int/4`(경로 값), `values/2`(반복 쿼리 값),
-    `int/4`의 `"long"` 형을 더했다. 기존 함수의 동작은 같다.
+  - 그래서 `lib/archon_web/request.ex`(결정 8의 6e 파일 목록 밖)에 `convert_int/4`(필수가 아닌 경로 값, `execute`의 `version`.
+    필수 경로 값은 6c의 `path_integer/2`), `values/2`(반복 쿼리 값), `int/4`의 `"long"` 형을 더했다. 기존 함수의 동작은 같다.
 
 ### 6. metadata와 bulk
 
