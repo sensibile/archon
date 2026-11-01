@@ -8,7 +8,8 @@
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: reduced to the operations the MVP runtime uses (ADR 0018, decision 3);
 # workflow and task writes are one atomic `Archon.Runtime.Commit` and the store never stamps times;
-# a commit also carries queue operations, an outbox, a re-evaluation time and limits (ADR 0021).
+# a commit also carries queue operations, an outbox, a re-evaluation time and limits (ADR 0021);
+# the queries by name and correlation ID are ordered (ADR 0025, decision 4).
 
 defmodule Archon.Runtime.Store do
   @moduledoc """
@@ -33,6 +34,16 @@ defmodule Archon.Runtime.Store do
       (upstream `getWorkflow(id, true)`), otherwise with `tasks: []`.
     * `c:get_task/1` - the task and the ID of its workflow.
     * `c:running_workflow_ids/0` - workflows whose status is not terminal (`RUNNING`, `PAUSED`).
+    * `c:correlated_workflows/4` - workflows of a definition name (any version) whose
+      correlation ID is one of `correlation_ids` (upstream `getWorkflowsByCorrelationId` and
+      `getWorkflowInstances` for each ID, read at once), only the `RUNNING` ones unless
+      `include_closed?`, with their tasks ordered by `seq` when `include_tasks?` (else
+      `tasks: []`).
+    * `c:pending_workflow_ids/1` - IDs of the workflows of a definition name (any version) whose
+      status is not terminal (upstream `getRunningWorkflowIds`, which does not use the version).
+    * `c:workflow_ids_created_between/4` - IDs of the workflows of a definition name and version,
+      in any status, whose `create_time` is from `start_ms` to `end_ms`, both included (upstream
+      `getWorkflowsByType` and the executor's version filter).
     * `c:remove_workflow/1` - deletes a workflow, its tasks and its outbox (queue messages are the
       caller's).
     * `c:in_progress_count/1` - tasks with this task definition name (`Task.task_def_name/1`) in
@@ -49,6 +60,10 @@ defmodule Archon.Runtime.Store do
     * `c:put_poll_data/4`, `c:get_poll_data/2` - the last poll per task type and domain (upstream
       `PollDataDAO`; a `nil` domain shares the key of the domain `"DEFAULT"`, as in
       `SqlitePollDataDAO`, and the returned value keeps the domain it was written with).
+
+  The three queries by name answer in `create_time` order and then workflow ID in binary order
+  (upstream leaves the order unspecified; ADR 0025, decision 4). A name or correlation ID that
+  cannot be stored in an index column (NUL or invalid UTF-8) matches no workflow on every store.
 
   Unlike upstream `ExecutionDAO#createTasks`, a commit does not skip tasks whose reference name
   and retry count already exist; `Archon.Runtime.Step` deduplicates them (`dedupAndAddTasks`).
@@ -79,6 +94,19 @@ defmodule Archon.Runtime.Store do
   @callback get_task(task_id :: String.t()) ::
               {:ok, Task.t(), workflow_id :: String.t()} | {:error, :not_found}
   @callback running_workflow_ids() :: [String.t()]
+  @callback correlated_workflows(
+              name :: String.t(),
+              correlation_ids :: [String.t()],
+              include_closed? :: boolean(),
+              include_tasks? :: boolean()
+            ) :: [Workflow.t()]
+  @callback pending_workflow_ids(name :: String.t()) :: [String.t()]
+  @callback workflow_ids_created_between(
+              name :: String.t(),
+              version :: integer(),
+              start_ms :: integer(),
+              end_ms :: integer()
+            ) :: [String.t()]
   @callback remove_workflow(id :: String.t()) :: :ok | {:error, :not_found}
   @callback in_progress_count(task_def_name :: String.t()) :: non_neg_integer()
   @callback pending_outbox(workflow_id :: String.t()) :: [{outbox_id(), Effect.t()}]
