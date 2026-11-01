@@ -226,12 +226,26 @@ defmodule ArchonWeb.RequestTest do
       assert Request.long(conn("t=0x7fffffffffffffff"), "t", nil) ==
                {:ok, 9_223_372_036_854_775_807}
 
+      # Character.isWhitespace, as int/4: a tab goes, a no-break space stays.
+      assert Request.long(conn("t=%091"), "t", nil) == {:ok, 1}
+      assert {:error, {:server_error, _message}} = Request.long(conn("t=%C2%A01"), "t", nil)
+
       assert Request.long(conn("t=9223372036854775808"), "t", nil) ==
                {:error,
                 {:server_error,
                  "Method parameter 't': Failed to convert value of type 'java.lang.String' " <>
                    ~s(to required type 'java.lang.Long'; For input string: "9223372036854775808")}}
     end
+  end
+
+  test "path_integer/2 takes Java's int range" do
+    assert Request.path_integer("2147483647", "version") == {:ok, 2_147_483_647}
+
+    assert Request.path_integer("2147483648", "version") ==
+             {:error,
+              {:server_error,
+               "Method parameter 'version': Failed to convert value of type 'java.lang.String' " <>
+                 ~s(to required type 'java.lang.Integer'; For input string: "2147483648")}}
   end
 
   describe "strings/2" do

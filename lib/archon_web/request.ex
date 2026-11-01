@@ -308,7 +308,7 @@ defmodule ArchonWeb.Request do
         {:ok, default}
 
       text ->
-        case String.replace(text, ~r/\s/u, "") do
+        case String.replace(text, @java_whitespace, "") do
           "" when java_type == "java.lang.Long" -> {:ok, default}
           digits -> int_result(parse_int(digits, @long_range), name, java_type)
         end
@@ -330,7 +330,7 @@ defmodule ArchonWeb.Request do
             "present but converted to null"}}
 
       digits ->
-        int_result(parse_int(digits), name, "java.lang.Integer")
+        int_result(parse_int(digits, @int_range), name, "java.lang.Integer")
     end
   end
 
