@@ -187,14 +187,17 @@ defmodule ArchonWeb.WorkflowControllerTest do
       :ok = Runtime.terminate_workflow(id, nil)
     end
 
-    test "parent fields in the body are not copied to the started workflow" do
+    test "parent fields, createdBy and idempotency fields are not copied to the workflow" do
       body =
         JSON.encode!(%{
           name: "archon_simple",
           input: %{x: 1},
           workflowId: "00000000-0000-0000-0000-00000000005d",
           parentWorkflowId: "parent",
-          parentWorkflowTaskId: "parent-task"
+          parentWorkflowTaskId: "parent-task",
+          createdBy: "someone",
+          idempotencyKey: "k",
+          idempotencyStrategy: "FAIL"
         })
 
       id = text(post_json("/api/workflow", body))
@@ -203,6 +206,9 @@ defmodule ArchonWeb.WorkflowControllerTest do
       workflow = json(get(build_conn(), "/api/workflow/#{id}?includeTasks=false"), 200)
       refute Map.has_key?(workflow, "parentWorkflowId")
       refute Map.has_key?(workflow, "parentWorkflowTaskId")
+      # Read and, as upstream's StartWorkflowInput, not used.
+      refute Map.has_key?(workflow, "createdBy")
+      refute Map.has_key?(workflow, "idempotencyKey")
       :ok = Runtime.terminate_workflow(id, nil)
     end
 

@@ -191,6 +191,8 @@ defmodule ArchonWeb.WorkflowController do
     end
   end
 
+  # `Archon.Runtime.get_workflow/2` answers only `:not_found`; a store failure raises (a 500 by
+  # the router's error handler).
   defp workflow(conn, id, include_tasks?) do
     case Runtime.get_workflow(id, include_tasks?) do
       {:ok, workflow} -> {:ok, workflow}
