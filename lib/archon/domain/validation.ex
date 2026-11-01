@@ -37,6 +37,18 @@ defmodule Archon.Domain.Validation do
     end)
   end
 
+  # Character.isWhitespace: Unicode space separators other than the no-break ones, the line and
+  # paragraph separators, and the ASCII controls \t-\r and \x1C-\x1F.
+  @java_blank ~r/^[\t-\r\x{1C}-\x{20}\x{1680}\x{2000}-\x{2006}\x{2008}-\x{200A}\x{2028}\x{2029}\x{205F}\x{3000}]*\z/u
+
+  @doc """
+  Java's `String#isBlank` and commons-lang `StringUtils.isBlank`: `nil` or only
+  `Character.isWhitespace` characters, so a no-break space is not blank.
+  """
+  @spec java_blank?(String.t() | nil) :: boolean()
+  def java_blank?(nil), do: true
+  def java_blank?(value) when is_binary(value), do: Regex.match?(@java_blank, value)
+
   @doc "`@NotEmpty` on a string: fails for `nil` and `\"\"`."
   @spec not_empty(String.t(), String.t() | nil, String.t()) :: [Codec.error()]
   def not_empty(path, value, message) when value in [nil, ""], do: [{path, message}]

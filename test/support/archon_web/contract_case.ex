@@ -32,6 +32,9 @@ defmodule ArchonWeb.ContractCase do
       answers 405; ADR 0023, decision 2).
     * `ignore: [path]` - leave out these key paths (lists of keys) of both bodies, for a message
       Archon cannot reproduce (Jackson's parse errors).
+    * `only: :expected_names` - keep only the elements of Archon's list body whose `name` is a
+      name in the fixture's list, for a list of definitions the shared runtime also holds other
+      tests' definitions in (`metadata_list_taskdefs`).
 
   `steps/2` cuts a part of the scenario. Run them with `replay/2`, threading the state from one
   call to the next.
@@ -58,7 +61,8 @@ defmodule ArchonWeb.ContractCase do
 
   Fixtures depend on the state earlier steps left, as the capture ran on an empty server. The
   runtime under test is shared with other tests, so a test replaying a list response (such as
-  `metadata_list_taskdefs`) has to keep other tests' definitions out of it.
+  `metadata_list_taskdefs`) has to keep other tests' definitions out of it (`only:`), and a test
+  replaying registrations has to remove the fixtures' definitions other tests stored first.
   """
 
   use ExUnit.CaseTemplate
@@ -75,7 +79,7 @@ defmodule ArchonWeb.ContractCase do
   @attempts 400
   @attempt_ms 25
 
-  @type exchange_opts :: [expect: :no_route, ignore: [[String.t()]]]
+  @type exchange_opts :: [expect: :no_route, ignore: [[String.t()]], only: :expected_names]
   @type step ::
           {:exchange, String.t()}
           | {:exchange, String.t(), exchange_opts()}
@@ -98,6 +102,7 @@ defmodule ArchonWeb.ContractCase do
   # Deliberate differences from the captured responses (see the moduledoc).
   @no_route [expect: :no_route]
   @jackson_message [ignore: [["message"]]]
+  @expected_names [only: :expected_names]
 
   @scenario [
     # metadata
@@ -148,7 +153,7 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "health"},
     {:exchange, "health_api"},
     # metadata: list, single update, overwrite, bulk update, validation
-    {:exchange, "metadata_list_taskdefs"},
+    {:exchange, "metadata_list_taskdefs", @expected_names},
     {:exchange, "metadata_register_taskdefs_single"},
     {:exchange, "metadata_update_taskdef"},
     {:exchange, "metadata_get_taskdef_updated"},
@@ -418,11 +423,20 @@ defmodule ArchonWeb.ContractCase do
         state
 
       nil ->
+        actual = only(actual, expected["body"], Keyword.get(opts, :only))
         state = bind_response(expected["body"], actual.body, state)
         assert_same(name, expected, actual, state, Keyword.get(opts, :ignore, []))
         state
     end
   end
+
+  defp only(actual, expected, :expected_names) when is_list(expected) and is_list(actual.body) do
+    names = MapSet.new(expected, & &1["name"])
+    %{actual | body: Enum.filter(actual.body, &(&1["name"] in names))}
+  end
+
+  # Not a list (an error): left for the comparison to report.
+  defp only(actual, _expected, _only), do: actual
 
   defp assert_no_route(name, actual) do
     "/" <> path = actual.path |> URI.parse() |> Map.fetch!(:path)

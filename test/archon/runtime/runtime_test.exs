@@ -12,7 +12,7 @@ defmodule Archon.Runtime.RuntimeTest do
   use Archon.RuntimeCase
 
   alias Archon.Contract
-  alias Archon.Domain.{Task, WorkflowDef, WorkflowTask}
+  alias Archon.Domain.{SchemaDef, SubWorkflowParams, Task, TaskDef, WorkflowDef, WorkflowTask}
 
   import Archon.StepReplay, only: [assert_matches: 2]
 
@@ -184,6 +184,130 @@ defmodule Archon.Runtime.RuntimeTest do
       assert {:ok, %{status: :terminated}} = Runtime.get_workflow(task.sub_workflow_id)
     end
 
+    # ADR 0023, decision 5: a schema Archon cannot check is refused before anything is created.
+    test "a definition enforcing an inline schema is refused, embedded ones included" do
+      task_def = %TaskDef{
+        name: "archon_task_a",
+        enforce_schema: true,
+        output_schema: %SchemaDef{external_ref: "x"}
+      }
+
+      for {definition, what} <- [
+            {%WorkflowDef{
+               name: "archon_inline",
+               input_schema: %SchemaDef{data: %{"type" => "object"}},
+               tasks: [simple_task()]
+             }, "archon_inline inputSchema"},
+            {%WorkflowDef{
+               name: "archon_inline",
+               tasks: [%{simple_task() | task_definition: task_def}]
+             }, "archon_task_a outputSchema"},
+            {%WorkflowDef{
+               name: "archon_inline",
+               tasks: [
+                 %WorkflowTask{
+                   name: "loop",
+                   task_reference_name: "loop_ref",
+                   type: "DO_WHILE",
+                   loop_over: [
+                     %WorkflowTask{
+                       name: "sub",
+                       task_reference_name: "sub_ref",
+                       type: "SUB_WORKFLOW",
+                       sub_workflow_param: %SubWorkflowParams{
+                         workflow_definition: %WorkflowDef{
+                           name: "archon_child",
+                           output_schema: %SchemaDef{name: " "},
+                           tasks: [simple_task()]
+                         }
+                       }
+                     }
+                   ]
+                 }
+               ]
+             }, "archon_child outputSchema"}
+          ] do
+        assert Runtime.start_workflow(%{
+                 definition: definition,
+                 input: %{},
+                 workflow_id: "refused"
+               }) ==
+                 {:error, {:invalid, "Schema validation is not supported yet: #{what}"}}
+      end
+
+      assert Runtime.get_workflow("refused") == {:error, :not_found}
+
+      # A name reference, or a schema not enforced, starts.
+      for definition <- [
+            %WorkflowDef{
+              name: "archon_inline",
+              input_schema: %SchemaDef{name: "s"},
+              tasks: [simple_task()]
+            },
+            %WorkflowDef{
+              name: "archon_inline",
+              enforce_schema: false,
+              input_schema: %SchemaDef{data: %{}},
+              tasks: [%{simple_task() | task_definition: %{task_def | enforce_schema: false}}]
+            }
+          ] do
+        assert {:ok, id} = Runtime.start_workflow(%{definition: definition, input: %{}})
+        assert Runtime.terminate_workflow(id, "done") == :ok
+      end
+    end
+
+    test "a registered task definition is checked when it is embedded" do
+      {:ok, registered} = Runtime.metadata().get_task_def("archon_task_a")
+
+      :ok =
+        Runtime.metadata().update_task_def(%{
+          registered
+          | enforce_schema: true,
+            input_schema: %SchemaDef{data: %{}}
+        })
+
+      assert Runtime.start_workflow(%{name: "archon_simple", input: %{}}) ==
+               {:error,
+                {:invalid, "Schema validation is not supported yet: archon_task_a inputSchema"}}
+    end
+
+    # The child's definition is the input expression's value, known only when the task runs:
+    # the SUB_WORKFLOW task fails with the refusal, as for any start refused before creation.
+    test "a sub-workflow definition given by an expression is refused when the task starts" do
+      definition = %WorkflowDef{
+        name: "archon_parent",
+        tasks: [
+          %WorkflowTask{
+            name: "sub",
+            task_reference_name: "sub_ref",
+            type: "SUB_WORKFLOW",
+            sub_workflow_param: %SubWorkflowParams{
+              name: "archon_child",
+              version: 1,
+              workflow_definition: "${workflow.input.child}"
+            }
+          }
+        ]
+      }
+
+      child = %{
+        "name" => "archon_child",
+        "inputSchema" => %{"data" => %{}},
+        "tasks" => [WorkflowTask.to_json(simple_task())]
+      }
+
+      assert {:ok, id} =
+               Runtime.start_workflow(%{definition: definition, input: %{"child" => child}})
+
+      task = eventually(fn -> (t = task(id, "sub_ref")) && t.status == :failed && t end)
+
+      assert task.reason_for_incompletion ==
+               "Schema validation is not supported yet: archon_child inputSchema"
+
+      assert task.sub_workflow_id == nil
+      assert eventually(fn -> match?({:ok, %{status: :failed}}, Runtime.get_workflow(id)) end)
+    end
+
     test "an ID that exists is a conflict" do
       id = start_simple(%{"x" => 1})
 
@@ -244,4 +368,7 @@ defmodule Archon.Runtime.RuntimeTest do
       await_down(id)
     end
   end
+
+  defp simple_task,
+    do: %WorkflowTask{name: "archon_task_a", task_reference_name: "a_ref", type: "SIMPLE"}
 end

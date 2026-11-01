@@ -8,6 +8,9 @@
 - 갱신: 2026-11-01 조각 5a가 upstream 서버에서 확인한 사실로 결정 1(HEAD), 결정 2(404 문구, 끝 슬래시), 결정 3(요청 body·쿼리 변환,
   `ArchonWeb.Request`), 결정 4(검증 오류의 `instance`, `update-v2`의 검증 실패 500, 오류 종류 두 개), 결정 6(캡처 결과와
   재생 도우미 세부), 결정 7(5a 파일 목록, 5e의 선행 조건)과 "upstream과 의도적으로 다른 점"을 보강했다.
+- 갱신: 2026-11-01 조각 5c가 결정 2(`Archon.Metadata`의 세부, 목록 순서, 단건 body를 목록으로 받기), 결정 4(코덱 타입 오류,
+  정의 오류 경로 접두사), 결정 5(판정 함수와 거절 지점의 순서), 결정 6(재생 옵션 `only:`, 정의 지우기)과 "upstream과 의도적으로
+  다른 점"을 보강했다. 새로 확인한 사실은 upstream 서버(기준 SHA 빌드, 빈 SQLite)에서 관측했다.
 - 갱신: 2026-11-01 조각 5e가 결정 4(`update-v2` 검증 실패 문구를 Spring 문구 그대로 만듦, 태스크 갱신의 404 문구 구분, 코덱 타입
   오류)와 결정 7(5e의 재생 선행 조건을 실제로 한 방식)을 upstream 서버 관측으로 보강하고, 결정 3에 코덱 오류 수 한도를 더했다.
 
@@ -112,6 +115,25 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   컨트롤러가 같은 순서로 한다.
   저장은 `Archon.Runtime.Metadata` behaviour를 그대로 쓰고, 목록 조회를 위해 콜백 `get_all_task_defs/0`을 더한다(메모리·Postgres
   구현과 계약 시험).
+- **`Archon.Metadata`의 세부(조각 5c).**
+  - 함수: `register_task_defs/1`, `update_task_def/1`, `get_task_def/1`, `get_task_defs/0`, `register_workflow_def/1`,
+    `update_workflow_def/1`, `update_workflow_defs/1`(`{:ok, BulkResponse}`), `get_workflow_def/2`(문구 있는 404),
+    `find_workflow_def/2`(문구 없는 `:not_found`, `version`이 `nil`이면 최신). 메서드 검증 실패는 인자 기준 경로의
+    `{:invalid, [{경로, 문구}]}`이고 접두사는 컨트롤러가 붙인다.
+  - 감사 필드: 등록한 TaskDef는 `createdBy`가 client app(인증이 없으므로 `""`, upstream 픽스처와 같음), `createTime`이 지금,
+    `updatedBy`는 없음, `updateTime`은 0이다(upstream은 `null`을 넣고 getter가 0을 쓴다). WorkflowDef 등록은 `createTime`만,
+    갱신은 `updateTime`만 바꾸고 나머지 감사 필드는 받은 그대로다(`overwrite`·일괄 갱신 뒤 `createTime`이 0인 픽스처).
+  - `GET /api/metadata/taskdefs`의 순서는 이름의 바이트 순이다. upstream DAO는 `ORDER BY` 없이 읽어 순서가 정해져 있지 않다
+    (SQLite는 삽입 순). Postgres 구현은 `ORDER BY name COLLATE "C"`다.
+  - 목록 body(`POST /api/metadata/taskdefs`, `PUT /api/metadata/workflow`)는 배열이 아닌 값을 원소 하나의 목록으로 받는다.
+    upstream 설정 `spring.jackson.deserialization.accept-single-value-as-array=true` 때문이다(5a 픽스처
+    `metadata_register_taskdefs_single`, `PUT /api/metadata/workflow`의 단건은 서버에서 확인).
+  - 목록의 `null` 원소: `PUT /api/metadata/workflow`는 원소 제약 `@NotNull`로 요청 전체가 400(경로
+    `updateWorkflowDef.arg0[i].<list element>`, 문구 `WorkflowDef cannot be null`)이다. `POST /api/metadata/taskdefs`는 `@Valid`가
+    `null`을 건너뛰어 검증을 통과하고, 앞 원소를 저장한 뒤 그 원소에서 upstream의 `NullPointerException` 문구로 500이다
+    (`Cannot invoke "...TaskDef.setCreatedBy(String)" because "taskDefinition" is null`). 둘 다 upstream 관측 그대로다.
+  - 일괄 갱신에서 정의 하나의 저장이 예외(Postgres의 NUL 이름, 펜스)나 exit(호출 timeout, 멈춘 저장소 서버)를 내면 upstream처럼 그 정의만 실패로 넣고 나머지를
+    저장한다. 문구는 Elixir 용어를 내보내지 않도록 고정 문구 `"Internal server error"`이고 자세한 내용은 로그에 남긴다.
 - 컨트롤러는 런타임 API와 `Archon.Metadata`만 부른다. 저장소·큐·`WorkflowServer`를 직접 부르지 않는다. ADR 0018 결정 7은
   REST가 부를 API를 `Archon.Runtime`·`Archon.Runtime.Tasks`로 정했으나 정의 등록 API가 없었으므로, 이 결정이 그 경계에
   `Archon.Metadata`를 더한다(아래 결과 절의 "일부 0023이 대체"). 백엔드는 런타임
@@ -190,6 +212,8 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   실수, 불리언)은 Java `toString` 표기의 문자열(`""`도 그대로, 정수 필드는 정수로), enum·struct·리스트·맵·`nil`은 `null`. 예:
   `POST /api/tasks`에 `taskId: ""`면 `invalidValue: ""`(`task_update_invalid`). upstream `path`의 메서드·인자 접두사는 픽스처로
   확인했다: `registerTaskDef.arg0`(배열이면 `[i]`가 붙음), `registerWorkflowDef.arg0`, `updateWorkflowDef.arg0`, `updateTask.arg0`.
+  5c가 upstream 서버에서 더 확인했다: `PUT /api/metadata/taskdefs`는 `updateTaskDef.arg0`, `POST /api/metadata/workflow?overwrite=true`로
+  있는 정의를 바꿀 때는 `updateWorkflowDef.arg0`(단건이라 `[i]` 없음), 이름 없는 정의는 `registerWorkflowDef.arg0.name`이다.
   값은 접두사 전의 경로로 찾는다. 경계 사례는 5a 픽스처 `metadata_register_taskdefs_coerced`(primitive 필드의 `null`은 `"0"`, 정수
   필드의 `-1.7`은 `"-1"`)와 `metadata_register_taskdefs_blank_name`(`""`)이다. 도메인 코덱에는 실수 필드가 없으므로 실수 표기는
   생기지 않는다.
@@ -211,6 +235,13 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   바꾸지 않는다. 같은 태스크 ID가 다른 워크플로우에 있으면 upstream은 그 태스크를 찾지만 Archon은 워크플로우 프로세스 안에서만 찾으므로
   태스크 문구 404다(ADR 0024의 신뢰 모델과 무관한 기존 차이). `extendLease`도 같은 이유로 `workflowInstanceId`가 틀리거나 없으면 태스크 문구 404다(upstream은 `taskId`만으로
   리스를 늘린다). 워크플로우를 다시 읽다 저장소 오류가 나면 예외가 올라가 500(`retryable` 참)이다.
+- **코덱 타입 오류(조각 5c).** body가 JSON이지만 도메인 코덱이 바꾸지 못하는 값(`"retryCount": "abc"`, 객체 자리의 배열)은
+  upstream처럼 500이고 문구는 `"JSON parse error: "`로 시작한다. 그 뒤는 Jackson 문구(``Cannot deserialize value of type `int`
+  from String "abc": not a valid `int` value``, Java 타입 이름과 원래 값) 대신 코덱의 첫 오류로 쓴다:
+  `"JSON parse error: <경로> <이유>"`(경로가 비면 이유만, 예 `JSON parse error: [0].retryCount must be integer`). 아래 5e의
+  `TaskResult` 규칙과 같은 모양이고 5d도 따른다. Jackson 문구를 옮기려면 필드마다 Java 타입과 Jackson의 값 표기를 다시 만들어야 해서
+  맞추지 않는다. 지금 이 경우의 픽스처는 없고(5a가 관측만 함), 5f가 캡처하면 재생에서 `ignore: [["message"]]`로 둔다.
+  숫자 문자열은 Jackson처럼 숫자 필드로 받는다(`"retryCount": "7"`은 7, upstream 관측, 코덱의 스칼라 강제 변환은 ADR 0002).
 - **`TaskResult` 코덱 타입 오류(조각 5e).** 필드 타입이 맞지 않는 body(`status: "BAD"`, 배열 body)는 upstream처럼 500이고 문구는
   `"JSON parse error: "`로 시작하지만 그 뒤는 Jackson 문구가 아니라 코덱 오류의 경로와 이유다(결정 3의 JSON이 아닌 body와 같은 방식).
   관측한 upstream 문구 예: `"JSON parse error: Cannot deserialize value of type `com.netflix.conductor.common.metadata.tasks.TaskResult$Status`
@@ -256,6 +287,24 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
     `{:invalid, 문구}`로 돌려주므로 REST에서는 400, 하위 워크플로우 시작에서는 기존 분류대로 SUB_WORKFLOW 태스크 `FAILED`다.
 - 이름 참조는 upstream처럼 받고 검사하지 않는다. `enforceSchema`가 거짓이면 어떤 스키마도 받는다
   (upstream도 검사하지 않는다).
+- **판정 함수와 거절 지점(조각 5c).**
+  - `Archon.Domain.SchemaDef.name_reference?/1`(공백 판정은 Java `Character.isWhitespace`라 no-break space는 공백이 아님),
+    `Archon.Domain.TaskDef.check_schema/1`, `Archon.Domain.WorkflowDef.check_schema/1`이다. 반환은 `:ok` 또는
+    `{:error, {:invalid, 문구}}`. 정의 이름이 없으면 문구의 이름은 `null`이다. WorkflowDef는 자기 스키마(`inputSchema`, 그다음
+    `outputSchema`)를 먼저, 그다음 태스크를 순서대로 본다. 태스크 안의 목록(`decisionCases`, `defaultCase`, `forkTasks`, `loopOver`)은
+    태스크 타입과 상관없이 모두 내려간다(`collectTasks`는 타입별 목록만 보지만 박힌 정의를 하나도 빠뜨리지 않기 위해서다).
+    `subWorkflowParam.workflowDefinition`이 `${...}` 식이면 그 자리에서는 볼 것이 없다. 거절할 곳이 여럿이면 첫 거절만 문구에
+    나오고, `decisionCases` 사이의 순서는 JSON 순서가 아니라 맵 순서다(ADR 0002의 키 순서 차이).
+  - `Archon.Metadata`: 메서드 검증 다음에 본다. `POST /api/metadata/taskdefs`는 목록 전체를 본 뒤 하나라도 거절이면 아무것도
+    저장하지 않는다. `PUT /api/metadata/taskdefs`는 없는 이름의 404 다음, `POST /api/metadata/workflow`는 409 판정 다음이다.
+  - `Archon.Runtime.new_workflow`: 태스크 정의를 채운 정의(`populate`) 전체를 `NULL input` 검사 다음에 본다. 인라인
+    `:definition`(`StartWorkflowRequest.workflowDef`, 식으로 정해진 `subWorkflowDefinition`)뿐 아니라 이름으로 찾은 등록본과 그
+    태스크에 채운 등록 TaskDef도 함께 본다. 등록 때 이미 거절되므로 보통은 통과하지만, 이 결정 전에 저장된 정의나 저장소에 직접
+    넣은 정의도 시작에서 막기 위해서다. 하위 워크플로우 시작에서는 `SubWorkflows.start_child`가 `{:invalid, 문구}`를 기존처럼
+    SUB_WORKFLOW 태스크의 `FAILED`(`reasonForIncompletion`이 그 문구)로 바꾼다. `start_workflow_idempotent/1`도 저장된 같은 ID의
+    자식을 찾기 전에 이 검사를 하므로, 이 결정 전에 그런 정의로 시작된 자식의 SUB_WORKFLOW 태스크를 다시 실행하면(복구, outbox)
+    자식이 살아 있어도 태스크가 `FAILED`가 된다. 정의를 못 찾을 때(`:not_found`)와 같은 동작이고, 이 결정 전에 저장된 정의는 개발
+    중의 시험 데이터뿐이라 받아들인다.
 - 검증기 채택과 `/api/schema`는 Later의 별도 ADR이다. 그때 이 거절을 없앤다.
 
 ### 6. 골든 픽스처 기반 계약 시험
@@ -290,8 +339,8 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 - **5a 캡처 결과.** 위 목록을 51개 픽스처로 더했다(모두 87개). 기존 36개는 다시 캡처해도 `normalize/1` 기준 같았고, 새 캡처를
   빈 서버에서 한 번 더 받아 87개 모두 같음을 확인했다. 목록에서 다음은 그대로 캡처할 수 없었다.
   - "서비스 단계 실패가 섞인 일괄": upstream SQLite DAO의 `updateWorkflowDef`는 이름이 `null`일 때만 실패하는데, 그 정의는
-    `@Valid`가 먼저 막는다. 그래서 정의별 실패가 섞인 `BulkResponse`는 Archon의 스키마 거절(결정 5)에서만 생기고, 5c의 단위 시험이
-    맡는다.
+    `@Valid`가 먼저 막는다. 그래서 정의별 실패가 섞인 `BulkResponse`는 Archon의 스키마 거절(결정 5)이나 저장 예외(결정 2)에서만
+    생기고, 5c의 단위 시험이 맡는다.
   - "MVP 경로의 다른 메서드" 중 Later 경로와 겹치는 것(`DELETE /api/metadata/taskdefs/{tasktype}`)은 upstream에서 정의를 지우는
     부작용이 있어 캡처하지 않았다. `PATCH /api/workflow`, `PUT /api/tasks/{taskId}`(405)를 캡처했다.
 - **재생 도우미 세부(5a).** `ArchonWeb.ContractCase.scenario/0`이 캡처 순서 전체이고, `steps/2`로 잘라 `replay/2`로 돌린다. 의도적인
@@ -301,6 +350,12 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   순서 없이 비교한다(Hibernate가 위반을 정해진 순서 없이 낸다). 픽스처별 스키마 분류는 `Archon.Contract.fixture_schemas/0`로
   옮겨 계약 시험과 재생이 함께 쓴다. 런타임은 다른 시험과 공유되므로 목록 응답(`metadata_list_taskdefs`)을 재생하는 조각은 다른
   시험의 정의를 걸러야 한다.
+- **정의 픽스처 재생(조각 5c).** 단계 옵션 `only: :expected_names`는 Archon 목록 body에서 픽스처 목록에 이름이 있는 원소만 남긴다
+  (`metadata_list_taskdefs`). 다른 시험(`Archon.RuntimeCase`)이 `archon_simple`·`archon_task_a`·`archon_task_b`를 등록해 두므로,
+  `test/archon_web/metadata_controller_test.exs`는 재생 전에 Metadata 픽스처가 쓰는 정의 이름을 저장소에서 지우고(behaviour에 삭제가
+  없어 메모리는 프로세스 상태, Postgres는 행을 직접 지운다) 끝나면 다시 지운 뒤 `RuntimeCase`의 정의를 되돌린다. 재생은 두
+  구간(`metadata_register_taskdefs`~`metadata_get_workflow_not_found`, `metadata_list_taskdefs`~`metadata_update_workflows_empty`)이고,
+  사이의 워크플로우 단계는 정의를 바꾸지 않으므로 둘째 구간 앞에서 첫 구간의 등록만 다시 한다.
 - 시나리오 시험 밖의 단위 시험은 컨트롤러마다 오류 변환과 쿼리 기본값을 본다.
 
 ### 7. 구현 조각
@@ -309,7 +364,7 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 |---|---|---|---|---|
 | 5a | 결정 1·4·6의 기반: 의존성, Endpoint·Router(MVP 19개 경로 전부), `Health` 컨트롤러, `ArchonWeb.Errors`, `ErrorResponse` 모델, MVP가 아닌 요청의 404와 Later 리터럴 경로, 설정(주소·포트, ADR 0024 결정 4), 재생 도우미, 픽스처 보강 캡처. 나머지 세 컨트롤러는 모든 액션이 없는 경로와 같은 404로 답하는 골격만 둔다 | `/health` 픽스처, 오류 변환 단위 시험, 없는 경로 픽스처, 기존 픽스처 재캡처 비교 | 없음 | `mix.exs`, `mix.lock`, `config/{config,test,runtime}.exs`, `lib/archon/application.ex`, `test/test_helper.exs`·`test/support/postgres_case.ex`(시험에서 런타임 뒤에 Endpoint 띄우기), `lib/archon_web.ex`, `lib/archon_web/{endpoint,router,errors,error_json,request,response}.ex`, `lib/archon_web/controllers/{health,metadata,workflow,task}_controller.ex`(골격), `lib/archon/domain/{error_response,validation_error}.ex`, `lib/archon/domain/task_result.ex`(`__fields__/0`, `invalidValue` 찾기), `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`(추가), `test/fixtures/contract/README.md`, `test/archon/contract_test.exs`·`test/archon/domain/contract_round_trip_test.exs`(새 픽스처 등록), `test/support/contract.ex`(`fixture_schemas/0`, `mask_times/1`), `test/support/archon_web/contract_case.ex`, `test/archon_web/{health,errors,router,request,contract_case,endpoint}_test.exs` |
 | 5b | [ADR 0024](0024-worker-input-trust-and-auth.md) 결정 1~3: SUB_WORKFLOW `subWorkflowId` 고정, 자식 소유권 확인, 조상 우회 코드 제거, ADR 0024 `승인`과 ADR 0018 목록 상태 | ADR 0024 결정 5의 시험, 기존 런타임 시험 전부(두 백엔드) | 없음 | ADR 0024 결정 5의 파일, `docs/adr/{0024,README}.md` |
-| 5c | 결정 2·5의 정의: `Archon.Metadata` 서비스, `get_all_task_defs/0` 콜백(메모리·Postgres·계약), `BulkResponse` 모델, 스키마 판정 함수와 시작 경로의 거절, `Metadata` 컨트롤러 일곱 액션 | `metadata_*` 픽스처 재생, 스키마 거절 시험(박힌 정의, 시작의 인라인 정의, 식으로 정한 하위 워크플로우 정의), 저장소 계약 시험 | 5a | `lib/archon/metadata.ex`, `lib/archon/domain/{workflow_def,task_def}.ex`(판정 함수), `lib/archon/runtime.ex`(`new_workflow`의 거절), `test/archon/runtime/runtime_test.exs`, `lib/archon/runtime/metadata.ex`, `lib/archon/runtime/metadata/{memory,postgres}.ex`, `test/support/runtime/metadata_contract.ex`, `test/archon/runtime/{metadata,metadata_postgres}_test.exs`, `lib/archon/domain/bulk_response.ex`, `lib/archon_web/controllers/metadata_controller.ex`, `test/archon/metadata_test.exs`, `test/archon_web/metadata_controller_test.exs` |
+| 5c | 결정 2·5의 정의: `Archon.Metadata` 서비스, `get_all_task_defs/0` 콜백(메모리·Postgres·계약), `BulkResponse` 모델, 스키마 판정 함수와 시작 경로의 거절, `Metadata` 컨트롤러 일곱 액션 | `metadata_*` 픽스처 재생, 스키마 거절 시험(박힌 정의, 시작의 인라인 정의, 식으로 정한 하위 워크플로우 정의), 저장소 계약 시험 | 5a | `lib/archon/metadata.ex`, `lib/archon/domain/{workflow_def,task_def}.ex`(판정 함수), `lib/archon/runtime.ex`(`new_workflow`의 거절), `test/archon/runtime/runtime_test.exs`, `lib/archon/runtime/metadata.ex`, `lib/archon/runtime/metadata/{memory,postgres}.ex`, `test/support/runtime/metadata_contract.ex`, `test/archon/runtime/{metadata,metadata_postgres}_test.exs`, `lib/archon/domain/bulk_response.ex`, `lib/archon_web/controllers/metadata_controller.ex`, `test/archon/metadata_test.exs`, `test/archon_web/metadata_controller_test.exs`. 구현에서 더한 것: `lib/archon/domain/{schema_def,validation}.ex`(이름 참조 판정, Java 공백 판정), `test/support/archon_web/contract_case.ex`(`only:` 옵션) |
 | 5d | 결정 2·3의 워크플로우: `StartWorkflowRequest`·`WorkflowStatus` 모델, 시작 두 가지(시작 맵은 요청 필드로만 만들고 부모 필드를 넣지 않음, ADR 0024 결정 4), 조회, 상태 요약, 종료 | `workflow_*` 픽스처 재생, 시작 맵에 부모 필드가 없는 시험 | 5a, 5c | `lib/archon/domain/{start_workflow_request,workflow_status}.ex`, `lib/archon_web/controllers/workflow_controller.ex`, `test/archon/domain/{start_workflow_request,workflow_status}_test.exs`, `test/archon_web/workflow_controller_test.exs` |
 | 5e | 결정 2의 태스크: poll, batch poll, 갱신, `update-v2`, 조회 | `task_*` 픽스처 재생, 검증 실패(`POST /api/tasks`는 400, `update-v2`는 500, 결정 4) | 5a, **5b** | `lib/archon_web/controllers/task_controller.ex`, `test/archon_web/task_controller_test.exs`, `lib/archon/domain/codec.ex`·`test/archon/domain/codec_test.exs`(코덱 오류 수 한도, 결정 3) |
 | 5f | 통합: 전체 시나리오 재생(픽스처 전부, 두 백엔드), Later·Unsupported 경로 404 표본, 실제 HTTP로 띄운 엔드포인트의 연기 시험, README 호환성 절(ADR 0001 결과 절의 Unsupported 목록 링크, 인증 없음과 주소 기본값), ADR 0023 `승인`과 ADR 0018 목록 상태 | `mix test` 전부(두 백엔드), CI | 5c, 5d, 5e | `test/archon_web/contract_replay_test.exs`, `test/archon_web/server_test.exs`, 빠진 픽스처가 있으면 `scripts/contract/capture_fixtures.sh`·`test/fixtures/contract/*`·`test/archon/contract_test.exs`, `README.md`, `docs/adr/{0023,README}.md`, `docs/adr/0003-porting-strategy.md`(비고) |
@@ -350,6 +405,9 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 - **요청 읽기의 차이**(결정 3): JSON이 아닌 body의 Jackson 문구를 옮기지 않고, 8 MB 넘는 body는 413이다(upstream은 제한이
   없다). 실수로 나타낼 수 없는 지수(`1e999`)는 500 parse error다
   (upstream은 `BigDecimal`로 받는다).
+- **`GET /api/metadata/taskdefs`는 이름 순이다**(결정 2). upstream은 순서를 정하지 않는다(SQLite는 삽입 순).
+- **일괄 갱신에서 저장 예외의 실패 문구는 고정 문구다**(결정 2). upstream은 예외의 `getMessage()`를 넣는다.
+- **코덱 타입 오류의 문구는 Jackson 문구가 아니다**(결정 4).
 - JSON 객체 키 순서 등 코덱 차이는 ADR 0002의 목록 그대로다.
 
 ## 대안

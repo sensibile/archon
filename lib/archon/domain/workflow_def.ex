@@ -23,6 +23,8 @@ defmodule Archon.Domain.WorkflowDef do
     Codec,
     RateLimitConfig,
     SchemaDef,
+    SubWorkflowParams,
+    TaskDef,
     Validation,
     WorkflowTask
   }
@@ -122,6 +124,56 @@ defmodule Archon.Domain.WorkflowDef do
   @doc "Decodes `to_storage/1` output. Keys missing from older rows decode to the field default."
   @spec from_storage(Codec.json()) :: Codec.result(t())
   def from_storage(json), do: Codec.decode(__MODULE__, @fields, json, [], internal: true)
+
+  @doc """
+  The schema refusal of ADR 0023, decision 5, for the definition and every definition embedded in
+  it: with `enforceSchema` (true by default for a workflow definition), an `inputSchema` or
+  `outputSchema` that is not a reference by name (`Archon.Domain.SchemaDef.name_reference?/1`)
+  is refused with `{:invalid, message}` (a 400). The embedded definitions are each task's
+  `taskDefinition` (`Archon.Domain.TaskDef.check_schema/1`) and inline
+  `subWorkflowParam.workflowDefinition`, in the tasks nested in any task list (`decisionCases`,
+  `defaultCase`, `forkTasks`, `loopOver`, whatever the task type), recursively.
+  """
+  @spec check_schema(t()) :: :ok | {:error, {:invalid, String.t()}}
+  def check_schema(%__MODULE__{} = d) do
+    own =
+      if d.enforce_schema,
+        do: SchemaDef.check(d.name, input: d.input_schema, output: d.output_schema),
+        else: :ok
+
+    with :ok <- own, do: check_tasks(d.tasks)
+  end
+
+  defp check_tasks(tasks), do: first_error(tasks || [], &check_task/1)
+
+  defp check_task(nil), do: :ok
+
+  defp check_task(%WorkflowTask{} = task) do
+    nested =
+      Map.values(task.decision_cases || %{}) ++
+        [task.default_case, task.loop_over] ++ (task.fork_tasks || [])
+
+    with :ok <- check_task_def(task.task_definition),
+         :ok <- check_sub_workflow(task.sub_workflow_param),
+         do: first_error(nested, &check_tasks/1)
+  end
+
+  defp first_error(items, check) do
+    Enum.find_value(items, :ok, fn item ->
+      case check.(item) do
+        :ok -> nil
+        error -> error
+      end
+    end)
+  end
+
+  defp check_task_def(%TaskDef{} = task_def), do: TaskDef.check_schema(task_def)
+  defp check_task_def(_none), do: :ok
+
+  defp check_sub_workflow(%SubWorkflowParams{workflow_definition: %__MODULE__{} = definition}),
+    do: check_schema(definition)
+
+  defp check_sub_workflow(_params), do: :ok
 
   @doc "Upstream `WorkflowDef.getKey/2`: `name.version`."
   @spec key(String.t(), integer()) :: String.t()

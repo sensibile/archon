@@ -133,6 +133,18 @@ defmodule Archon.Domain.TaskDef do
   def concurrency_limit(%__MODULE__{concurrent_exec_limit: limit}), do: limit
 
   @doc """
+  The schema refusal of ADR 0023, decision 5: with `enforceSchema` (false by default for a task
+  definition), an `inputSchema` or `outputSchema` that is not a reference by name
+  (`Archon.Domain.SchemaDef.name_reference?/1`) cannot be checked without a schema validator, so
+  the definition is refused with `{:invalid, message}` (a 400).
+  """
+  @spec check_schema(t()) :: :ok | {:error, {:invalid, String.t()}}
+  def check_schema(%__MODULE__{enforce_schema: true, name: name} = d),
+    do: SchemaDef.check(name, input: d.input_schema, output: d.output_schema)
+
+  def check_schema(%__MODULE__{}), do: :ok
+
+  @doc """
   Bean validation of a task definition. See `Archon.Domain.Validation` for `opts`.
 
   Ports the field annotations of `TaskDef` plus the class-level `@TaskTimeoutConstraint`.

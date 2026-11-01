@@ -60,6 +60,19 @@ defmodule Archon.Runtime.Metadata.Postgres do
   end
 
   @impl Metadata
+  @spec get_all_task_defs(Postgres.t()) :: [TaskDef.t()]
+  def get_all_task_defs(instance \\ Postgres.runtime()) do
+    %{rows: rows} =
+      query!(
+        instance,
+        ~s(SELECT name, json_data FROM #{table(instance, "meta_task_def")} ORDER BY name COLLATE "C"),
+        []
+      )
+
+    Enum.map(rows, fn [name, json] -> decode!(TaskDef, name, json) end)
+  end
+
+  @impl Metadata
   @spec create_workflow_def(Postgres.t(), WorkflowDef.t()) :: :ok | {:error, :conflict}
   def create_workflow_def(
         instance \\ Postgres.runtime(),
@@ -149,16 +162,20 @@ defmodule Archon.Runtime.Metadata.Postgres do
   defp fetch(instance, module, sql, [name | _rest] = params) do
     with true <- storable?(name),
          %{rows: [[json]]} <- query!(instance, sql, params) do
-      case module.from_storage(JSON.decode!(json)) do
-        {:ok, definition} ->
-          {:ok, definition}
-
-        {:error, errors} ->
-          raise ArgumentError,
-                "stored #{inspect(module)} #{inspect(name)} does not decode: #{inspect(errors)}"
-      end
+      {:ok, decode!(module, name, json)}
     else
       _absent -> {:error, :not_found}
+    end
+  end
+
+  defp decode!(module, name, json) do
+    case module.from_storage(JSON.decode!(json)) do
+      {:ok, definition} ->
+        definition
+
+      {:error, errors} ->
+        raise ArgumentError,
+              "stored #{inspect(module)} #{inspect(name)} does not decode: #{inspect(errors)}"
     end
   end
 
