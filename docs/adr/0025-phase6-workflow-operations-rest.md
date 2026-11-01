@@ -294,14 +294,17 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   (메모리·Postgres·계약 시험). `Archon.Metadata`가 upstream `MetadataServiceImpl`과 `MetadataDAO`의 기본 구현을 옮긴다.
   - `GET /api/metadata/workflow?classifier=`: 모든 버전을 이름, 버전 순으로. `classifier`가 공백이 아니면
     `WorkflowClassifier.classifierOf`(정의 `metadata`의 `classifier` 문자열, `agent_sdk`·`agentDef`가 있으면 `"agent"`, 아니면
-    `"workflow"`)와 대소문자 없이 비교해 거른다.
-  - `names`: 이름을 중복 없이 정렬한 목록. `{name}/versions`: 그 이름의 `{name, version, createTime}` 요약을 버전 순으로(없으면 `[]`,
+    `"workflow"`)와 대소문자 없이 비교해 거른다. 쿼리 값은 Java `trim`하고 저장된 `classifier`는 다듬지 않는다(upstream과 같음).
+    쿼리의 잘못된 UTF-8은 Tomcat처럼 U+FFFD로 읽는다(6c 보충).
+  - `names`: 이름을 중복 없이 Java `String` 순서(UTF-16 코드 단위)로 정렬한 목록. `{name}/versions`: 그 이름의 `{name, version, createTime}` 요약을 버전 순으로(없으면 `[]`,
     `updateTime`은 없음). `names-and-versions`: 이름별 요약 목록(`updateTime` 포함, 이름·버전 순). `latest-versions`: 이름마다 가장
     큰 버전의 정의(upstream은 순서가 없고 archon은 이름 순). `WorkflowDefSummary`는 도메인 코덱 모델로 더한다.
 - **삭제.** `DELETE /api/metadata/workflow/{name}/{version}`과 `DELETE /api/metadata/taskdefs/{tasktype}`은 실행 중인 워크플로우나
   정의 참조를 보지 않고 지운다(upstream과 같음). 없는 정의는 upstream SQLite DAO의 `NotFoundException`이 트랜잭션 도우미에서
   `NonTransientException`으로 감싸여 **500**이고 문구는 `"No such workflow definition: <name> version: <v>"`,
   `"No such task definition"`이다. 픽스처로 확인하고 그대로 맞춘다. `version`이 숫자가 아니면 Spring 변환 실패 500이다.
+  6c 구현 보충(upstream 서버에서 확인): `version`은 쿼리 정수와 같이 바꾼다(`Character.isWhitespace` 공백 제거, `0x1`·`+1`도 1, no-break space는 남아 변환 실패 500). 공백뿐이면 null로 바뀌어
+  500 `"Required URI template variable 'version' for method parameter type Integer is present but converted to null"`이다.
   정의를 지우면 그 정의로 이미 도는 워크플로우는 저장된 정의로 계속 돈다(archon은 시작 때 정의를 워크플로우에 박는다).
 - **`POST /api/metadata/workflow/validate`**: 등록과 같은 `WorkflowDef.validate/2` 전부(이름, 태스크 목록, `schemaVersion`, ref
   유일성, 입력 매개변수 참조, 태스크 타입 제약 등)와 ADR 0023 결정 5의 `check_schema`만 하고 저장하지 않는다. 성공은 200 body 없음, 실패는 400 `validationErrors`(접두사 `validateWorkflowDef.arg0`, 픽스처로

@@ -7,7 +7,8 @@
 # sqlite-persistence/src/main/java/com/netflix/conductor/sqlite/dao/metadata/SqliteMetadataDAO.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: reduced to the operations the MVP runtime and metadata REST use (ADR 0018,
-# decision 3; ADR 0023, decision 2); results are tagged tuples instead of exceptions and `Optional`.
+# decision 3; ADR 0023, decision 2; ADR 0025, decision 6); results are tagged tuples instead of
+# exceptions and `Optional`.
 
 defmodule Archon.Runtime.Metadata do
   @moduledoc """
@@ -25,6 +26,10 @@ defmodule Archon.Runtime.Metadata do
     * `c:update_workflow_def/1` - inserts or replaces that name and version.
     * `c:get_workflow_def/2` - by name and version.
     * `c:get_latest_workflow_def/1` - the highest version of a name.
+    * `c:get_all_workflow_defs/0` - every workflow definition, ordered by name (byte order) and
+      version (upstream SQLite `ORDER BY name, version`).
+    * `c:remove_workflow_def/2`, `c:remove_task_def/1` - delete one definition;
+      `{:error, :not_found}` when it is not stored (upstream's `NotFoundException`).
 
   The store keeps definitions as given; upstream's `MetadataServiceImpl` sets audit times and
   validates before calling the DAO, and so does the caller here.
@@ -42,4 +47,8 @@ defmodule Archon.Runtime.Metadata do
               {:ok, WorkflowDef.t()} | {:error, :not_found}
   @callback get_latest_workflow_def(name :: String.t()) ::
               {:ok, WorkflowDef.t()} | {:error, :not_found}
+  @callback get_all_workflow_defs() :: [WorkflowDef.t()]
+  @callback remove_workflow_def(name :: String.t(), version :: integer()) ::
+              :ok | {:error, :not_found}
+  @callback remove_task_def(name :: String.t()) :: :ok | {:error, :not_found}
 end

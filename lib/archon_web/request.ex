@@ -50,6 +50,9 @@ defmodule ArchonWeb.Request do
   @int_range -2_147_483_648..2_147_483_647
   @long_range -9_223_372_036_854_775_808..9_223_372_036_854_775_807
 
+  # Character.isWhitespace (StringUtils.trimAllWhitespace): not the no-break spaces.
+  @java_whitespace ~r/[\t-\r\x{1C}-\x{20}\x{1680}\x{2000}-\x{2006}\x{2008}-\x{200A}\x{2028}\x{2029}\x{205F}\x{3000}]/u
+
   @doc """
   Reads and decodes the JSON body. An empty or `null` body is an error, as for upstream's
   required `@RequestBody`; `:handler` completes its message with the upstream handler signature
@@ -274,7 +277,8 @@ defmodule ArchonWeb.Request do
   An integer query value. `java_type` names the handler's parameter type in the error message
   (`"int"`, or `"java.lang.Integer"` for a boxed one, which also takes blank text as `default`;
   `"long"` takes the range of a Java `long`).
-  Like `NumberUtils.parseNumber`, all whitespace is removed and `0x`/`#` hexadecimal is accepted.
+  Like `NumberUtils.parseNumber`, all `Character.isWhitespace` characters are removed (not a
+  no-break space) and `0x`/`#` hexadecimal is accepted.
   """
   @spec int(Plug.Conn.t(), String.t(), integer() | nil, String.t()) ::
           {:ok, integer() | nil} | {:error, {:server_error, String.t()}}
@@ -282,17 +286,37 @@ defmodule ArchonWeb.Request do
     do: convert_int(name, first_value(conn, name), default, java_type)
 
   @doc """
-  `int/4` for a value that is not a query value (a path variable): `nil` or `""` is `default`.
+  `int/4` for a value that is not a query value (the path variable of a handler that does not
+  require it, such as `executeWorkflow`'s `version`): `nil` or `""` is `default`.
   """
   @spec convert_int(String.t(), String.t() | nil, integer() | nil, String.t()) ::
           {:ok, integer() | nil} | {:error, {:server_error, String.t()}}
   def convert_int(_name, value, default, _java_type) when value in [nil, ""], do: {:ok, default}
 
   def convert_int(name, text, default, java_type) do
-    case String.replace(text, ~r/\s/u, "") do
+    case String.replace(text, @java_whitespace, "") do
       # A boxed Integer takes blank text as null; a primitive int fails on it.
       "" when java_type == "java.lang.Integer" -> {:ok, default}
       digits -> int_result(parse_int(digits, range(java_type)), name, java_type)
+    end
+  end
+
+  @doc """
+  A path variable of upstream type `Integer`, converted as `int/4` converts a query value. Blank
+  text converts to null, which Spring refuses for a required path variable (a 500).
+  """
+  @spec path_integer(String.t(), String.t()) ::
+          {:ok, integer()} | {:error, {:server_error, String.t()}}
+  def path_integer(text, name) when is_binary(text) do
+    case String.replace(text, @java_whitespace, "") do
+      "" ->
+        {:error,
+         {:server_error,
+          "Required URI template variable '#{name}' for method parameter type Integer is " <>
+            "present but converted to null"}}
+
+      digits ->
+        int_result(parse_int(digits, @int_range), name, "java.lang.Integer")
     end
   end
 

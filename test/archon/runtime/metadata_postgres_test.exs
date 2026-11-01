@@ -47,6 +47,8 @@ defmodule Archon.Runtime.MetadataPostgresTest do
         do: PgMetadata.create_workflow_def(server, %WorkflowDef{name: "n", version: version})
 
     assert {:ok, %WorkflowDef{version: 10}} = PgMetadata.get_latest_workflow_def(server, "n")
+
+    assert server |> PgMetadata.get_all_workflow_defs() |> Enum.map(& &1.version) == [2, 9, 10]
   end
 
   describe "NUL in a name" do
@@ -69,6 +71,8 @@ defmodule Archon.Runtime.MetadataPostgresTest do
       assert PgMetadata.get_task_def(server, <<0xFF>>) == {:error, :not_found}
       assert PgMetadata.get_workflow_def(server, "w\u0000", 1) == {:error, :not_found}
       assert PgMetadata.get_latest_workflow_def(server, "w\u0000") == {:error, :not_found}
+      assert PgMetadata.remove_workflow_def(server, "w\u0000", 1) == {:error, :not_found}
+      assert PgMetadata.remove_task_def(server, <<0xFF>>) == {:error, :not_found}
     end
   end
 
@@ -84,7 +88,9 @@ defmodule Archon.Runtime.MetadataPostgresTest do
             create_task_def: [%TaskDef{name: "t"}],
             update_task_def: [%TaskDef{name: "t"}],
             create_workflow_def: [%WorkflowDef{name: "w", version: 1}],
-            update_workflow_def: [%WorkflowDef{name: "w", version: 1}]
+            update_workflow_def: [%WorkflowDef{name: "w", version: 1}],
+            remove_workflow_def: ["w", 1],
+            remove_task_def: ["t"]
           ] do
         assert_raise FencedError, fn -> apply(PgMetadata, fun, [fenced | args]) end
       end
@@ -93,6 +99,18 @@ defmodule Archon.Runtime.MetadataPostgresTest do
       assert PgMetadata.get_task_def(fenced, "t") == {:error, :not_found}
       assert PgMetadata.get_latest_workflow_def(fenced, "w") == {:error, :not_found}
       assert PgMetadata.get_all_task_defs(fenced) == []
+      assert PgMetadata.get_all_workflow_defs(fenced) == []
+    end
+
+    test "a stale epoch removes nothing", %{server: server, fenced: fenced} do
+      :ok = PgMetadata.create_task_def(server, %TaskDef{name: "t"})
+      :ok = PgMetadata.create_workflow_def(server, %WorkflowDef{name: "w", version: 1})
+
+      assert_raise FencedError, fn -> PgMetadata.remove_workflow_def(fenced, "w", 1) end
+      assert_raise FencedError, fn -> PgMetadata.remove_task_def(fenced, "t") end
+
+      assert {:ok, _definition} = PgMetadata.get_workflow_def(server, "w", 1)
+      assert {:ok, _task_def} = PgMetadata.get_task_def(server, "t")
     end
 
     test "writes with the published epoch", %{fenced: fenced} do
@@ -108,6 +126,9 @@ defmodule Archon.Runtime.MetadataPostgresTest do
 
       assert PgMetadata.update_workflow_def(fenced, %WorkflowDef{name: "w", version: 1}) == :ok
       assert {:ok, %TaskDef{name: "t"}} = PgMetadata.get_task_def(fenced, "t")
+
+      assert PgMetadata.remove_workflow_def(fenced, "w", 1) == :ok
+      assert PgMetadata.remove_task_def(fenced, "t") == :ok
     end
   end
 
