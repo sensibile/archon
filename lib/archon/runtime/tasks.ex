@@ -7,10 +7,13 @@
 # (poll, getLastPollTask, ackTaskReceived, updateTask, getTask),
 # core/.../service/TaskServiceImpl.java (poll, batchPoll, updateTask, getTask),
 # core/.../core/dal/ExecutionDAOFacade.java (updateTaskLastPoll) and
-# rest/src/main/java/com/netflix/conductor/rest/controllers/TaskResource.java (updateTaskV2)
-# at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
+# rest/src/main/java/com/netflix/conductor/rest/controllers/TaskResource.java (updateTaskV2,
+# updateTaskSync), ExecutionService.java (getPendingTaskForWorkflow) and TaskServiceImpl.java
+# (updateTask by reference, signalTask, findPendingBlockingTask) at commit
+# 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: each popped task goes to its workflow's process, which applies the poll
-# (ADR 0018, decisions 1 and 7); this module pops, records the poll data and acks.
+# (ADR 0018, decisions 1 and 7); this module pops, records the poll data and acks. A signal
+# descends only into children the SUB_WORKFLOW task owns (ADR 0024, decision 2).
 
 defmodule Archon.Runtime.Tasks do
   @moduledoc """
@@ -24,6 +27,11 @@ defmodule Archon.Runtime.Tasks do
     * `update_v2/1` - upstream `TaskResource#updateTaskV2` (`POST /api/tasks/update-v2`): the
       update, then the next task of the same type and domain when the updated task is terminal.
     * `get/1` - upstream `getTask`: reads the store.
+    * `pending_task/2`, `update_by_ref/5` - upstream `getPendingTaskForWorkflow` and
+      `updateTask(workflowId, taskRefName, ...)` (`POST /api/tasks/{workflowId}/{taskRefName}/{status}`
+      and `.../sync`, ADR 0025 decision 5).
+    * `signal/3` - upstream `signalTask` (`POST /api/tasks/{workflowId}/{status}/signal` and
+      `.../sync`).
 
   A poll pops task IDs from the queue `[domain:]taskType` and sends each to the process of its
   workflow (`Archon.Runtime.WorkflowServer.poll/3`), which checks the task, the concurrent
@@ -36,7 +44,8 @@ defmodule Archon.Runtime.Tasks do
 
   require Logger
 
-  alias Archon.Domain.{Task, TaskResult}
+  alias Archon.Decider.Parameters
+  alias Archon.Domain.{Task, TaskResult, Workflow}
   alias Archon.Runtime
   alias Archon.Runtime.Step.Schedule
   alias Archon.Runtime.WorkflowServer
@@ -211,4 +220,154 @@ defmodule Archon.Runtime.Tasks do
       {:error, :not_found} -> {:error, :not_found}
     end
   end
+
+  @doc """
+  Upstream `ExecutionService#getPendingTaskForWorkflow`: the first task of the workflow that is
+  not terminal and has the reference name, else the first one whose reference name without its
+  `DO_WHILE` iteration suffix (`__<n>`) is the name. `nil` without one, also for an unknown
+  workflow (upstream reads the workflow's tasks, which are none).
+  """
+  @spec pending_task(String.t(), String.t()) :: Task.t() | nil
+  def pending_task(workflow_id, ref) when is_binary(workflow_id) and is_binary(ref) do
+    case Runtime.get_workflow(workflow_id, true) do
+      {:ok, %Workflow{tasks: tasks}} ->
+        pending = Enum.reject(tasks, &Task.terminal?(&1.status))
+
+        Enum.find(pending, &(&1.reference_task_name == ref)) ||
+          Enum.find(pending, &(Parameters.remove_iteration(&1.reference_task_name) == ref))
+
+      {:error, :not_found} ->
+        nil
+    end
+  end
+
+  @doc """
+  Upstream `TaskServiceImpl#updateTask(workflowId, taskRefName, status, workerId, output)`: updates
+  `pending_task/2` with the status, its output merged with `output`, and `worker_id` unless it is
+  blank (`keep_worker: true`, the default) or always (`keep_worker: false`, `updateTaskSync`).
+  The updated task's ID, or `nil` without a pending task.
+  """
+  @spec update_by_ref(String.t(), String.t(), TaskResult.status(), String.t() | nil, map(),
+          keep_worker: boolean()
+        ) :: {:ok, String.t() | nil} | {:error, term()}
+  def update_by_ref(workflow_id, ref, status, worker_id, output, opts \\ []) do
+    case pending_task(workflow_id, ref) do
+      nil ->
+        {:ok, nil}
+
+      %Task{} = task ->
+        worker_id =
+          if Keyword.get(opts, :keep_worker, true) and blank?(worker_id),
+            do: task.worker_id,
+            else: worker_id
+
+        update_pending(task, status, output, worker_id)
+    end
+  end
+
+  @doc """
+  Upstream `TaskServiceImpl#signalTask`: updates the workflow's first `WAIT` task that is not
+  terminal, else the one a non-terminal `SUB_WORKFLOW` task's child would signal, depth first, with
+  the status and its output merged with `output`. The updated task's ID, or `nil` without such a
+  task. A child the `SUB_WORKFLOW` task does not own is passed over (ADR 0024, decision 2); an
+  unknown workflow, the named one or a child, is
+  `{:error, {:not_found, "No such workflow found by id: <id>"}}` as upstream's read.
+  """
+  @spec signal(String.t(), TaskResult.status(), map()) ::
+          {:ok, String.t() | nil} | {:error, term()}
+  def signal(workflow_id, status, output) when is_binary(workflow_id) do
+    with {:ok, workflow} <- read_workflow(workflow_id),
+         {:ok, %Task{} = task} <- blocked_task(workflow, [workflow_id]) do
+      update_pending(task, status, output, task.worker_id)
+    end
+  end
+
+  # findPendingBlockingTask: the workflow's own WAIT tasks first, then its children in task order.
+  defp blocked_task(%Workflow{tasks: tasks} = workflow, seen) do
+    case Enum.find(tasks, &(&1.task_type == "WAIT" and not Task.terminal?(&1.status))) do
+      %Task{} = task -> {:ok, task}
+      nil -> child_blocked_task(workflow, Enum.filter(tasks, &running_sub_workflow?/1), seen)
+    end
+  end
+
+  defp child_blocked_task(_workflow, [], _seen), do: {:ok, nil}
+
+  defp child_blocked_task(workflow, [task | rest], seen) do
+    case owned_child(workflow, task, seen) do
+      {:ok, %Workflow{} = child} ->
+        case blocked_task(child, [child.workflow_id | seen]) do
+          {:ok, nil} -> child_blocked_task(workflow, rest, seen)
+          found -> found
+        end
+
+      {:ok, nil} ->
+        child_blocked_task(workflow, rest, seen)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp running_sub_workflow?(%Task{} = task) do
+    task.task_type == "SUB_WORKFLOW" and not Task.terminal?(task.status) and
+      not blank?(Task.sub_workflow_id(task))
+  end
+
+  @doc """
+  The child workflow of the `SUB_WORKFLOW` task `task` of `parent`: `{:ok, child}` when the child
+  belongs to that workflow and task (ADR 0024, decision 2), `{:ok, nil}` when it does not or when
+  its ID is one of `seen` (a store whose parent fields loop), and
+  `{:error, {:not_found, message}}` for an unknown child.
+  """
+  @spec owned_child(Workflow.t(), Task.t(), [String.t()]) ::
+          {:ok, Workflow.t() | nil} | {:error, {:not_found, String.t()}}
+  def owned_child(%Workflow{} = parent, %Task{} = task, seen) do
+    id = Task.sub_workflow_id(task)
+
+    with false <- id in seen,
+         {:ok, child} <- read_workflow(id) do
+      if child.parent_workflow_id == parent.workflow_id and
+           child.parent_workflow_task_id == task.task_id,
+         do: {:ok, child},
+         else: {:ok, nil}
+    else
+      true -> {:ok, nil}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp read_workflow(id) do
+    case Runtime.get_workflow(id, true) do
+      {:ok, workflow} -> {:ok, workflow}
+      {:error, :not_found} -> {:error, {:not_found, "No such workflow found by id: #{id}"}}
+    end
+  end
+
+  # new TaskResult(pending) with the status, output and worker; the updated task's ID.
+  defp update_pending(%Task{} = task, status, output, worker_id) do
+    result = TaskResult.from_task(task)
+
+    result = %{
+      result
+      | status: status,
+        output_data: Map.merge(result.output_data || %{}, output || %{}),
+        worker_id: worker_id
+    }
+
+    case update(result) do
+      {:ok, %Task{task_id: id}} -> {:ok, id}
+      {:ok, nil} -> {:ok, nil}
+      {:error, :not_found} -> read_workflow(task.workflow_instance_id) |> missing_task(task)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  # The workflow or the task went away between the read and the update: upstream's update reads
+  # the workflow first, then the task.
+  defp missing_task({:error, _reason} = error, _task), do: error
+
+  defp missing_task({:ok, _workflow}, task),
+    do: {:error, {:not_found, "No such task found by id: #{task.task_id}"}}
+
+  defp blank?(value), do: value == nil or String.trim(value) == ""
 end

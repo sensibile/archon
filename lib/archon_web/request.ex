@@ -48,6 +48,7 @@ defmodule ArchonWeb.Request do
   @chunk 1_000_000
 
   @int_range -2_147_483_648..2_147_483_647
+  @long_range -9_223_372_036_854_775_808..9_223_372_036_854_775_807
 
   @doc """
   Reads and decodes the JSON body. An empty or `null` body is an error, as for upstream's
@@ -271,29 +272,37 @@ defmodule ArchonWeb.Request do
 
   @doc """
   An integer query value. `java_type` names the handler's parameter type in the error message
-  (`"int"`, or `"java.lang.Integer"` for a boxed one, which also takes blank text as `default`).
+  (`"int"`, or `"java.lang.Integer"` for a boxed one, which also takes blank text as `default`;
+  `"long"` takes the range of a Java `long`).
   Like `NumberUtils.parseNumber`, all whitespace is removed and `0x`/`#` hexadecimal is accepted.
   """
   @spec int(Plug.Conn.t(), String.t(), integer() | nil, String.t()) ::
           {:ok, integer() | nil} | {:error, {:server_error, String.t()}}
-  def int(conn, name, default, java_type \\ "int") do
-    case first_value(conn, name) do
-      value when value in [nil, ""] ->
-        {:ok, default}
+  def int(conn, name, default, java_type \\ "int"),
+    do: convert_int(name, first_value(conn, name), default, java_type)
 
-      text ->
-        case String.replace(text, ~r/\s/u, "") do
-          # A boxed Integer takes blank text as null; a primitive int fails on it.
-          "" when java_type == "java.lang.Integer" -> {:ok, default}
-          digits -> int_result(parse_int(digits), name, java_type)
-        end
+  @doc """
+  `int/4` for a value that is not a query value (a path variable): `nil` or `""` is `default`.
+  """
+  @spec convert_int(String.t(), String.t() | nil, integer() | nil, String.t()) ::
+          {:ok, integer() | nil} | {:error, {:server_error, String.t()}}
+  def convert_int(_name, value, default, _java_type) when value in [nil, ""], do: {:ok, default}
+
+  def convert_int(name, text, default, java_type) do
+    case String.replace(text, ~r/\s/u, "") do
+      # A boxed Integer takes blank text as null; a primitive int fails on it.
+      "" when java_type == "java.lang.Integer" -> {:ok, default}
+      digits -> int_result(parse_int(digits, range(java_type)), name, java_type)
     end
   end
 
   defp int_result({:ok, value}, _name, _java_type), do: {:ok, value}
   defp int_result({:error, detail}, name, java_type), do: mismatch(name, java_type, detail)
 
-  defp parse_int(text) do
+  defp range("long"), do: @long_range
+  defp range(_java_type), do: @int_range
+
+  defp parse_int(text, range) do
     {sign, rest} =
       case text do
         "-" <> rest -> {-1, rest}
@@ -308,7 +317,7 @@ defmodule ArchonWeb.Request do
     with true <- digits != "" and not String.starts_with?(digits, ["-", "+"]),
          {value, ""} <- Integer.parse(digits, radix),
          value = sign * value,
-         true <- value in @int_range do
+         true <- value in range do
       {:ok, value}
     else
       _other -> {:error, number_format(text, digits, radix)}
@@ -356,6 +365,10 @@ defmodule ArchonWeb.Request do
       values -> Enum.join(values, ",")
     end
   end
+
+  @doc "Every value of a query parameter, in order (Tomcat's parsing, below)."
+  @spec values(Plug.Conn.t(), String.t()) :: [String.t()]
+  def values(conn, name), do: query_values(conn, name)
 
   defp first_value(conn, name), do: conn |> query_values(name) |> List.first()
 

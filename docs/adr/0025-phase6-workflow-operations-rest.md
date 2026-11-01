@@ -7,6 +7,8 @@
   추천안으로 정했다.
 - 갱신: 2026-11-02 조각 6a. 캡처에서 확인한 upstream 응답 중 이 문서의 기술과 다르거나 더 자세한 것을 결정 7 끝
   "조각 6a의 캡처에서 확인한 것"에 적었다. 그 응답이 정답이고, 해당 조각이 맞춘다.
+- 갱신: 2026-11-02 조각 6e. 결정 5 끝 "조각 6e가 정한 것"에 구현에서 정한 세부(모르는 자식, 응답 없음의 문구, 변환
+  실패 문구, `ArchonWeb.Request` 보충)를 적었다.
 
 ## 맥락
 
@@ -259,6 +261,23 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   upstream과 같음), `returnStrategy`다. 시작은 `POST /api/workflow`와 같은 경로(ADR 0023 결정 3·4의 검증과 오류, ADR 0024 결정 4)를
   쓴다. 인라인 정의에 태스크가 있으면 upstream은 입력에 `_systemMetadata.dynamic = true`를 넣는다(입력이 `null`이면 NPE 500). archon도
   같은 입력을 만든다.
+- **조각 6e가 정한 것(2026-11-02).** upstream 서버(기준 SHA, 빈 SQLite)에서 확인한 응답을 따른다.
+  - 함수: `Archon.Runtime.Tasks`의 `pending_task/2`, `update_by_ref/6`(`keep_worker: false`가 sync), `signal/3`, `owned_child/3`.
+    응답기는 `ArchonWeb.SignalResponder.await/5`, 모델은 `Archon.Domain.{SignalResponse,WorkflowRun,TaskRun}`이다.
+    `WorkflowSignalReturnStrategy`는 따로 모듈을 두지 않고 `SignalResponse.strategies/0`의 원자다.
+  - signal이 내려간 자식이 저장소에 없으면 upstream `getExecutionStatus`처럼 404 `"No such workflow found by id: <자식 ID>"`다.
+    소유권이 맞지 않는 자식은 건너뛴다(ADR 0024 결정 2). 응답기는 둘 다 건너뛴다(upstream의 `catch`).
+  - 막힌 태스크가 없는 `BLOCKING_TASK*`의 500 문구는 대기 중이면 `"The mapper [com.netflix.conductor.rest.controllers.
+    WorkflowSignalResponder$$Lambda] returned a null value."`(upstream의 JVM 람다 주소는 재현하지 않음, 재생은 `message`를 뺌),
+    시간 초과면 `"value"`다. 시간 초과가 0 이하면(`waitForSeconds=-1`) 읽기 없이 바로 시간 초과 응답이다(upstream 관측).
+  - 변환 실패는 Spring 문구 그대로 500이다. `status` 경로 값은 `TaskResult.Status` 상수(앞뒤 공백 무시)이고, 공백뿐이면
+    `"Required URI template variable 'status' for method parameter type Status is present but converted to null"`이다.
+    `returnStrategy`가 공백뿐이면 기본값, 반복되면 첫 값을 바꾸고 문구의 원래 형이 `java.lang.String[]`이다. 값은 100자에서
+    자르고 `" (truncated)..."`를 붙인다. `timeoutMillis`는 Java `long` 범위다. `execute`의 `version`이 공백뿐이면 `null`이라
+    `version == 0`에서 NPE 500, 인라인 정의의 `_systemMetadata`가 맵이 아니면 JVM의 `ClassCastException` 문구 500이다.
+  - sync ref 갱신의 메서드 검증(`@Valid TaskResult`)은 따로 하지 않는다. 대기 태스크에서 만든 결과는 두 ID가 늘 있다.
+  - 그래서 `lib/archon_web/request.ex`(결정 8의 6e 파일 목록 밖)에 `convert_int/4`(경로 값), `values/2`(반복 쿼리 값),
+    `int/4`의 `"long"` 형을 더했다. 기존 함수의 동작은 같다.
 
 ### 6. metadata와 bulk
 

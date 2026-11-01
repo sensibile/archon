@@ -213,6 +213,33 @@ defmodule ArchonWeb.RequestTest do
                  "Method parameter 'version': Failed to convert value of type 'java.lang.String' " <>
                    ~s(to required type 'java.lang.Integer'; For input string: "abc")}}
     end
+
+    test "a long takes the range of a Java long" do
+      assert Request.int(conn("t=3000000000"), "t", 5000, "long") == {:ok, 3_000_000_000}
+      assert Request.int(conn("t=3000000000"), "t", 5000) |> elem(0) == :error
+
+      assert Request.int(conn("t=9223372036854775808"), "t", 5000, "long") ==
+               {:error,
+                {:server_error,
+                 "Method parameter 't': Failed to convert value of type 'java.lang.String' " <>
+                   ~s(to required type 'long'; For input string: "9223372036854775808")}}
+    end
+  end
+
+  describe "convert_int/4" do
+    test "converts a value that is not a query value as int/4 does" do
+      assert Request.convert_int("version", "0x10", nil, "java.lang.Integer") == {:ok, 16}
+      assert Request.convert_int("version", " ", nil, "java.lang.Integer") == {:ok, nil}
+      assert Request.convert_int("version", "", 7, "java.lang.Integer") == {:ok, 7}
+
+      assert {:error, {:server_error, "Method parameter 'version': " <> _rest}} =
+               Request.convert_int("version", "x", nil, "java.lang.Integer")
+    end
+  end
+
+  test "values/2 lists every value of a parameter in order" do
+    assert Request.values(conn("a=1&b=2&a=3"), "a") == ["1", "3"]
+    assert Request.values(conn("b=2"), "a") == []
   end
 
   describe "boolean/4" do
