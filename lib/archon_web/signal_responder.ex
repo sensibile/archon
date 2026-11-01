@@ -199,10 +199,10 @@ defmodule ArchonWeb.SignalResponder do
 
   defp child_blocking(_workflow, _task, _refs, _seen), do: {[], nil}
 
-  # Upstream skips a child it cannot fetch, whatever the exception.
   # Java's String#trim: code points up to U+0020 at both ends.
   defp java_trim(text), do: String.replace(text, ~r/\A[\x00-\x20]+|[\x00-\x20]+\z/, "")
 
+  # Upstream skips a child it cannot fetch, whatever the exception.
   defp owned_child(workflow, task, seen) do
     Tasks.owned_child(workflow, task, seen)
   rescue

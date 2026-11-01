@@ -396,6 +396,8 @@ defmodule ArchonWeb.SignalController do
   defp concise(value) do
     {kept, units} =
       value
+      # Bytes that are not UTF-8 (`%FF` in the path) as U+FFFD, so the message can be written.
+      |> String.replace_invalid()
       |> String.to_charlist()
       |> Enum.reduce_while({[], 0}, fn char, {kept, units} ->
         size = if char > 0xFFFF, do: 2, else: 1
