@@ -125,15 +125,19 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
        가장 깊은 워크플로우를 정한다. 대상이 없으면 400.
     2. 그 워크플로우에 경우 1·2의 이벤트를 보낸다. 이벤트는 프로세스 안에서 끝났는지와 대상이 있는지를 다시 본다(1은 읽기만
        했으므로). 이 이벤트는 부모 되살림(`child_revived`)을 outbox에 남긴다.
-    3. 그 답을 받은 뒤 경로에 있는 위 워크플로우마다, 대상의 부모부터 최상위까지 차례로 경우 3의 이벤트(`RUNNING`, 자식으로 가는
-       SUB_WORKFLOW 태스크의 `retried`를 거짓으로 하고 `IN_PROGRESS`, 결정)를 보내고 마지막 답 뒤에 응답한다. 입력·correlationId는
+    3. 그 답을 받은 뒤 경로에 있는 위 워크플로우마다, 대상의 부모부터 최상위까지 차례로 경우 3의 이벤트를 보내고 마지막 답 뒤에 응답한다. 이벤트는
+       워크플로우를 `RUNNING`으로 하고 실패 필드를 지운 뒤, 자식으로 가는 SUB_WORKFLOW 태스크를 upstream 경우 3과 같이 되돌린다
+       (`IN_PROGRESS`, `retried`·`executed` 거짓, `scheduledTime`·`startTime`은 지금, `updateTime`·`endTime`·`pollCount`는 0,
+       `reasonForIncompletion` 지움). 그리고 upstream처럼 자기 부모에게 `child_revived`를 outbox로 남긴 뒤 결정한다. 입력·correlationId는
        최상위의 이벤트에만 싣는다(upstream도 재귀 호출에는 `null`을 넘긴다). 그래서 응답 때 경로의 워크플로우는 모두 `RUNNING`이고
        최상위에 준 입력이 반영돼 있다. `child_revived`만으로 두지 않는 것은, 경로가 재시도된 SUB_WORKFLOW 태스크(이전 시도의 자식)를
        지나면 `child_revived`가 그 태스크를 건너뛰어(`Step.Lifecycle.child_revived/2`) 중간 워크플로우가 `FAILED`로 남기 때문이다.
        upstream `rerunWF`는 재시도된 태스크도 찾고 모든 단계에서 경우 3을 한다.
     4. 경우 3의 이벤트는 이미 `RUNNING`인 워크플로우도 받는다(2가 남긴 `child_revived`가 먼저 닿았을 수 있다). 그 SUB_WORKFLOW 태스크가
        아직 있는지만 본다. 경로 밖의 조상(최상위의 부모 등)은 `child_revived`로 따라온다. 같은 워크플로우가 경우 3과
-       `child_revived`로 두 번 되살려지는 것이 결과를 바꾸지 않는지, 재시도된 자식 안의 대상을 rerun하는 경우를 조각 6f가 시험한다.
+       `child_revived`로 두 번 되살려지는 것이 결과를 바꾸지 않는지, 재시도된 자식 안의 대상을 rerun하는 경우를 조각 6f가 시험한다. 이 경우 중간
+       워크플로우에는 같은 ref의 태스크가 둘(되돌린 이전 시도와 새 시도) 남으므로, 시험의 기대값은 추론이 아니라 upstream Java 오라클
+       (기준 SHA 빌드 서버)에서 가져온다.
        자식이 아직 `FAILED`일 때 위가 결정하지 않도록 2의 답(자식 커밋과 결정 저장)을 받은 뒤에 3을 보낸다.
   - 같은 ID를 돌려준다. 동적 FORK(`FORK_JOIN_DYNAMIC`)는 MVP 태스크 타입이 아니므로(ADR 0003 결정 4) 그 분기는 옮기지 않는다.
 - **skiptask(새 기능).** upstream `skipTaskFromWorkflow`다. `RUNNING`이 아니면, 정의에 그 ref가 없으면, 이미 그 ref의 태스크가
