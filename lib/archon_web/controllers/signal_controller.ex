@@ -29,7 +29,15 @@ defmodule ArchonWeb.SignalController do
 
   use ArchonWeb, :controller
 
-  alias Archon.Domain.{Codec, SignalResponse, StartWorkflowRequest, Validation, Workflow}
+  alias Archon.Domain.{
+    Codec,
+    ErrorResponse,
+    SignalResponse,
+    StartWorkflowRequest,
+    Validation,
+    Workflow
+  }
+
   alias Archon.Runtime
   alias Archon.Runtime.Tasks
   alias ArchonWeb.SignalResponder
@@ -266,19 +274,30 @@ defmodule ArchonWeb.SignalController do
     end
   end
 
-  # As `ArchonWeb.WorkflowController.start/2`: without an input, upstream downloads the input
-  # from the external storage path, which fails on a server without external payload storage.
+  # What `ArchonWeb.WorkflowController.start/2` refuses before a workflow exists, which the
+  # runtime does not check.
   defp check_start(conn, %StartWorkflowRequest{} = request) do
-    if request.input in [nil, %{}] and
-         not Validation.java_blank?(request.external_input_payload_storage_path) do
-      Errors.send_error(
-        conn,
-        {:server_error,
-         "Unable to download payload from external storage path: " <>
-           request.external_input_payload_storage_path}
-      )
-    else
-      :ok
+    cond do
+      # MetadataMapperService#lookupWorkflowDefinition: an IllegalArgumentException (400).
+      request.workflow_def == nil and Validation.java_blank?(request.name) ->
+        Errors.send_error(
+          conn,
+          {:invalid, "Workflow name must be specified when searching for a definition"}
+        )
+
+      # Without an input, upstream downloads the input from the external storage path, which
+      # fails on a server without external payload storage.
+      request.input in [nil, %{}] and
+          not Validation.java_blank?(request.external_input_payload_storage_path) ->
+        Errors.send_error(
+          conn,
+          {:server_error,
+           "Unable to download payload from external storage path: " <>
+             request.external_input_payload_storage_path}
+        )
+
+      true ->
+        :ok
     end
   end
 
@@ -291,6 +310,12 @@ defmodule ArchonWeb.SignalController do
 
   defp send_response(conn, {:ok, response}),
     do: Response.json(conn, SignalResponse.to_json(response))
+
+  # Tomcat's AsyncRequestTimeoutException: a 500 whose message is null.
+  defp send_response(conn, {:error, :async_timeout}) do
+    response = %{Errors.error_response({:server_error, ""}) | message: nil}
+    Response.json(conn, 500, ErrorResponse.to_json(response))
+  end
 
   defp send_response(conn, {:error, reason}), do: Errors.send_error(conn, reason)
 
@@ -349,24 +374,39 @@ defmodule ArchonWeb.SignalController do
   defp enum_value(nil, _values), do: {:ok, nil}
 
   defp enum_value(text, values) do
-    case String.trim(text) do
+    # Java's String#trim
+    case String.replace(text, ~r/\A[\x00-\x20]+|[\x00-\x20]+\z/, "") do
       "" -> {:ok, nil}
       name -> Enum.find_value(values, :error, &(Codec.enum_name(&1) == name and {:ok, &1}))
     end
   end
 
   # MethodArgumentTypeMismatchException with ConversionFailedException's message
-  # (`ObjectUtils.nullSafeConciseToString` cuts the value to 100 characters).
+  # (`ObjectUtils.nullSafeConciseToString` cuts the value to 100 UTF-16 code units; a surrogate
+  # pair the cut splits is left out, where Jackson writes its lone half as an escape).
   defp conversion_error(name, source, type, annotation, value) do
-    value =
-      if String.length(value) > 100,
-        do: String.slice(value, 0, 100) <> " (truncated)...",
-        else: value
+    value = concise(value)
 
     {:server_error,
      "Method parameter '#{name}': Failed to convert value of type '#{source}' to required type " <>
        "'#{type}'; Failed to convert from type [java.lang.String] to type " <>
        "[@org.springframework.web.bind.annotation.#{annotation} #{type}] for value [#{value}]"}
+  end
+
+  defp concise(value) do
+    {kept, units} =
+      value
+      |> String.to_charlist()
+      |> Enum.reduce_while({[], 0}, fn char, {kept, units} ->
+        size = if char > 0xFFFF, do: 2, else: 1
+
+        if units + size > 100,
+          do: {:halt, {kept, :cut}},
+          else: {:cont, {[char | kept], units + size}}
+      end)
+
+    text = kept |> Enum.reverse() |> List.to_string()
+    if units == :cut, do: text <> " (truncated)...", else: text
   end
 
   # The output map body (`@RequestBody Map<String, Object>`).

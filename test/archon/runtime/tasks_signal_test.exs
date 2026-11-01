@@ -153,6 +153,18 @@ defmodule Archon.Runtime.TasksSignalTest do
     end
   end
 
+  describe "signal/3 and children it cannot use" do
+    test "a child removed from the store is not found, as upstream's read" do
+      parent = start("archon_ops_signal_parent")
+      child = child(parent)
+      eventually(fn -> task(child, "wait1_ref") end)
+      :ok = Runtime.store().remove_workflow(child)
+
+      assert Tasks.signal(parent, :completed, %{}) ==
+               {:error, {:not_found, "No such workflow found by id: #{child}"}}
+    end
+  end
+
   describe "owned_child/3" do
     setup do
       parent = start("archon_ops_signal_parent")

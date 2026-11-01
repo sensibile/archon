@@ -23,7 +23,9 @@ defmodule ArchonWeb.SignalResponder do
   that cannot be read, is passed over as upstream's `catch`.
 
   When the timeout passes first, the answer is the workflow as it is then, without blocking
-  tasks and with `signalTimeout` true; the workflow goes on.
+  tasks and with `signalTimeout` true; the workflow goes on. No wait lasts over 30 s
+  (`await/5`), so a request holds its connection process and reads the store for at most that
+  long, also after its client went away.
 
   A `BLOCKING_TASK*` strategy without a blocking task has no answer, and upstream's Reactor fails:
   `{:error, {:server_error, message}}`, with Reactor's message for a mapper that returned `null`
@@ -31,57 +33,97 @@ defmodule ArchonWeb.SignalResponder do
   (`Mono.just(null)`).
   """
 
-  alias Archon.Domain.{SignalResponse, Task, Workflow}
+  alias Archon.Domain.{SignalResponse, Task, Validation, Workflow}
   alias Archon.Runtime
   alias Archon.Runtime.Tasks
 
   @tick_ms 100
+  # Tomcat's default asynchronous request timeout (spring.mvc.async.request-timeout unset);
+  # `config :archon, ArchonWeb.SignalResponder, async_timeout_ms: ...` changes it (tests).
+  @async_timeout_ms 30_000
 
   @null_mapper "The mapper [com.netflix.conductor.rest.controllers.WorkflowSignalResponder$$Lambda] " <>
                  "returned a null value."
 
   @doc """
   Waits for the workflow `workflow_id` as described in the moduledoc. `task_refs` are the
-  reference names whose terminal tasks block (each is trimmed); `timeout_ms` may be 0 or less,
-  which answers at once with the timed-out state.
+  reference names whose terminal tasks block (each is trimmed as Java's `String#trim`);
+  `timeout_ms` may be 0 or less, which answers at once with the timed-out state.
+
+  Whatever `timeout_ms` is, the wait ends after 30 s with `{:error, :async_timeout}`: upstream
+  answers through Spring MVC's asynchronous request, which Tomcat ends after its default 30 s
+  (`AsyncRequestTimeoutException`, a 500 without a message, observed on the upstream server).
+  A timeout of exactly 30 s answers as a timeout.
   """
   @spec await(String.t(), [String.t()], SignalResponse.strategy(), String.t(), integer()) ::
           {:ok, SignalResponse.t()} | {:error, term()}
   def await(workflow_id, task_refs, strategy, request_id, timeout_ms) do
-    refs = Enum.map(task_refs, &String.trim/1)
+    refs = Enum.map(task_refs, &java_trim/1)
     start = System.monotonic_time(:millisecond)
-    tick(workflow_id, refs, strategy, request_id, start, start + timeout_ms, 1)
+
+    wait = %{
+      id: workflow_id,
+      refs: refs,
+      strategy: strategy,
+      request_id: request_id,
+      start: start,
+      deadline: start + timeout_ms,
+      limit: start + async_timeout_ms()
+    }
+
+    tick(wait, 1)
   end
 
   # Flux.interval(100ms) with a timeout: the n-th read is at start + n * 100 ms, unless the
-  # deadline comes first.
-  defp tick(id, refs, strategy, request_id, start, deadline, n) do
-    at = start + n * @tick_ms
+  # deadline or the asynchronous request's limit comes first. A read that ends past either
+  # answers as that end, as upstream's timers fire while the read runs.
+  defp tick(wait, n) do
+    at = wait.start + n * @tick_ms
 
-    if at >= deadline do
-      sleep_until(deadline)
-      timed_out(id, strategy, request_id)
+    if at >= finish(wait) do
+      sleep_until(finish(wait))
+      finished(wait)
     else
       sleep_until(at)
 
-      with {:ok, workflow} <- read(id) do
-        {tasks, blocking} = blocking_tasks(workflow, refs)
+      case check(wait) do
+        :waiting -> tick(wait, n + 1)
+        answer -> unless_finished(wait, answer)
+      end
+    end
+  end
 
-        if Workflow.terminal?(workflow.status) or tasks != [] do
-          answer(
-            SignalResponse.new(
-              workflow,
-              blocking || workflow,
-              tasks,
-              false,
-              strategy,
-              request_id
-            ),
-            @null_mapper
-          )
-        else
-          tick(id, refs, strategy, request_id, start, deadline, n + 1)
-        end
+  defp unless_finished(wait, answer),
+    do: if(now() >= finish(wait), do: finished(wait), else: answer)
+
+  defp finish(%{deadline: deadline, limit: limit}), do: min(deadline, limit)
+
+  defp finished(%{deadline: deadline, limit: limit} = wait) when deadline <= limit,
+    do: timed_out(wait.id, wait.strategy, wait.request_id)
+
+  defp finished(_wait), do: {:error, :async_timeout}
+
+  defp async_timeout_ms,
+    do:
+      Keyword.get(
+        Application.get_env(:archon, __MODULE__, []),
+        :async_timeout_ms,
+        @async_timeout_ms
+      )
+
+  defp now, do: System.monotonic_time(:millisecond)
+
+  # One read: the answer once the workflow is terminal or a task blocks, else `:waiting`.
+  defp check(wait) do
+    with {:ok, workflow} <- read(wait.id) do
+      {tasks, blocking} = blocking_tasks(workflow, wait.refs)
+
+      if Workflow.terminal?(workflow.status) or tasks != [] do
+        workflow
+        |> SignalResponse.new(blocking || workflow, tasks, false, wait.strategy, wait.request_id)
+        |> answer(@null_mapper)
+      else
+        :waiting
       end
     end
   end
@@ -96,7 +138,7 @@ defmodule ArchonWeb.SignalResponder do
   defp answer(response, _message), do: {:ok, response}
 
   defp sleep_until(at) do
-    case at - System.monotonic_time(:millisecond) do
+    case at - now() do
       delay when delay > 0 -> Process.sleep(delay)
       _due -> :ok
     end
@@ -145,7 +187,7 @@ defmodule ArchonWeb.SignalResponder do
   defp child_blocking(workflow, %Task{task_type: "SUB_WORKFLOW"} = task, refs, seen) do
     id = Task.sub_workflow_id(task)
 
-    if id not in [nil, ""] and String.trim(id) != "" and not Task.terminal?(task.status) do
+    if not Validation.java_blank?(id) and not Task.terminal?(task.status) do
       case owned_child(workflow, task, seen) do
         {:ok, %Workflow{} = child} -> blocking_tasks(child, refs, [child.workflow_id | seen])
         _passed_over -> {[], nil}
@@ -158,6 +200,9 @@ defmodule ArchonWeb.SignalResponder do
   defp child_blocking(_workflow, _task, _refs, _seen), do: {[], nil}
 
   # Upstream skips a child it cannot fetch, whatever the exception.
+  # Java's String#trim: code points up to U+0020 at both ends.
+  defp java_trim(text), do: String.replace(text, ~r/\A[\x00-\x20]+|[\x00-\x20]+\z/, "")
+
   defp owned_child(workflow, task, seen) do
     Tasks.owned_child(workflow, task, seen)
   rescue

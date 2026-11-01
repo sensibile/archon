@@ -191,6 +191,29 @@ defmodule ArchonWeb.SignalResponderTest do
       assert ms < 100
     end
 
+    test "no wait lasts over the asynchronous request's limit" do
+      Application.put_env(:archon, SignalResponder, async_timeout_ms: 250)
+      on_exit(fn -> Application.delete_env(:archon, SignalResponder) end)
+      id = start("archon_ops_idle")
+
+      {ms, result} =
+        elapsed_ms(fn -> SignalResponder.await(id, [], :target_workflow, "r", 60_000) end)
+
+      assert result == {:error, :async_timeout}
+      assert ms >= 250 and ms < 1_000
+
+      assert {:ok, %WorkflowRun{signal_timeout: true}} =
+               SignalResponder.await(id, [], :target_workflow, "r", 250)
+    end
+
+    test "a child removed from the store is passed over" do
+      parent = start("archon_ops_signal_parent")
+      child = child(parent)
+      :ok = Runtime.store().remove_workflow(child)
+
+      assert SignalResponder.blocking_tasks(workflow(parent), []) == {[], nil}
+    end
+
     test "an unknown workflow is not found" do
       assert SignalResponder.await("missing", [], :target_workflow, "r", 0) ==
                {:error, {:not_found, "No such workflow found by id: missing"}}

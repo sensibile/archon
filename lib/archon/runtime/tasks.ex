@@ -27,7 +27,7 @@ defmodule Archon.Runtime.Tasks do
     * `update_v2/1` - upstream `TaskResource#updateTaskV2` (`POST /api/tasks/update-v2`): the
       update, then the next task of the same type and domain when the updated task is terminal.
     * `get/1` - upstream `getTask`: reads the store.
-    * `pending_task/2`, `update_by_ref/5` - upstream `getPendingTaskForWorkflow` and
+    * `pending_task/2`, `update_by_ref/6` - upstream `getPendingTaskForWorkflow` and
       `updateTask(workflowId, taskRefName, ...)` (`POST /api/tasks/{workflowId}/{taskRefName}/{status}`
       and `.../sync`, ADR 0025 decision 5).
     * `signal/3` - upstream `signalTask` (`POST /api/tasks/{workflowId}/{status}/signal` and
@@ -45,7 +45,7 @@ defmodule Archon.Runtime.Tasks do
   require Logger
 
   alias Archon.Decider.Parameters
-  alias Archon.Domain.{Task, TaskResult, Workflow}
+  alias Archon.Domain.{Task, TaskResult, Validation, Workflow}
   alias Archon.Runtime
   alias Archon.Runtime.Step.Schedule
   alias Archon.Runtime.WorkflowServer
@@ -350,7 +350,7 @@ defmodule Archon.Runtime.Tasks do
     result = %{
       result
       | status: status,
-        output_data: Map.merge(result.output_data || %{}, output || %{}),
+        output_data: Map.merge(result.output_data, output),
         worker_id: worker_id
     }
 
@@ -369,5 +369,6 @@ defmodule Archon.Runtime.Tasks do
   defp missing_task({:ok, _workflow}, task),
     do: {:error, {:not_found, "No such task found by id: #{task.task_id}"}}
 
-  defp blank?(value), do: value == nil or String.trim(value) == ""
+  # StringUtils.isBlank
+  defp blank?(value), do: Validation.java_blank?(value)
 end

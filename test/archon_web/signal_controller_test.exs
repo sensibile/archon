@@ -68,6 +68,13 @@ defmodule ArchonWeb.SignalControllerTest do
                "for value [#{String.duplicate("A", 100)} (truncated)...]"
     end
 
+    test "the cut counts UTF-16 code units" do
+      path = "/api/tasks/wf/#{URI.encode(String.duplicate("\u{1F600}", 60))}/signal"
+
+      assert message(post_json(path, %{}), 500) =~
+               "for value [#{String.duplicate("\u{1F600}", 50)} (truncated)...]"
+    end
+
     test "a blank status converts to null" do
       assert message(post_json("/api/tasks/wf/%20/signal", %{}), 500) ==
                "Required URI template variable 'status' for method parameter type Status is " <>
@@ -166,6 +173,21 @@ defmodule ArchonWeb.SignalControllerTest do
   end
 
   describe "execute" do
+    test "a blank name without an inline definition is a 400" do
+      assert message(post_json("/api/workflow/execute/%20/1", %{}), 400) ==
+               "Workflow name must be specified when searching for a definition"
+    end
+
+    test "a wait past the asynchronous request's limit is a 500 without a message" do
+      Application.put_env(:archon, ArchonWeb.SignalResponder, async_timeout_ms: 200)
+      on_exit(fn -> Application.delete_env(:archon, ArchonWeb.SignalResponder) end)
+
+      conn = post_json("/api/workflow/execute/archon_ops_idle/1?waitForSeconds=60", %{})
+      assert %{"status" => 500, "retryable" => false} = body = json(conn, 500)
+      refute Map.has_key?(body, "message")
+      assert Map.has_key?(body, "instance")
+    end
+
     test "a blank version is null, which the handler unboxes" do
       assert message(post_json("/api/workflow/execute/archon_ops_noop/%20", %{}), 500) ==
                ~s(Cannot invoke "java.lang.Integer.intValue\(\)" because "version" is null)

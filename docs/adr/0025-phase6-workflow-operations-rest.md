@@ -7,8 +7,8 @@
   추천안으로 정했다.
 - 갱신: 2026-11-02 조각 6a. 캡처에서 확인한 upstream 응답 중 이 문서의 기술과 다르거나 더 자세한 것을 결정 7 끝
   "조각 6a의 캡처에서 확인한 것"에 적었다. 그 응답이 정답이고, 해당 조각이 맞춘다.
-- 갱신: 2026-11-02 조각 6e. 결정 5 끝 "조각 6e가 정한 것"에 구현에서 정한 세부(모르는 자식, 응답 없음의 문구, 변환
-  실패 문구, `ArchonWeb.Request` 보충)를 적었다.
+- 갱신: 2026-11-02 조각 6e. 결정 5 끝 "조각 6e가 정한 것"에 구현에서 정한 세부(모르는 자식, 응답 없음의 문구, 대기의
+  30초 상한, 변환 실패 문구, `ArchonWeb.Request` 보충)를 적었다.
 
 ## 맥락
 
@@ -270,11 +270,18 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   - 막힌 태스크가 없는 `BLOCKING_TASK*`의 500 문구는 대기 중이면 `"The mapper [com.netflix.conductor.rest.controllers.
     WorkflowSignalResponder$$Lambda] returned a null value."`(upstream의 JVM 람다 주소는 재현하지 않음, 재생은 `message`를 뺌),
     시간 초과면 `"value"`다. 시간 초과가 0 이하면(`waitForSeconds=-1`) 읽기 없이 바로 시간 초과 응답이다(upstream 관측).
+  - 대기는 시간 초과 값과 상관없이 30초를 넘지 않는다. upstream은 Spring MVC 비동기 요청으로 답하고 Tomcat 기본 비동기 시간 제한
+    (30초, `spring.mvc.async.request-timeout` 설정 없음)이 끝내므로, 30초 넘게 기다리는 `execute`(`waitForSeconds=45`)와
+    `signal/sync`(`timeoutMillis=40000`)는 30초에 500(`message` 없음, `AsyncRequestTimeoutException`)이다(upstream 관측). archon도
+    같은 응답이고, 그래서 요청 하나가 연결 프로세스를 잡고 저장소를 읽는 시간은 클라이언트가 떠나도 30초까지다. 읽기가 마감 뒤에
+    끝나면 마감의 응답이다(upstream의 타이머가 읽는 중에도 울림).
   - 변환 실패는 Spring 문구 그대로 500이다. `status` 경로 값은 `TaskResult.Status` 상수(앞뒤 공백 무시)이고, 공백뿐이면
     `"Required URI template variable 'status' for method parameter type Status is present but converted to null"`이다.
     `returnStrategy`가 공백뿐이면 기본값, 반복되면 첫 값을 바꾸고 문구의 원래 형이 `java.lang.String[]`이다. 값은 100자에서
-    자르고 `" (truncated)..."`를 붙인다. `timeoutMillis`는 Java `long` 범위다. `execute`의 `version`이 공백뿐이면 `null`이라
-    `version == 0`에서 NPE 500, 인라인 정의의 `_systemMetadata`가 맵이 아니면 JVM의 `ClassCastException` 문구 500이다.
+    UTF-16 단위로 자르고 `" (truncated)..."`를 붙인다(잘린 서로게이트 쌍의 반쪽은 넣지 않음, upstream은 이스케이프로 씀).
+    공백 판정은 Java `String#trim`(U+0020 이하)이다. `timeoutMillis`는 Java `long` 범위다. `execute`의 `version`이 공백뿐이면 `null`이라
+    `version == 0`에서 NPE 500, 인라인 정의의 `_systemMetadata`가 맵이 아니면 JVM의 `ClassCastException` 문구 500이다. 인라인
+    정의 없이 이름이 공백이면 `POST /api/workflow`처럼 400 `"Workflow name must be specified when searching for a definition"`이다.
   - sync ref 갱신의 메서드 검증(`@Valid TaskResult`)은 따로 하지 않는다. 대기 태스크에서 만든 결과는 두 ID가 늘 있다.
   - 그래서 `lib/archon_web/request.ex`(결정 8의 6e 파일 목록 밖)에 `convert_int/4`(경로 값), `values/2`(반복 쿼리 값),
     `int/4`의 `"long"` 형을 더했다. 기존 함수의 동작은 같다.
