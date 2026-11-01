@@ -231,9 +231,9 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   - **resetcallbacks의 Env.** `Env.offsets_reset`(지연을 없앤 태스크 ID 집합)에 `reset_offset/2`의 참 결과를 담는다. 거르기는
     `Step.Lifecycle.callback_to_reset?/2`(시스템 태스크가 아니고 `SCHEDULED`, `callbackAfterSeconds > 0`)다. 메모리 큐는 꺼냄 표시를
     따로 두어(`popped?`) 꺼낸 메시지의 `unack` 시각을 지킨다.
-  - **body 없는 POST의 단순 요청.** Codex 보안 리뷰가 retry·restart·resetcallbacks에 교차 출처 폼 POST가 닿는다고 지적했다
-    (ADR 0023 결정 3의 Content-Type 검사는 body를 읽는 액션만 지킨다). 컨트롤러가 그 세 액션의 폼·`text/plain` 요청을 거절한다
-    ("upstream과 의도적으로 다른 점").
+  - **body 없는 POST의 교차 출처 요청.** Codex 보안 리뷰가 retry·restart·resetcallbacks에 교차 출처 폼 POST가 닿는다고 지적했고
+    (ADR 0023 결정 3의 Content-Type 검사는 body를 읽는 액션만 지킨다), 자체 리뷰가 타입 거르기로는 Content-Type 없는 요청과
+    `<a ping>`이 남는다고 보탰다. 그래서 타입이 아니라 출처 헤더로 거절한다("upstream과 의도적으로 다른 점").
   - **retry의 `updateTime`(Phase 4 코드 수정).** upstream `retry`는 `updateTasks`가 시각을 찍은 같은 객체를 `scheduleTask`로 저장하므로 새
     태스크의 `updateTime`이 0이 아니다(`workflow_get_retried`). archon은 다시 찍힌 태스크로 스케줄하도록 고쳤다.
 
@@ -437,11 +437,12 @@ ADR 0023의 목록에 더해 다음이 생긴다.
 - **remove의 전달 대기 500**(결정 3): outbox 전달이 마감(예 10초)까지 끝나지 않으면 `archiveWorkflow`와 상관없이 아무것도 지우지
   않고 500 `retryable` 참이다. upstream은 종료의 부수 효과를 동기로 끝내므로 이 응답이 없다. bulk remove·terminate-remove는 ID마다
   이 대기를 하므로 전달이 계속 실패하는 ID가 많으면 요청이 길어진다(받아들이는 비용).
-- **body 없는 생명주기 POST의 단순 요청 거절**(결정 3 끝, 조각 6d): retry·restart·resetcallbacks는 body를 읽지 않으므로 ADR 0023
-  결정 3의 JSON `Content-Type` 검사를 거치지 않는다. 그래서 브라우저가 preflight 없이 보내는 교차 출처 폼·`text/plain` POST
-  (`application/x-www-form-urlencoded`, `multipart/form-data`, `text/plain`)를 그 검사와 같은 500 `"Content-Type '<값>' is not
-  supported"`로 거절한다. upstream은 body를 무시하고 실행한다. 헤더가 없거나 다른 타입이면 upstream과 같다. 인증 없는 MVP의
-  나머지 위험(같은 호스트의 다른 프로세스, DNS rebinding)은 ADR 0024 결정 4대로 인증 ADR이 다룬다.
+- **body 없는 생명주기 POST의 교차 출처 요청 거절**(결정 3 끝, 조각 6d): retry·restart·resetcallbacks는 body를 읽지 않으므로
+  ADR 0023 결정 3의 JSON `Content-Type` 검사를 거치지 않고, 브라우저가 preflight 없이 다른 사이트에서 POST할 수 있다(폼,
+  body 없는 `no-cors` `fetch`, `<a ping>`). 브라우저가 교차 출처로 표시한 요청(`Sec-Fetch-Site`가 `same-origin`·`none`이 아님, 그
+  헤더가 없으면 `Origin`의 호스트·포트가 `Host`와 다름)을 403 `"Cross-origin request refused"`로 거절한다. 두 헤더를 보내지 않는
+  클라이언트(SDK, curl)는 upstream과 같다. 인증 없는 MVP의 나머지 위험(같은 호스트의 다른 프로세스, DNS rebinding)은 ADR 0024
+  결정 4대로 인증 ADR이 다룬다.
 - **task 실행 로그**(결정 1): Later. `TaskResult.logs`를 저장하지 않는다(Phase 5와 같음).
 
 ## 대안

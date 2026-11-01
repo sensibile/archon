@@ -21,9 +21,12 @@ defmodule ArchonWeb.WorkflowLifecycleController do
 
   `retry`, `restart` and `resetcallbacks` read no body, so the JSON `Content-Type` check of
   `ArchonWeb.Request` that keeps a browser's cross-origin "simple" request from an action (ADR 0023,
-  decision 3) does not run for them. A `POST` with a type a browser sends without a CORS preflight
-  (a form or `text/plain`) is refused with that check's 500 instead (ADR 0025, decision 3, a
-  deliberate difference: upstream ignores the body).
+  decision 3) does not run for them, and a browser can `POST` to them from another site without a
+  CORS preflight (a form, `fetch` in `no-cors` mode with no body, `<a ping>`). A request a browser
+  marks as cross-origin is refused with a 403 instead (ADR 0025, decision 3, a deliberate
+  difference): `Sec-Fetch-Site` other than `same-origin` or `none`, or, without it, an `Origin`
+  whose host and port are not the request's `Host`. Clients that are not browsers send neither
+  header and are answered as upstream.
   """
 
   use ArchonWeb, :controller
@@ -35,10 +38,7 @@ defmodule ArchonWeb.WorkflowLifecycleController do
 
   @unimplemented [:rerun]
 
-  # The CORS-safelisted request types a browser posts cross-origin without a preflight.
-  @simple_types ["application/x-www-form-urlencoded", "multipart/form-data", "text/plain"]
-
-  plug :refuse_simple_request when action in [:retry, :restart, :reset_callbacks]
+  plug :refuse_cross_origin when action in [:retry, :restart, :reset_callbacks]
 
   @doc "The actions not implemented yet."
   @spec unimplemented() :: [atom()]
@@ -120,17 +120,44 @@ defmodule ArchonWeb.WorkflowLifecycleController do
     end
   end
 
-  defp refuse_simple_request(conn, _opts) do
-    with [value | _rest] <- get_req_header(conn, "content-type"),
-         type = value |> String.split(";") |> hd() |> String.trim() |> String.downcase(),
-         true <- type in @simple_types do
+  defp refuse_cross_origin(conn, _opts) do
+    if cross_origin?(conn) do
       conn
-      |> Errors.send_error(
-        {:server_error, "Content-Type '#{String.trim(value)}' is not supported"}
-      )
+      |> Errors.send_error({:forbidden, "Cross-origin request refused"})
       |> halt()
     else
-      _other -> conn
+      conn
+    end
+  end
+
+  defp cross_origin?(conn) do
+    case get_req_header(conn, "sec-fetch-site") do
+      [site | _rest] ->
+        String.downcase(String.trim(site)) not in ["same-origin", "none"]
+
+      [] ->
+        case get_req_header(conn, "origin") do
+          [origin | _rest] -> authority(origin) != host(conn)
+          [] -> false
+        end
+    end
+  end
+
+  # "scheme://host[:port]" as "host:port", the default port of the scheme filled in.
+  defp authority(origin) do
+    case URI.parse(String.trim(origin)) do
+      %URI{host: host, port: port} when is_binary(host) and host != "" ->
+        "#{String.downcase(host)}:#{port}"
+
+      _opaque ->
+        nil
+    end
+  end
+
+  defp host(conn) do
+    case get_req_header(conn, "host") do
+      [value | _rest] -> authority("#{conn.scheme}://#{String.trim(value)}")
+      [] -> "#{String.downcase(conn.host)}:#{conn.port}"
     end
   end
 

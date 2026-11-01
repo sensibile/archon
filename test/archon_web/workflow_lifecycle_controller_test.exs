@@ -5,7 +5,7 @@
 defmodule ArchonWeb.WorkflowLifecycleControllerTest do
   @moduledoc """
   `ArchonWeb.WorkflowLifecycleController` beyond the contract replay (ADR 0025, decisions 2 and
-  3, slice 6d): the bodyless `POST` actions refuse a browser's cross-origin simple request, and a
+  3, slice 6d): the bodyless `POST` actions refuse a browser's cross-origin request, and a
   removal that waits too long for the outbox is a retryable 500.
   """
 
@@ -29,45 +29,54 @@ defmodule ArchonWeb.WorkflowLifecycleControllerTest do
   end
 
   describe "a bodyless POST" do
-    test "with a form or text/plain type is refused before the action" do
+    test "that a browser marks as cross-origin is refused before the action" do
       id = start()
-      {:ok, before} = Runtime.get_workflow(id)
 
       for action <- ~w(retry restart resetcallbacks),
-          type <- [
-            "application/x-www-form-urlencoded",
-            "multipart/form-data; boundary=x",
-            "Text/Plain;charset=UTF-8"
+          headers <- [
+            [{"sec-fetch-site", "cross-site"}],
+            [{"sec-fetch-site", "same-site"}, {"origin", "http://www.example.com"}],
+            [{"origin", "http://evil.example"}],
+            [{"origin", "null"}],
+            [{"origin", "http://www.example.com:8080"}],
+            [{"content-type", "text/ping"}, {"sec-fetch-site", "cross-site"}]
           ] do
         conn =
-          build_conn()
-          |> put_req_header("content-type", type)
-          |> post("/api/workflow/#{id}/#{action}", "")
+          Enum.reduce(headers, build_conn(), fn {k, v}, conn -> put_req_header(conn, k, v) end)
+          |> post("/api/workflow/#{id}/#{action}")
 
-        assert %{"status" => 500, "retryable" => false, "message" => message} =
-                 json_response(conn, 500)
+        assert %{"status" => 403, "retryable" => false, "message" => message} =
+                 json_response(conn, 403)
 
-        assert message == "Content-Type '#{type}' is not supported"
+        assert message == "Cross-origin request refused"
       end
 
-      assert Runtime.get_workflow(id) == {:ok, before}
+      # resetcallbacks would have answered 204, retry 404 and restart 409
+      assert {:ok, %{status: :running}} = Runtime.get_workflow(id)
     end
 
-    test "without a type or with another one runs the action, as upstream" do
+    test "from the same origin or a client that is not a browser runs the action" do
       id = start()
 
-      assert build_conn() |> post("/api/workflow/#{id}/resetcallbacks") |> response(204)
+      for headers <- [
+            [],
+            [{"sec-fetch-site", "same-origin"}],
+            [{"sec-fetch-site", "none"}],
+            [{"origin", "http://www.example.com"}],
+            [{"content-type", "application/x-www-form-urlencoded"}]
+          ] do
+        conn =
+          Enum.reduce(headers, build_conn(), fn {k, v}, conn -> put_req_header(conn, k, v) end)
+          |> post("/api/workflow/#{id}/resetcallbacks")
 
-      assert build_conn()
-             |> put_req_header("content-type", "application/json")
-             |> post("/api/workflow/#{id}/resetcallbacks", "")
-             |> response(204)
+        assert response(conn, 204)
+      end
 
-      # running: retry's own 404, after the check
+      # running: retry's own 404
       assert %{"status" => 404} =
                build_conn()
-               |> put_req_header("content-type", "application/octet-stream")
-               |> post("/api/workflow/#{id}/retry", "")
+               |> put_req_header("origin", "http://www.example.com")
+               |> post("/api/workflow/#{id}/retry")
                |> json_response(404)
     end
   end

@@ -22,6 +22,7 @@ defmodule ArchonWeb.Errors do
   | `{:invalid_state, message}`, `{:terminate, message}` | unmapped | 500 | false |
   | `{:server_error, message}` | unmapped (a message upstream's framework writes) | 500 | false |
   | `{:payload_too_large, message}` | (a body over `ArchonWeb.Request`'s limit) | 413 | false |
+  | `{:forbidden, message}` | (a browser's cross-origin request to a bodyless action, ADR 0025) | 403 | false |
   | `{:env \\| :pre_effect \\| :commit \\| :post_effect, _}`, `{:exit, _}`, `:outbox_pending`, a database exception | `TransientException` | 500 | true |
   | anything else | `Throwable` | 500 | false |
 
@@ -110,6 +111,9 @@ defmodule ArchonWeb.Errors do
 
   def error_response({:payload_too_large, message}, _opts) when is_binary(message),
     do: application(413, message)
+
+  def error_response({:forbidden, message}, _opts) when is_binary(message),
+    do: application(403, message)
 
   def error_response({tag, message}, _opts)
       when tag in [:invalid_state, :terminate, :server_error] and is_binary(message),
