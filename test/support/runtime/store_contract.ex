@@ -47,6 +47,7 @@ defmodule Archon.Runtime.StoreContract do
       unquote(task_cases())
       unquote(other_cases())
       unquote(query_cases())
+      unquote(query_id_cases())
       unquote(queue_cases())
       unquote(outbox_cases())
       unquote(wake_cases())
@@ -510,7 +511,13 @@ defmodule Archon.Runtime.StoreContract do
           assert {:ok, with_tasks} == s(ctx, :get_workflow, ["c1", true])
           assert {:ok, found} == s(ctx, :get_workflow, ["c1", false])
         end
+      end
+    end
+  end
 
+  defp query_id_cases do
+    quote do
+      describe "Store contract: workflow IDs by name" do
         test "pending_workflow_ids are the RUNNING and PAUSED workflows of the name, any version",
              ctx do
           create(ctx, named("p3", "flow", 1, status: :running, create_time: 30))
@@ -547,6 +554,21 @@ defmodule Archon.Runtime.StoreContract do
                    5
 
           assert s(ctx, :workflow_ids_created_between, ["flow", 2 ** 40, 0, 1_000]) == []
+        end
+
+        # The Postgres columns cannot hold these: a version outside int, a time outside bigint.
+        test "a version or create time beyond the columns matches no range and sorts last", ctx do
+          create(ctx, named("r-big-version", "flow", 2 ** 40, create_time: 10))
+          create(ctx, named("r-big-time", "flow", 1, create_time: 2 ** 70))
+          create(ctx, named("r-small", "flow", 1, create_time: 20))
+
+          assert s(ctx, :workflow_ids_created_between, ["flow", 2 ** 40, 0, 100]) == []
+
+          assert s(ctx, :workflow_ids_created_between, ["flow", 1, -(2 ** 80), 2 ** 80]) ==
+                   ["r-small"]
+
+          assert s(ctx, :pending_workflow_ids, ["flow"]) ==
+                   ["r-big-version", "r-small", "r-big-time"]
         end
 
         test "the queries see a commit's new name, version, correlation ID and create time",

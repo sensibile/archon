@@ -43,6 +43,10 @@ defmodule Archon.Runtime.Store.Memory do
 
   @queue_timeout 5_000
 
+  # The ranges of the Postgres store's version and create time columns.
+  @int_range -0x80000000..0x7FFFFFFF
+  @bigint_range -0x8000000000000000..0x7FFFFFFFFFFFFFFF
+
   @doc false
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
@@ -314,8 +318,8 @@ defmodule Archon.Runtime.Store.Memory do
   def handle_call({:workflow_ids_created_between, name, version, start_ms, end_ms}, _from, state) do
     ids =
       for %Workflow{create_time: time} = workflow <- by_name(state, name),
-          Workflow.workflow_version(workflow) == version,
-          is_integer(time) and time >= start_ms and time <= end_ms,
+          Workflow.workflow_version(workflow) == version and version in @int_range,
+          time in @bigint_range and time >= start_ms and time <= end_ms,
           do: workflow.workflow_id
 
     {:reply, ids, state}
@@ -485,12 +489,17 @@ defmodule Archon.Runtime.Store.Memory do
     }
   end
 
-  # Workflows of a definition name, by create time and then ID (a nil time last, as in Postgres).
+  # A create time the Postgres column cannot hold is NULL there, and sorts last.
+  defp sort_time(time) when is_integer(time) and time in @bigint_range, do: {0, time}
+  defp sort_time(_time), do: {1, 0}
+
+  # Workflows of a definition name, by create time and then ID (a time the Postgres column cannot
+  # hold last, as there); a version or time outside the column's range matches no time range.
   defp by_name(state, name) do
     state.workflows
     |> Map.values()
     |> Enum.filter(&(Workflow.workflow_name(&1) == name))
-    |> Enum.sort_by(&{&1.create_time == nil, &1.create_time, &1.workflow_id})
+    |> Enum.sort_by(&{sort_time(&1.create_time), &1.workflow_id})
   end
 
   defp tasks_of(state, workflow_id) do

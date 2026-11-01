@@ -78,6 +78,14 @@ defmodule Archon.Runtime.PostgresTest do
         {"w-3", %Workflow{workflow_id: "w-3", status: :running}}
       ]
 
+      # More rows than one page of the migration (500), after the three above.
+      rows =
+        rows ++
+          for n <- 1..600 do
+            id = "x-" <> String.pad_leading("#{n}", 3, "0")
+            {id, %Workflow{workflow_id: id, status: :running, create_time: n}}
+          end
+
       for {id, workflow} <- rows do
         Repo.query!(
           ~s|INSERT INTO "#{@scratch}".workflow (workflow_id, status, json_data) | <>
@@ -89,8 +97,16 @@ defmodule Archon.Runtime.PostgresTest do
       assert [_query_columns] = Release.migrate(Repo, @scratch)
 
       assert Repo.query!(
+               ~s|SELECT count(*) FROM "#{@scratch}".workflow WHERE create_time IS NULL|
+             ).rows == [[0]]
+
+      assert Repo.query!(
+               ~s|SELECT sum(create_time)::bigint FROM "#{@scratch}".workflow WHERE workflow_id LIKE 'x-%'|
+             ).rows == [[180_300]]
+
+      assert Repo.query!(
                "SELECT workflow_id, workflow_name, workflow_version, correlation_id, create_time " <>
-                 ~s|FROM "#{@scratch}".workflow ORDER BY workflow_id|
+                 ~s|FROM "#{@scratch}".workflow WHERE workflow_id LIKE 'w-%' ORDER BY workflow_id|
              ).rows == [
                ["w-1", "flow", 2, "corr", 1_793_571_042_687],
                ["w-2", "fl\\u0000ow", 1, nil, 5],

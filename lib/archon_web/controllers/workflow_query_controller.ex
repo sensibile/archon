@@ -136,10 +136,10 @@ defmodule ArchonWeb.WorkflowQueryController do
   """
   @spec correlated_many(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def correlated_many(conn, %{"name" => name}) do
-    # Spring converts the body before the query values.
-    with {:ok, json, conn} <- body(conn),
+    # Spring converts the handler's arguments in their order: the query values, then the body.
+    with {:ok, closed?, tasks?} <- include(conn),
+         {:ok, json, conn} <- body(conn),
          {:ok, ids} <- decode(conn, ids(json)),
-         {:ok, closed?, tasks?} <- include(conn),
          :ok <- check_ids(conn, ids) do
       now = System.system_time(:millisecond)
 

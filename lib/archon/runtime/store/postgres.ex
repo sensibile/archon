@@ -28,8 +28,8 @@ defmodule Archon.Runtime.Store.Postgres do
   ## Rows
 
   A workflow row keeps its status, parent workflow ID, re-evaluation time `wake_at`, definition
-  name and version, correlation ID and create time as columns and the workflow's storage encoding (`Archon.Domain.Workflow.to_storage/1`) without its `tasks`
-  as `json_data` text. A task row keeps its workflow, `seq`, status and task definition name
+  name and version, correlation ID and create time as columns and the workflow's storage
+  encoding (`Archon.Domain.Workflow.to_storage/1`) without its `tasks` as `json_data` text. A task row keeps its workflow, `seq`, status and task definition name
   (`Archon.Domain.Task.task_def_name/1`, so the type when there is none) as columns and its
   storage encoding. Statuses are stored as upstream's constant names (`RUNNING`, `IN_PROGRESS`).
   Workflow IDs sort in binary order (`COLLATE "C"`).
@@ -61,12 +61,14 @@ defmodule Archon.Runtime.Store.Postgres do
 
   Index columns are plain `text`, which cannot hold NUL or invalid UTF-8 (as in upstream). A
   commit or poll data write with such an ID, name or status raises `ArgumentError` before it
-  reaches the database, except a workflow's definition name, version, correlation ID and create
-  time, which only the queries use: their column is left `NULL` (also for a number outside the
-  column's range), so the queries do not find that workflow (and no
-  query can ask for such a value, see `Archon.Runtime.Store`), and so does a value in a workflow or task that does not encode to UTF-8
+  reaches the database, and so does a value in a workflow or task that does not encode to UTF-8
   JSON; NUL inside JSON values is escaped and kept. Reads and deletes treat such an ID or name as
   absent. A page cursor with one raises `ArgumentError`, as no stored ID can have produced it.
+
+  A workflow's definition name and version, correlation ID and create time are the exception:
+  only the queries read their columns, so a value a column cannot hold (NUL, invalid UTF-8, a
+  number outside the column's range) leaves it `NULL` instead of refusing the commit, and the
+  queries do not find that workflow by it (`Archon.Runtime.Store`).
 
   ## Writes that cannot return an error
 
@@ -89,6 +91,8 @@ defmodule Archon.Runtime.Store.Postgres do
   @running Codec.enum_name(:running)
   @in_progress Codec.enum_name(:in_progress)
   @not_terminal Enum.map([:running, :paused], &Codec.enum_name/1)
+  # Inlined, so a generic plan still matches the partial index workflow_pending_name_index.
+  @not_terminal_sql Enum.map_join(@not_terminal, ", ", &"'#{&1}'")
 
   @max_bigint 0x7FFFFFFFFFFFFFFF
   @int_range -0x80000000..0x7FFFFFFF
@@ -192,9 +196,9 @@ defmodule Archon.Runtime.Store.Postgres do
       instance
       |> query!(
         "SELECT workflow_id FROM #{table(instance, "workflow")} " <>
-          "WHERE workflow_name = $1 AND status = ANY($2) " <>
+          "WHERE workflow_name = $1 AND status IN (#{@not_terminal_sql}) " <>
           "ORDER BY create_time, workflow_id",
-        [name, @not_terminal]
+        [name]
       )
       |> Map.fetch!(:rows)
       |> Enum.map(&hd/1)

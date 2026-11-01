@@ -246,6 +246,11 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   - 페이지 끝 `start + count`는 Java `int` 덧셈처럼 넘친다(`start=1&count=2147483647`은 400 `"fromIndex(1) > toIndex(-2147483648)"`).
   - correlated POST body의 `null` 항목은 upstream SQLite DAO의 `Preconditions.checkNotNull`처럼 500 `"correlationId cannot be null"`이다.
     문자열이 아닌 스칼라는 Jackson처럼 문자열로 바꾸고, 배열이 아닌 값은 한 개짜리 목록이다.
+  - 마이그레이션은 런타임을 멈춘 상태에서 돈다(ADR 0021의 단일 노드 배포). 열 추가부터 색인까지 한 트랜잭션이라 `workflow` 표를
+    끝까지 잠그고, 이전 버전 노드가 그 뒤에 커밋하면 새 열이 비고, 끝난 워크플로우는 다시 커밋되지 않아 조회에 계속 빠지기 때문이다.
+    여러 노드·무중단 배포는 범위 밖이다(ADR 0025 "범위 밖").
+  - 새 열은 커밋마다 다시 쓴다. upstream SQLite는 `correlation_id`와 `workflow_def_to_workflow`를 생성 때만 쓰므로, 나중에
+    correlationId를 바꾸는 rerun(조각 6f) 뒤에는 upstream이 옛 ID로, archon이 새 ID로 찾는다. 6f가 결정 2에서 이 차이를 다룬다.
   - `running/{name}`의 `startTime`·`endTime`은 `Long` 범위로 읽는다(넘으면 500 변환 오류). 버전은 시간 구간이 없을 때도 `int`로
     읽으므로 숫자가 아니면 500이다.
 

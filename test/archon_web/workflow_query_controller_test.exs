@@ -161,9 +161,10 @@ defmodule ArchonWeb.WorkflowQueryControllerTest do
 
       assert message(post_json(path, ~s([{}])), 500) =~ "JSON parse error: "
 
-      # The body converts before the query values.
-      assert message(post_json(path <> "?includeClosed=maybe", ~s([{}])), 500) =~
-               "JSON parse error: "
+      # The query values convert before the body.
+      assert message(post_json(path <> "?includeClosed=maybe", ""), 500) ==
+               "Method parameter 'includeClosed': Failed to convert value of type " <>
+                 "'java.lang.String' to required type 'boolean'; Invalid boolean value [maybe]"
     end
   end
 
