@@ -166,7 +166,9 @@ defmodule Archon.Metadata do
           {:ok, BulkResponse.t()} | {:error, error()}
   def update_workflow_defs(definitions) when is_list(definitions) do
     with :ok <- validate_list(definitions, "WorkflowDefList is empty", &workflow_def_element/1) do
-      {:ok, Enum.reduce(definitions, %BulkResponse{}, &bulk_update/2)}
+      # The stored names newest first (appending would copy them each time), then in order.
+      {successes, response} = Enum.reduce(definitions, {[], %BulkResponse{}}, &bulk_update/2)
+      {:ok, %{response | bulk_successful_results: Enum.reverse(successes)}}
     end
   end
 
@@ -176,14 +178,14 @@ defmodule Archon.Metadata do
 
   defp workflow_def_element(definition), do: WorkflowDef.validate(definition)
 
-  defp bulk_update(definition, response) do
+  defp bulk_update(definition, {successes, response}) do
     case WorkflowDef.check_schema(definition) do
       :ok ->
         :ok = store_workflow_def(definition)
-        BulkResponse.success(response, definition.name)
+        {[definition.name | successes], response}
 
       {:error, {:invalid, message}} ->
-        BulkResponse.failure(response, definition.name, message)
+        {successes, BulkResponse.failure(response, definition.name, message)}
     end
   rescue
     # Upstream catches any exception of one definition; its message would show Elixir terms.
@@ -193,7 +195,7 @@ defmodule Archon.Metadata do
           Exception.format(:error, exception, __STACKTRACE__)
       )
 
-      BulkResponse.failure(response, definition.name, "Internal server error")
+      {successes, BulkResponse.failure(response, definition.name, "Internal server error")}
   catch
     # A store call that timed out or found its server down.
     :exit, reason ->
@@ -202,7 +204,7 @@ defmodule Archon.Metadata do
           Exception.format_exit(reason)
       )
 
-      BulkResponse.failure(response, definition.name, "Internal server error")
+      {successes, BulkResponse.failure(response, definition.name, "Internal server error")}
   end
 
   defp store_workflow_def(definition),

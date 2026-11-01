@@ -38,11 +38,6 @@ defmodule Archon.Domain.BulkResponse do
   @spec to_json(t()) :: Codec.json_object()
   def to_json(%__MODULE__{} = response), do: Codec.encode(__MODULE__, @fields, response)
 
-  @doc "Upstream `appendSuccessResponse`."
-  @spec success(t(), String.t()) :: t()
-  def success(%__MODULE__{} = response, name),
-    do: %{response | bulk_successful_results: response.bulk_successful_results ++ [name]}
-
   @doc "Upstream `appendFailedResponse`."
   @spec failure(t(), String.t(), String.t()) :: t()
   def failure(%__MODULE__{} = response, name, message),

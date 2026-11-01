@@ -75,6 +75,17 @@ defmodule Archon.Domain.CodecTest do
   end
 
   describe "errors" do
+    # A body within the 8 MB limit holds this many bad elements; appending each error to the
+    # ones before it would take minutes (ADR 0023, slice 5c review).
+    test "many errors are gathered in order without quadratic copying" do
+      items = List.duplicate(false, 200_000)
+
+      assert {:error, errors} = Codec.cast({:list, {:struct, TaskDef}}, items, [], [])
+      assert length(errors) == 200_000
+      assert Enum.take(errors, 2) == [{"[0]", "must be object"}, {"[1]", "must be object"}]
+      assert List.last(errors) == {"[199999]", "must be object"}
+    end
+
     test "a non-object body is rejected" do
       assert {:error, [{"", "must be object"}]} = TaskDef.from_json([1])
     end

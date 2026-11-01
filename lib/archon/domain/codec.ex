@@ -100,13 +100,13 @@ defmodule Archon.Domain.Codec do
       Enum.reduce(fields, {[], []}, fn {key, _name, _type, _opts} = field, {attrs, errors} ->
         case decode_field(module, field, json, path, codec_opts) do
           {:ok, value} -> {[{key, value} | attrs], errors}
-          {:error, more} -> {attrs, errors ++ more}
+          {:error, more} -> {attrs, [more | errors]}
         end
       end)
 
     case errors do
       [] -> {:ok, struct!(module, attrs)}
-      errors -> {:error, errors}
+      errors -> {:error, concat_errors(errors)}
     end
   end
 
@@ -299,15 +299,19 @@ defmodule Archon.Domain.Codec do
       Enum.reduce(items, {[], []}, fn item, {values, errors} ->
         case fun.(item) do
           {:ok, value} -> {[value | values], errors}
-          {:error, more} -> {values, errors ++ more}
+          {:error, more} -> {values, [more | errors]}
         end
       end)
 
     case errors do
       [] -> {:ok, Enum.reverse(values)}
-      errors -> {:error, errors}
+      errors -> {:error, concat_errors(errors)}
     end
   end
+
+  # The error lists gathered newest first, in order: appending each one would copy the errors
+  # so far every time, quadratic in a large body's errors.
+  defp concat_errors(reversed), do: reversed |> Enum.reverse() |> Enum.concat()
 
   @doc "A single type error at `path`."
   @spec type_error(path(), String.t()) :: {:error, [error()]}
