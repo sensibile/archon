@@ -25,7 +25,7 @@ defmodule ArchonWeb.WorkflowLifecycleController do
   CORS preflight (a form, `fetch` in `no-cors` mode with no body, `<a ping>`). A request a browser
   marks as cross-origin is refused with a 403 instead (ADR 0025, decision 3, a deliberate
   difference): `Sec-Fetch-Site` other than `same-origin` or `none`, or, without it, an `Origin`
-  whose host and port are not the request's `Host`. Clients that are not browsers send neither
+  whose host and port are not the request's (`conn.host`, `conn.port`, from its `Host`). Clients that are not browsers send neither
   header and are answered as upstream.
   """
 
@@ -154,12 +154,8 @@ defmodule ArchonWeb.WorkflowLifecycleController do
     end
   end
 
-  defp host(conn) do
-    case get_req_header(conn, "host") do
-      [value | _rest] -> authority("#{conn.scheme}://#{String.trim(value)}")
-      [] -> "#{String.downcase(conn.host)}:#{conn.port}"
-    end
-  end
+  # The adapter takes the request's host and port from its Host header (or HTTP/2 authority).
+  defp host(conn), do: "#{String.downcase(conn.host)}:#{conn.port}"
 
   defp reply(conn, _id, :ok, send), do: send.(conn)
 

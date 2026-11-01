@@ -72,10 +72,9 @@ defmodule ArchonWeb.WorkflowLifecycleControllerTest do
         assert response(conn, 204)
       end
 
-      # the Host header a server receives, not the adapter's host
+      # the host and port the adapter took from the request's Host header
       on_host = fn conn, origin ->
-        conn
-        |> put_req_header("host", "Archon.Local:8080")
+        %{conn | host: "Archon.Local", port: 8080}
         |> put_req_header("origin", origin)
         |> post("/api/workflow/#{id}/resetcallbacks")
       end
