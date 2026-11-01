@@ -7,7 +7,8 @@
 # (pauseWorkflow, resumeWorkflow, retry, findLastFailedSubWorkflowIfAny, restart) at commit
 # 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: what needs other workflows or the metadata is read here, and the
-# operation itself is a message to the workflow's process (ADR 0018, decision 9).
+# operation itself is a message to the workflow's process (ADR 0018, decision 9); the retry goes
+# down only to children that belong to their task (ADR 0024, decision 2).
 
 defmodule Archon.Runtime.Lifecycle do
   @moduledoc """
@@ -71,8 +72,9 @@ defmodule Archon.Runtime.Lifecycle do
     end
   end
 
-  # findLastFailedSubWorkflowIfAny. A child that cannot be read (or one already visited, through
-  # a worker-supplied subWorkflowId, ADR 0018) leaves the retry with the workflow above it.
+  # findLastFailedSubWorkflowIfAny. A child that cannot be read, or one that does not belong to
+  # the task (ADR 0024, decision 2), leaves the retry with the workflow above it, as upstream's
+  # NotFoundException does. `seen` only guards against a store whose parent fields loop.
   defp last_failed(%Task{} = task, %Workflow{} = parent, seen) do
     cond do
       not Rules.unsuccessful_terminal_task?(task) ->
@@ -82,6 +84,7 @@ defmodule Archon.Runtime.Lifecycle do
         with id when is_binary(id) <- Task.sub_workflow_id(task),
              false <- id in seen,
              {:ok, child} <- Runtime.get_workflow(id, true),
+             true <- owned?(child, parent, task),
              %Task{} = failed <- Enum.find(child.tasks, &Rules.unsuccessful_terminal_task?/1) do
           last_failed(failed, child, [id | seen])
         else
@@ -100,6 +103,9 @@ defmodule Archon.Runtime.Lifecycle do
         parent
     end
   end
+
+  defp owned?(%Workflow{} = child, %Workflow{workflow_id: parent_id}, %Task{task_id: task_id}),
+    do: child.parent_workflow_id == parent_id and child.parent_workflow_task_id == task_id
 
   @doc """
   Upstream `restart(workflowId, useLatestDefinitions)`. With `use_latest_definitions`, the

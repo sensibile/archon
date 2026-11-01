@@ -8,7 +8,8 @@
 # taskExecutionPostponeDuration, systemTaskWorkerCallbackDuration, systemTaskPostponeThreshold)
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the settings and every outside value the runtime reads became one struct
-# passed to Archon.Runtime.Step (ADR 0018, decision 2).
+# passed to Archon.Runtime.Step (ADR 0018, decision 2), and a task's child is read only when it
+# belongs to the task (ADR 0024, decision 2).
 
 defmodule Archon.Runtime.Step.Env do
   @moduledoc """
@@ -25,7 +26,8 @@ defmodule Archon.Runtime.Step.Env do
     * `queued` - the IDs of tasks that have a queue message, for the recovery check.
     * `workflows` - other workflows the step reads, by ID: the children of `SUB_WORKFLOW`
       tasks, the parent and the failure workflow. `nil` means the store has no such workflow; a
-      missing key means it was not looked up, and the check that needs it is skipped.
+      missing key means it was not looked up, and the check that needs it is skipped. A task's
+      child is taken out with `child/3` only.
     * `outbox_pending?` - the workflow has outbox entries left (ADR 0021, decision 4), for the
       recovery check of a terminal workflow.
 
@@ -47,7 +49,7 @@ defmodule Archon.Runtime.Step.Env do
   """
 
   alias Archon.Decider.{Context, SystemTasks}
-  alias Archon.Domain.{TaskDef, Workflow}
+  alias Archon.Domain.{Task, TaskDef, Workflow}
   alias Archon.Script
 
   @enforce_keys [:now]
@@ -123,5 +125,32 @@ defmodule Archon.Runtime.Step.Env do
       latest_workflow_versions: env.latest_workflow_versions,
       system_tasks: env.system_tasks
     }
+  end
+
+  @doc """
+  The child `id` of `task` from `workflows` (ADR 0024, decision 2): `:error` when it was not
+  read, `{:ok, nil}` when the store has no such workflow or it does not belong to the task (its
+  `parentWorkflowId` and `parentWorkflowTaskId` are not the task's workflow and task), else
+  `{:ok, child}`. `workflows` keeps every workflow read, so an ID that names the parent is still
+  the parent for the checks that read it.
+  """
+  @spec child(t(), Task.t(), String.t() | nil) :: :error | {:ok, Workflow.t() | nil}
+  def child(%__MODULE__{workflows: workflows}, %Task{} = task, id) do
+    case Map.fetch(workflows, id) do
+      {:ok,
+       %Workflow{
+         parent_workflow_id: parent,
+         parent_workflow_task_id: parent_task
+       } = child}
+      when is_binary(parent) and parent == task.workflow_instance_id and
+             parent_task == task.task_id ->
+        {:ok, child}
+
+      {:ok, _none_or_other} ->
+        {:ok, nil}
+
+      :error ->
+        :error
+    end
   end
 end

@@ -225,6 +225,38 @@ defmodule Archon.Runtime.StepTasksTest do
         Step.run(workflow([simple([])]), {:update, result}, env())
 
       assert {task.sub_workflow_id, task.output_data} == {"new", %{"subWorkflowId" => "new"}}
+
+      # without the result's, the key stays with a null value (only a SUB_WORKFLOW drops it)
+      result = result(status: :failed, output_data: %{"subWorkflowId" => "old"})
+
+      {task, _stored, [], _commit, _post} =
+        Step.run(workflow([simple([])]), {:update, result}, env())
+
+      assert {task.sub_workflow_id, task.output_data} == {nil, %{"subWorkflowId" => nil}}
+    end
+
+    # ADR 0024, decision 1
+    test "a SUB_WORKFLOW task keeps its child ID and output key against the result's" do
+      sub = fn id, output ->
+        simple(task_type: "SUB_WORKFLOW", sub_workflow_id: id, output_data: output)
+      end
+
+      cases = [
+        {sub.("child", %{"subWorkflowId" => "child"}), %{"subWorkflowId" => "other", "y" => 1},
+         {"child", %{"subWorkflowId" => "child", "y" => 1}}},
+        {sub.("child", %{}), %{"y" => 1}, {"child", %{"y" => 1}}},
+        {sub.(nil, %{}), %{"subWorkflowId" => "other", "y" => 1}, {nil, %{"y" => 1}}}
+      ]
+
+      for {task, output, expected} <- cases do
+        result = result(status: :failed, output_data: output, sub_workflow_id: "other")
+
+        {updated, _stored, [], _commit, _post} =
+          Step.run(workflow([task]), {:update, result}, env())
+
+        assert {updated.sub_workflow_id, updated.output_data} == expected
+        assert {updated.status, updated.reason_for_incompletion} == {:failed, nil}
+      end
     end
 
     test "a terminal task or workflow ignores the update and removes the message" do

@@ -10,7 +10,8 @@
 # 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: each call is an effect of the calling workflow's process or of its outbox
 # runner, and a parent hears of its child by a call instead of the decider queue (ADR 0018,
-# decisions 1 and 5; ADR 0021, decision 4).
+# decisions 1 and 5; ADR 0021, decision 4), and a child is checked to belong to the caller before
+# it is cancelled or retried (ADR 0024, decision 2).
 
 defmodule Archon.Runtime.SubWorkflows do
   @moduledoc """
@@ -52,13 +53,11 @@ defmodule Archon.Runtime.SubWorkflows do
   alias Archon.Runtime.Step.{Effect, Event, SubWorkflow}
   alias Archon.Runtime.WorkflowServer
 
-  @task_supervisor Archon.Runtime.TaskSupervisor
-
   @doc "Starts the child of a `SUB_WORKFLOW` task (upstream `startWorkflowIdempotent`)."
   @spec start_child(Effect.start()) :: Event.sub_workflow_result()
   def start_child(%{workflow_id: id, parent_workflow_id: id} = start) when is_binary(id) do
-    # A task whose subWorkflowId (worker-supplied, ADR 0018) names its own workflow: the
-    # process cannot call itself, so the ownership check upstream would fail it runs here.
+    # A task whose subWorkflowId names its own workflow (stored before ADR 0024): the process
+    # cannot call itself, so the ownership check upstream would fail it runs here.
     case Runtime.get_workflow(id, false) do
       {:ok, existing} ->
         owner = %Workflow{
@@ -99,62 +98,35 @@ defmodule Archon.Runtime.SubWorkflows do
   defp message(reason), do: inspect(reason)
 
   @doc """
-  Terminates a child because its parent ended (upstream `SubWorkflow#cancel`). A child that does
-  not exist, or one that is `owner_id` itself, counts as terminated.
+  Terminates a child because its parent ended (upstream `SubWorkflow#cancel`). The child is read
+  from the store first and called only when its `parentWorkflowId` is `owner_id` (ADR 0024,
+  decision 2): a child that does not exist, one that belongs to another parent and `owner_id`
+  itself count as terminated. A failed read raises, which the caller handles as it does a failed
+  cancel.
 
   Options:
 
     * `end_count:` - the parent's `endCount` after the commit that saved this termination (an
       outbox entry, ADR 0021, decision 4). A child that ran again after reading that end of its
       parent is left running. `nil` (the default, a `pre` termination) skips the check.
-    * `in_process: true` - the call runs in the parent's own process (a `pre` termination). An
-      ancestor of the parent is then cancelled from a task under `Archon.Runtime.TaskSupervisor`
-      once this process is free (ADR 0018, decision 5), as its cancel calls back into this one.
-      Without it (the outbox runner) the ancestor is cancelled and waited for.
   """
   @spec terminate_child(String.t(), String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def terminate_child(owner_id, child_id, reason, opts \\ []) do
-    # A worker-supplied subWorkflowId (ADR 0018) may name the parent itself or one of its
-    # ancestors. The parent itself is ending already (upstream terminates it again).
-    end_count = Keyword.get(opts, :end_count)
-
-    cond do
-      child_id == owner_id ->
-        :ok
-
-      Keyword.get(opts, :in_process, false) and ancestor?(owner_id, child_id, []) ->
-        cancel_later(child_id, reason)
-
-      # The end count is about the owner as a parent; an ancestor named as a child (L7, L8) has
-      # another parent, so its check is skipped.
-      end_count != nil and ancestor?(owner_id, child_id, []) ->
-        cancel(child_id, reason, nil)
-
-      true ->
-        cancel(child_id, reason, end_count)
-    end
+    # The parent itself is ending already (upstream terminates it again); the process cannot
+    # call itself.
+    if child_id != owner_id and owned?(owner_id, child_id),
+      do: cancel(child_id, reason, Keyword.get(opts, :end_count)),
+      else: :ok
   end
 
-  defp ancestor?(id, target, seen) do
-    with false <- id in seen,
-         {:ok, %Workflow{parent_workflow_id: parent}} when parent not in [nil, ""] <-
-           Runtime.get_workflow(id, false) do
-      parent == target or ancestor?(parent, target, [id | seen])
-    else
-      _root -> false
+  # The sender's ownership check (ADR 0024, decision 2), before the other workflow's process is
+  # called: an ancestor is never its descendant's child, so a pre termination cannot call back
+  # into its own chain (L6, L7), and an unrelated workflow is not touched (L8).
+  defp owned?(owner_id, child_id) do
+    case Runtime.get_workflow(child_id, false) do
+      {:ok, %Workflow{parent_workflow_id: parent}} -> parent == owner_id
+      {:error, :not_found} -> false
     end
-  end
-
-  # ADR 0021, L6: supervised. Lost with the VM, it is made good by the ancestor's own recovery
-  # check when it is activated again.
-  defp cancel_later(child_id, reason) do
-    {:ok, _pid} =
-      Elixir.Task.Supervisor.start_child(@task_supervisor, fn ->
-        with {:error, error} <- cancel(child_id, reason, nil),
-             do: Logger.warning("workflow #{child_id} was not cancelled: #{inspect(error)}")
-      end)
-
-    :ok
   end
 
   defp cancel(child_id, reason, end_count) do
@@ -207,8 +179,8 @@ defmodule Archon.Runtime.SubWorkflows do
   @doc """
   Retries a failed child for a reviving parent `owner_id` (upstream `updateAndPushParents` calls
   `retry` on it) and returns its answer. The child does not ask its parent back. A child that is
-  the parent or one of its ancestors (a worker-supplied `subWorkflowId`, ADR 0018) is skipped
-  with a warning, as upstream's retry of it would revive the parent's own chain.
+  `owner_id` itself, does not exist or belongs to another parent (ADR 0024, decision 2) is
+  skipped with a warning; a failed read raises.
   """
   @spec retry_child(String.t(), String.t()) :: :ok | {:error, term()}
   def retry_child(owner_id, child_id) do
@@ -216,11 +188,11 @@ defmodule Archon.Runtime.SubWorkflows do
       owner_id == child_id ->
         Logger.warning("workflow #{child_id} names itself as a child to retry; skipped")
 
-      ancestor?(owner_id, child_id, []) ->
-        Logger.warning("workflow #{owner_id} names its ancestor #{child_id} to retry; skipped")
+      owned?(owner_id, child_id) ->
+        WorkflowServer.retry(child_id, false)
 
       true ->
-        WorkflowServer.retry(child_id, false)
+        Logger.warning("workflow #{child_id} is not a child of #{owner_id} to retry; skipped")
     end
   end
 end
