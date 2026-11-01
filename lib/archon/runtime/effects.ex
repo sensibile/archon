@@ -30,5 +30,5 @@ defmodule Archon.Runtime.Effects do
     do: {:event, {:sub_workflow_started, task_id, SubWorkflows.start_child(start)}}
 
   def run({:terminate_sub_workflow, child_id, reason}, owner_id),
-    do: SubWorkflows.terminate_child(owner_id, child_id, reason, in_process: true)
+    do: SubWorkflows.terminate_child(owner_id, child_id, reason)
 end

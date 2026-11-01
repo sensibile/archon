@@ -11,7 +11,8 @@
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: each operation is an event of the workflow's own process; the parents
 # are revived by a message to each parent in turn instead of one loop over the store, and the
-# decider queue push became the step's decide (ADR 0018, decision 9).
+# decider queue push became the step's decide (ADR 0018, decision 9); a task's child is followed
+# only when it belongs to the task (ADR 0024, decision 2).
 
 defmodule Archon.Runtime.Step.Lifecycle do
   @moduledoc """
@@ -36,7 +37,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
   alias Archon.Decider.Parameters
   alias Archon.Domain.{Task, Workflow, WorkflowDef, WorkflowTask}
-  alias Archon.Runtime.Step.{Decide, Schedule, State}
+  alias Archon.Runtime.Step.{Decide, Env, Schedule, State}
 
   @type reply :: :ok | {:error, {:conflict | :not_found | :invalid_state, String.t()}}
 
@@ -333,11 +334,11 @@ defmodule Archon.Runtime.Step.Lifecycle do
     # A child that already ended again (a restart that finished in its first decide) is read
     # now instead of on the next :wake: its notice reached this workflow before the revival.
     state =
-      case Map.get(state.env.workflows, Task.sub_workflow_id(task) || "") do
-        %Workflow{status: status} = _child ->
+      case Env.child(state.env, task, Task.sub_workflow_id(task)) do
+        {:ok, %Workflow{status: status}} ->
           if Workflow.terminal?(status), do: State.due(state, [task.task_id]), else: state
 
-        nil ->
+        _unread_or_none ->
           state
       end
 
@@ -376,16 +377,16 @@ defmodule Archon.Runtime.Step.Lifecycle do
   defp repair(state, task), do: repair_canceled(state, task)
 
   defp repair_child(%State{env: env} = state, task, id) do
-    case Map.get(env.workflows, id) do
-      %Workflow{status: :running} ->
+    case Env.child(env, task, id) do
+      {:ok, %Workflow{status: :running}} ->
         follow(state, task)
 
-      %Workflow{tasks: tasks} ->
+      {:ok, %Workflow{tasks: tasks}} ->
         if Enum.any?(tasks, &unsuccessful_terminal?/1),
           do: state |> State.post({:retry_sub_workflow, id}) |> follow(task),
           else: state
 
-      nil ->
+      _unread_or_none ->
         state
     end
   end

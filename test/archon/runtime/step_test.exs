@@ -710,6 +710,7 @@ defmodule Archon.Runtime.StepTest do
               task_id: "s",
               task_type: "SUB_WORKFLOW",
               status: :canceled,
+              workflow_instance_id: "wf",
               sub_workflow_id: "c"
             }
           ]
@@ -719,7 +720,14 @@ defmodule Archon.Runtime.StepTest do
           "on_failure"
         )
 
-      workflows = %{"c" => %Workflow{workflow_id: "c", status: :running}, "fw" => nil}
+      child = %Workflow{
+        workflow_id: "c",
+        status: :running,
+        parent_workflow_id: "wf",
+        parent_workflow_task_id: "s"
+      }
+
+      workflows = %{"c" => child, "fw" => nil}
       {:ok, ^wf, [], post} = run(wf, :recover, env(workflows: workflows))
 
       assert [
@@ -727,6 +735,38 @@ defmodule Archon.Runtime.StepTest do
                 "Parent workflow has been terminated with status FAILED", 0},
                {:start_failure_workflow, %{workflow_id: "fw", name: "on_failure"}}
              ] = post
+
+      # ADR 0024, decision 2: a workflow that belongs to another parent or task is no child
+      for other <- [
+            %{child | parent_workflow_id: "other"},
+            %{child | parent_workflow_task_id: "x"}
+          ] do
+        {:ok, ^wf, [], post} = run(wf, :recover, env(workflows: %{workflows | "c" => other}))
+        assert [{:start_failure_workflow, _start}] = post
+      end
+    end
+
+    # ADR 0024, decision 2: the parent stays in env.workflows when a task's child ID names it.
+    test "a SUB_WORKFLOW input that names the parent leaves the orphan check reading the parent" do
+      sub = %Task{
+        task_id: "s",
+        task_type: "SUB_WORKFLOW",
+        status: :in_progress,
+        workflow_instance_id: "wf",
+        input_data: %{"subWorkflowId" => "gone"}
+      }
+
+      wf = new_workflow([], parent_workflow_id: "gone", tasks: [sub])
+      env = env(workflows: %{"gone" => nil})
+
+      assert Env.child(env, sub, Task.sub_workflow_id(sub)) == {:ok, nil}
+      assert Env.child(env, sub, "unread") == :error
+
+      # the ID still goes to the termination, which checks it before calling (SubWorkflows)
+      assert {:ok, terminated, [{:terminate_sub_workflow, "gone", _reason}], _post} =
+               run(wf, :recover, env)
+
+      assert terminated.status == :terminated
     end
   end
 
