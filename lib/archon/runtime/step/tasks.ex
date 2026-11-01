@@ -136,19 +136,7 @@ defmodule Archon.Runtime.Step.Tasks do
         else: result.status
 
     sub_workflow_id = sub_workflow_id(task, result)
-    output = result.output_data || %{}
-
-    output =
-      cond do
-        not Map.has_key?(output, "subWorkflowId") ->
-          output
-
-        task.task_type == "SUB_WORKFLOW" and sub_workflow_id == nil ->
-          Map.delete(output, "subWorkflowId")
-
-        true ->
-          Map.put(output, "subWorkflowId", sub_workflow_id)
-      end
+    output = output_key(result.output_data || %{}, task, sub_workflow_id)
 
     task = %{
       task
@@ -176,6 +164,14 @@ defmodule Archon.Runtime.Step.Tasks do
   # stores the result's, as upstream does.
   defp sub_workflow_id(%Task{task_type: "SUB_WORKFLOW", sub_workflow_id: id}, _result), do: id
   defp sub_workflow_id(_task, %TaskResult{sub_workflow_id: id}), do: id
+
+  # An output subWorkflowId key follows the task's; a SUB_WORKFLOW without a child drops it.
+  defp output_key(output, _task, _id) when not is_map_key(output, "subWorkflowId"), do: output
+
+  defp output_key(output, %Task{task_type: "SUB_WORKFLOW"}, nil),
+    do: Map.delete(output, "subWorkflowId")
+
+  defp output_key(output, _task, id), do: Map.put(output, "subWorkflowId", id)
 
   defp queue_effect(%Task{status: status} = task, result) do
     if Task.terminal?(status),
