@@ -81,14 +81,8 @@ defmodule ArchonWeb.WorkflowControllerTest do
       end
     end
 
+    # The body {} (no name) is the fixture workflow_start_request_no_name.
     test "validation errors are under startWorkflow.arg0" do
-      assert validation_errors(post_json("/api/workflow", "{}")) == [
-               %{
-                 "path" => "startWorkflow.arg0.name",
-                 "message" => "Workflow name cannot be null or empty"
-               }
-             ]
-
       body = ~s({"name":"x","priority":100,"workflowDef":{"name":"","tasks":[)
       body = body <> ~s({"name":"archon_task_a","taskReferenceName":"a","type":"SIMPLE"}]}})
 
@@ -163,10 +157,8 @@ defmodule ArchonWeb.WorkflowControllerTest do
       end
     end
 
-    test "a null input is upstream's 400; null priority and taskToDomain are the defaults" do
-      conn = post_json("/api/workflow", ~s({"name":"archon_simple","input":null}))
-      assert message(conn, 400) == "NULL input passed when starting workflow"
-
+    # A null input is the fixture workflow_start_request_null_input.
+    test "null priority and taskToDomain are the defaults" do
       body = ~s({"name":"archon_simple","priority":null,"taskToDomain":null})
       id = text(post_json("/api/workflow", body))
 
@@ -279,10 +271,8 @@ defmodule ArchonWeb.WorkflowControllerTest do
       end
     end
 
-    test "an unknown definition is the service's 404" do
-      assert message(post_json("/api/workflow/archon_simple?version=7", "{}"), 404) ==
-               "No such workflow found by name: archon_simple, version: 7"
-
+    # An unknown version is the fixture workflow_start_version_not_found.
+    test "a blank name is the service's 404 too" do
       assert message(post_json("/api/workflow/%20", "{}"), 404) ==
                "No such workflow found by name:  , version: null"
     end

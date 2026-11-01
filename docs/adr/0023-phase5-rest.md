@@ -414,7 +414,8 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
     옮겨 Metadata 시험과 함께 쓴다. 다른 시험이 등록한 픽스처 정의를 지우고 큐를 비운 뒤 재생하고, 끝나면 다시 지우고
     `RuntimeCase`의 정의를 되돌린다. 두 백엔드에서 돈다.
   - 손으로 적은 upstream 문구 중 같은 요청이 픽스처로 재생되는 시험(이름 없는 정의, `overwrite=abc`, `PUT`의 `[null]`, `version=abc`,
-    `updateTaskDef.arg0.name`, `timeout=5001`, `count=x`)은 지웠고, `update-v2` 두 오류 문구는 픽스처 값과 비교한다. 같은 규칙의
+    `updateTaskDef.arg0.name`, `timeout=5001`, `count=x`,
+    `POST /api/workflow`의 `{}`·`input: null`, `version=7`의 404)은 지웠고, `update-v2` 두 오류 문구는 픽스처 값과 비교한다. 같은 규칙의
     다른 표본(모든 경로의 빈 body·`null`, 다른 필드의 코덱 오류 등)은 단위 시험에 남겼다.
 - 시나리오 시험 밖의 단위 시험은 컨트롤러마다 오류 변환과 쿼리 기본값을 본다.
 

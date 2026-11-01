@@ -22,6 +22,7 @@ defmodule ArchonWeb.ServerTest do
   setup do
     {:ok, _apps} = Application.ensure_all_started(:inets)
     Archon.RuntimeCase.register_definitions()
+    Archon.RuntimeCase.isolate_queues(~w(archon_task_a))
 
     # The default address with any free port: PORT=0 lets the system pick one.
     saved = for name <- ~w(ARCHON_HTTP_IP PORT), into: %{}, do: {name, System.get_env(name)}
