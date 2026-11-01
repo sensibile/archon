@@ -203,7 +203,8 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   읽는다(`"No such task found by id: <id>"`). `extendLease`는 태스크만 읽는다(`extendLease`). 그래서 컨트롤러는 `:not_found`를 받으면
   `extendLease`가 아니고 `Runtime.get_workflow/2`가 `:not_found`일 때만 워크플로우 문구를, 나머지는 태스크 문구를 쓴다. 런타임 API는
   바꾸지 않는다. 같은 태스크 ID가 다른 워크플로우에 있으면 upstream은 그 태스크를 찾지만 Archon은 워크플로우 프로세스 안에서만 찾으므로
-  태스크 문구 404다(ADR 0024의 신뢰 모델과 무관한 기존 차이).
+  태스크 문구 404다(ADR 0024의 신뢰 모델과 무관한 기존 차이). `extendLease`도 같은 이유로 `workflowInstanceId`가 틀리거나 없으면 태스크 문구 404다(upstream은 `taskId`만으로
+  리스를 늘린다). 워크플로우를 다시 읽다 저장소 오류가 나면 예외가 올라가 500(`retryable` 참)이다.
 - **`TaskResult` 코덱 타입 오류(조각 5e).** 필드 타입이 맞지 않는 body(`status: "BAD"`, 배열 body)는 upstream처럼 500이고 문구는
   `"JSON parse error: "`로 시작하지만 그 뒤는 Jackson 문구가 아니라 코덱 오류의 경로와 이유다(결정 3의 JSON이 아닌 body와 같은 방식).
   관측한 upstream 문구 예: `"JSON parse error: Cannot deserialize value of type `com.netflix.conductor.common.metadata.tasks.TaskResult$Status`

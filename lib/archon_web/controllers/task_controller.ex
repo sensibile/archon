@@ -137,19 +137,23 @@ defmodule ArchonWeb.TaskController do
     do: "JSON parse error: " <> String.trim("#{path} #{message}")
 
   defp send_update_error(conn, :not_found, result),
-    do: Errors.send_error(conn, {:not_found, not_found_message(result)})
+    do: Errors.send_error(conn, {:not_found, not_found_message(result, workflow_exists?(result))})
 
   defp send_update_error(conn, reason, _result), do: Errors.send_error(conn, reason)
 
   # `Archon.Runtime.Tasks.update/1` answers `:not_found` for a missing workflow and a missing
   # task alike. Upstream reads the workflow first ("No such workflow found by id"), then the task
-  # ("No such task found by id"); `extendLease` reads only the task.
-  defp not_found_message(%TaskResult{} = result) do
-    if not result.extend_lease and
-         Runtime.get_workflow(result.workflow_instance_id, false) == {:error, :not_found},
-       do: "No such workflow found by id: #{result.workflow_instance_id}",
-       else: "No such task found by id: #{result.task_id}"
-  end
+  # ("No such task found by id"); `extendLease` reads only the task. A store failure while
+  # reading the workflow raises, a 500 as upstream's own read would fail (`Plug.ErrorHandler`).
+  defp workflow_exists?(%TaskResult{extend_lease: true}), do: true
+
+  defp workflow_exists?(%TaskResult{workflow_instance_id: id}),
+    do: Runtime.get_workflow(id, false) != {:error, :not_found}
+
+  defp not_found_message(result, false),
+    do: "No such workflow found by id: #{result.workflow_instance_id}"
+
+  defp not_found_message(result, true), do: "No such task found by id: #{result.task_id}"
 
   @doc """
   The message of Spring's `MethodArgumentNotValidException` for `updateTaskV2`'s `@Valid
