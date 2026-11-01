@@ -479,6 +479,36 @@ defmodule Archon.Runtime.SubWorkflowTest do
       assert workflow(id).status == :failed
     end
 
+    # TestSubWorkflow#testStartSubWorkflowWithSubWorkflowDefinition: the child runs the inline
+    # definition, which is not registered, and its input is marked dynamic (SubWorkflow#start).
+    test "an inline child definition is started without a registered one and marked dynamic" do
+      define(~S"""
+      {"name": "archon_inline_sub_wf_parent", "version": 1, "tasks": [
+        {"name": "inline_sub", "taskReferenceName": "st", "type": "SUB_WORKFLOW",
+         "inputParameters": {"param1": "${workflow.input.param1}"},
+         "subWorkflowParam": {"name": "archon_inline_child", "workflowDefinition": {
+           "name": "archon_inline_child", "version": 1, "tasks": [
+             {"name": "simple_task_in_sub_wf", "taskReferenceName": "t1", "type": "SIMPLE",
+              "inputParameters": {}}]}}}]}
+      """)
+
+      assert {:error, :not_found} = Runtime.metadata().get_workflow_def("archon_inline_child", 1)
+
+      id = start("archon_inline_sub_wf_parent", %{"param1" => "p1 value"})
+      child_id = child_of(id, "st")
+
+      await_statuses(child_id, [{"simple_task_in_sub_wf", :scheduled}])
+      child = workflow(child_id)
+      assert child.workflow_definition.name == "archon_inline_child"
+      assert child.parent_workflow_id == id
+      assert %{"param1" => "p1 value", "_systemMetadata" => %{"dynamic" => true}} = child.input
+      assert {:error, :not_found} = Runtime.metadata().get_workflow_def("archon_inline_child", 1)
+
+      complete(child_id, "t1")
+      assert await_status(child_id, :completed)
+      assert [{"SUB_WORKFLOW", :completed}] = statuses(await_status(id, :completed))
+    end
+
     test "a child that belongs to another parent is refused" do
       {id, child_id} = start_with_child("sub_workflow")
       sub_task = task(id, "t2")
