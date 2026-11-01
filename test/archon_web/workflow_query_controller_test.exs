@@ -34,7 +34,7 @@ defmodule ArchonWeb.WorkflowQueryControllerTest do
 
   # archon_simple under another name and version, so a test's running list is its own.
   defp define(name, version) do
-    {:ok, definition} = Runtime.metadata().get_workflow_def("archon_simple", 1)
+    {:ok, %WorkflowDef{} = definition} = Runtime.metadata().get_workflow_def("archon_simple", 1)
 
     :ok =
       Runtime.metadata().update_workflow_def(%WorkflowDef{

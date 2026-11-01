@@ -567,6 +567,10 @@ defmodule Archon.Runtime.StoreContract do
           assert s(ctx, :workflow_ids_created_between, ["flow", 1, -(2 ** 80), 2 ** 80]) ==
                    ["r-small"]
 
+          # A bound past the column's range leaves nothing between.
+          assert s(ctx, :workflow_ids_created_between, ["flow", 1, 2 ** 70, 2 ** 80]) == []
+          assert s(ctx, :workflow_ids_created_between, ["flow", 1, -(2 ** 80), -(2 ** 70)]) == []
+
           assert s(ctx, :pending_workflow_ids, ["flow"]) ==
                    ["r-big-version", "r-small", "r-big-time"]
         end

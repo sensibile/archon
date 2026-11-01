@@ -29,7 +29,8 @@ defmodule Archon.Runtime.Store.Postgres do
 
   A workflow row keeps its status, parent workflow ID, re-evaluation time `wake_at`, definition
   name and version, correlation ID and create time as columns and the workflow's storage
-  encoding (`Archon.Domain.Workflow.to_storage/1`) without its `tasks` as `json_data` text. A task row keeps its workflow, `seq`, status and task definition name
+  encoding (`Archon.Domain.Workflow.to_storage/1`) without its `tasks` as `json_data` text. A
+  task row keeps its workflow, `seq`, status and task definition name
   (`Archon.Domain.Task.task_def_name/1`, so the type when there is none) as columns and its
   storage encoding. Statuses are stored as upstream's constant names (`RUNNING`, `IN_PROGRESS`).
   Workflow IDs sort in binary order (`COLLATE "C"`).
@@ -219,8 +220,10 @@ defmodule Archon.Runtime.Store.Postgres do
       )
       when is_binary(name) and is_integer(version) and is_integer(start_ms) and
              is_integer(end_ms) do
-    # Bounds outside the columns' ranges match nothing a column holds, so they are clamped.
-    if storable?(name) and version in @int_range do
+    # A column holds no time past a bound outside its range: that range is empty, and the other
+    # bound is clamped.
+    if storable?(name) and version in @int_range and start_ms <= @bigint_range.last and
+         end_ms >= @bigint_range.first do
       instance
       |> query!(
         "SELECT workflow_id FROM #{table(instance, "workflow")} " <>
