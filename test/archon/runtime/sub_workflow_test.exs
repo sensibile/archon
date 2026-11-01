@@ -939,6 +939,48 @@ defmodule Archon.Runtime.SubWorkflowTest do
       assert await_status(top, :terminated).output == %{"subWorkflowId" => mid}
       assert Task.to_json(task(top, "sub_ref"))["outputData"] == %{"subWorkflowId" => mid}
     end
+
+    test "a chain whose mid is terminated ends with its own child in the output",
+         %{top: top, mid: mid, leaf: leaf} do
+      poll(leaf, "leaf_ref")
+      assert Runtime.terminate_workflow(mid, "terminated") == :ok
+
+      assert await_status(top, :terminated).output == %{"subWorkflowId" => mid}
+      assert Task.to_json(task(top, "sub_ref"))["outputData"] == %{"subWorkflowId" => mid}
+    end
+
+    test "a chain whose leaf times out ends with its own child in the output" do
+      RuntimeHooks.install(clock: 1_000_000, timer: self())
+
+      define(~S"""
+      {"name": "nest_timed_leaf", "version": 1, "timeoutPolicy": "TIME_OUT_WF",
+       "timeoutSeconds": 10, "tasks": [
+        {"name": "nest_leaf_task", "taskReferenceName": "leaf_ref", "type": "SIMPLE"}]}
+      """)
+
+      for {name, child} <- [
+            {"nest_timed_mid", "nest_timed_leaf"},
+            {"nest_timed_top", "nest_timed_mid"}
+          ] do
+        define(~s"""
+        {"name": "#{name}", "version": 1, "tasks": [
+          {"name": "nest_sub", "taskReferenceName": "sub_ref", "type": "SUB_WORKFLOW",
+           "subWorkflowParam": {"name": "#{child}", "version": 1}}]}
+        """)
+      end
+
+      top = start("nest_timed_top", %{})
+      mid = nested_child(top)
+      leaf = nested_child(mid)
+      poll(leaf, "leaf_ref")
+
+      RuntimeHooks.advance(10_000)
+      send(WorkflowServer.whereis(leaf), :wake)
+
+      assert await_status(leaf, :timed_out)
+      assert await_status(top, :timed_out).output == %{"subWorkflowId" => mid}
+      assert Task.to_json(task(top, "sub_ref"))["outputData"] == %{"subWorkflowId" => mid}
+    end
   end
 
   defp nested_child(id) do
