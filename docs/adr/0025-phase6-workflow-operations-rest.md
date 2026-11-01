@@ -277,7 +277,7 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   정의 참조를 보지 않고 지운다(upstream과 같음). 없는 정의는 upstream SQLite DAO의 `NotFoundException`이 트랜잭션 도우미에서
   `NonTransientException`으로 감싸여 **500**이고 문구는 `"No such workflow definition: <name> version: <v>"`,
   `"No such task definition"`이다. 픽스처로 확인하고 그대로 맞춘다. `version`이 숫자가 아니면 Spring 변환 실패 500이다.
-  6c 구현 보충(upstream 서버에서 확인): `version`은 쿼리 정수와 같이 바꾼다(공백 제거, `0x1`·`+1`도 1). 공백뿐이면 null로 바뀌어
+  6c 구현 보충(upstream 서버에서 확인): `version`은 쿼리 정수와 같이 바꾼다(`Character.isWhitespace` 공백 제거, `0x1`·`+1`도 1, no-break space는 남아 변환 실패 500). 공백뿐이면 null로 바뀌어
   500 `"Required URI template variable 'version' for method parameter type Integer is present but converted to null"`이다.
   정의를 지우면 그 정의로 이미 도는 워크플로우는 저장된 정의로 계속 돈다(archon은 시작 때 정의를 워크플로우에 박는다).
 - **`POST /api/metadata/workflow/validate`**: 등록과 같은 `WorkflowDef.validate/2` 전부(이름, 태스크 목록, `schemaVersion`, ref
