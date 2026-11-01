@@ -62,6 +62,32 @@ defmodule Archon.Runtime.StorePostgresTest do
                [["wf1_t1", "wf1", 1, "IN_PROGRESS", "worker"]]
     end
 
+    # ADR 0025, decision 4: the query columns, NULL for what a column cannot hold.
+    test "keep the definition name and version, correlation ID and create time", ctx do
+      create(ctx, workflow("wf1"))
+
+      create(
+        ctx,
+        workflow("wf2",
+          workflow_definition: %WorkflowDef{name: "n\u0000", version: 2 ** 40},
+          correlation_id: "c\u0000",
+          create_time: 2 ** 70
+        )
+      )
+
+      assert Repo.query!(
+               "SELECT workflow_id, workflow_name, workflow_version, correlation_id, create_time " <>
+                 "FROM #{t(ctx, "workflow")} ORDER BY workflow_id"
+             ).rows == [
+               ["wf1", "Junit Workflow", 3, "correlationX", 90],
+               ["wf2", nil, nil, nil, nil]
+             ]
+
+      assert {:ok,
+              %Workflow{correlation_id: "c\u0000", create_time: 1_180_591_620_717_411_303_424}} =
+               s(ctx, :get_workflow, ["wf2", false])
+    end
+
     test "NUL inside values goes through JSON and comes back", ctx do
       wf =
         workflow("wf1",

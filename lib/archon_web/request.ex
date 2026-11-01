@@ -26,7 +26,7 @@ defmodule ArchonWeb.Request do
 
   ## Query values
 
-  `int/4`, `boolean/4` and `string/3` follow Spring's `@RequestParam` conversion
+  `int/4`, `long/4`, `boolean/4`, `string/3` and `strings/2` follow Spring's `@RequestParam` conversion
   (`CustomNumberEditor`, `CustomBooleanEditor`, checked against the upstream server):
 
     * A missing value, or exactly `""`, is the default.
@@ -34,7 +34,8 @@ defmodule ArchonWeb.Request do
       message, because upstream's mapper finds no status for that exception class (ADR 0023,
       decision 4).
     * A repeated parameter converts its first value to a number or boolean, and joins all
-      values with `,` for a string.
+      values with `,` for a string. A `List<String>` parameter keeps the values of a repeated
+      parameter as they are and splits a single value at every `,`, trimming each part.
     * A pair whose `%` escapes do not decode is left out, as Tomcat does, instead of failing the
       request as `Plug.Conn.fetch_query_params/1` would.
   """
@@ -275,8 +276,7 @@ defmodule ArchonWeb.Request do
 
   @doc """
   An integer query value. `java_type` names the handler's parameter type in the error message
-  (`"int"`, or `"java.lang.Integer"` for a boxed one, which also takes blank text as `default`;
-  `"long"` takes the range of a Java `long`).
+  (`"int"`, or `"java.lang.Integer"` for a boxed one, which also takes blank text as `default`).
   Like `NumberUtils.parseNumber`, all `Character.isWhitespace` characters are removed (not a
   no-break space) and `0x`/`#` hexadecimal is accepted.
   """
@@ -297,7 +297,26 @@ defmodule ArchonWeb.Request do
     case String.replace(text, @java_whitespace, "") do
       # A boxed Integer takes blank text as null; a primitive int fails on it.
       "" when java_type == "java.lang.Integer" -> {:ok, default}
-      digits -> int_result(parse_int(digits, range(java_type)), name, java_type)
+      digits -> int_result(parse_int(digits, @int_range), name, java_type)
+    end
+  end
+
+  @doc """
+  A long integer query value, as `int/4` with Java's `long` range. `java_type` is
+  `"java.lang.Long"` by default (a boxed `Long`, which takes blank text as `default`).
+  """
+  @spec long(Plug.Conn.t(), String.t(), integer() | nil, String.t()) ::
+          {:ok, integer() | nil} | {:error, {:server_error, String.t()}}
+  def long(conn, name, default, java_type \\ "java.lang.Long") do
+    case first_value(conn, name) do
+      value when value in [nil, ""] ->
+        {:ok, default}
+
+      text ->
+        case String.replace(text, @java_whitespace, "") do
+          "" when java_type == "java.lang.Long" -> {:ok, default}
+          digits -> int_result(parse_int(digits, @long_range), name, java_type)
+        end
     end
   end
 
@@ -322,9 +341,6 @@ defmodule ArchonWeb.Request do
 
   defp int_result({:ok, value}, _name, _java_type), do: {:ok, value}
   defp int_result({:error, detail}, name, java_type), do: mismatch(name, java_type, detail)
-
-  defp range("long"), do: @long_range
-  defp range(_java_type), do: @int_range
 
   defp parse_int(text, range) do
     {sign, rest} =
@@ -393,6 +409,24 @@ defmodule ArchonWeb.Request do
   @doc "Every value of a query parameter, in order (Tomcat's parsing, below)."
   @spec values(Plug.Conn.t(), String.t()) :: [String.t()]
   def values(conn, name), do: query_values(conn, name)
+
+  @doc """
+  A `List<String>` query value (`StringToCollectionConverter`): `nil` when missing, the values of
+  a repeated parameter as they are, or a single value split at every `,` with each part trimmed
+  as Java's `String.trim` does (`""` is the empty list).
+  """
+  @spec strings(Plug.Conn.t(), String.t()) :: [String.t()] | nil
+  def strings(conn, name) do
+    case query_values(conn, name) do
+      [] -> nil
+      [""] -> []
+      [value] -> value |> String.split(",") |> Enum.map(&java_trim/1)
+      values -> values
+    end
+  end
+
+  # String.trim: every character up to U+0020 at either end.
+  defp java_trim(text), do: String.replace(text, ~r/\A[\x00-\x20]+|[\x00-\x20]+\z/, "")
 
   defp first_value(conn, name), do: conn |> query_values(name) |> List.first()
 

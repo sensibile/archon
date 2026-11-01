@@ -5,12 +5,15 @@
 #
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/WorkflowExecutorOps.java
 # (startWorkflow, startWorkflowIdempotent, resolveWorkflowDefinition, createWorkflowModel,
-# validateWorkflow, terminateWorkflow) and core/.../metadata/MetadataMapperService.java
-# (lookupForWorkflowDefinition, populateTaskDefinitions) at commit
+# validateWorkflow, terminateWorkflow, getWorkflows, getRunningWorkflowIds),
+# core/.../metadata/MetadataMapperService.java (lookupForWorkflowDefinition,
+# populateTaskDefinitions), core/.../service/ExecutionService.java (getWorkflowInstances) and
+# core/.../service/WorkflowServiceImpl.java (getRunningWorkflows) at commit
 # 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the caller resolves the definition and builds the workflow, and the
 # workflow's own process creates and decides it (ADR 0018, decisions 1 and 7); a definition
-# enforcing a schema that cannot be checked is refused (ADR 0023, decision 5).
+# enforcing a schema that cannot be checked is refused (ADR 0023, decision 5); the queries read
+# ordered store queries (ADR 0025, decision 4).
 
 defmodule Archon.Runtime do
   @moduledoc """
@@ -24,6 +27,8 @@ defmodule Archon.Runtime do
       child): the process creates the workflow, answers, and decides after the answer.
     * `get_workflow/2` - reads the store; no process is involved.
     * `terminate_workflow/2` - upstream `terminateWorkflow(String, String)`.
+    * `correlated_workflows/4` and `running_workflow_ids/4` - upstream `getWorkflowInstances`
+      and `getRunningWorkflows`, read from the store (ADR 0025, decision 4).
 
   Pause, resume, retry and restart are `Archon.Runtime.Lifecycle`.
 
@@ -118,6 +123,39 @@ defmodule Archon.Runtime do
   @spec get_workflow(String.t(), boolean()) :: {:ok, Workflow.t()} | {:error, :not_found}
   def get_workflow(id, include_tasks? \\ true) when is_binary(id),
     do: store().get_workflow(id, include_tasks?)
+
+  @doc """
+  Upstream `getWorkflowInstances` for each of `correlation_ids`, in one store read: a map from
+  each ID to the workflows of the definition `name` (any version) with that correlation ID, only
+  the `RUNNING` ones unless `include_closed?` (`PAUSED` is closed here), with their tasks when
+  `include_tasks?`, ordered by create time and then workflow ID (`[]` for an ID without one).
+  """
+  @spec correlated_workflows(String.t(), [String.t()], boolean(), boolean()) ::
+          %{optional(String.t()) => [Workflow.t()]}
+  def correlated_workflows(name, correlation_ids, include_closed?, include_tasks?)
+      when is_binary(name) and is_list(correlation_ids) do
+    found =
+      name
+      |> store().correlated_workflows(correlation_ids, include_closed?, include_tasks?)
+      |> Enum.group_by(& &1.correlation_id)
+
+    Map.new(correlation_ids, &{&1, Map.get(found, &1, [])})
+  end
+
+  @doc """
+  Upstream `getRunningWorkflows`: with `start_ms` and `end_ms` both given and not 0, the IDs of the
+  workflows of `name` and `version` created between them (both included) in any status; otherwise
+  the IDs of the workflows of `name` that are `RUNNING` or `PAUSED`, whatever their version, as
+  upstream's SQLite store ignores it. Ordered by create time and then workflow ID.
+  """
+  @spec running_workflow_ids(String.t(), integer(), integer() | nil, integer() | nil) ::
+          [String.t()]
+  def running_workflow_ids(name, version, start_ms, end_ms)
+      when is_binary(name) and is_integer(version) do
+    if start_ms not in [nil, 0] and end_ms not in [nil, 0],
+      do: store().workflow_ids_created_between(name, version, start_ms, end_ms),
+      else: store().pending_workflow_ids(name)
+  end
 
   @doc """
   Upstream `terminateWorkflow(String, String)` (ADR 0018, decision 8 (b)): `:ok`, also for a

@@ -9,6 +9,8 @@
   "조각 6a의 캡처에서 확인한 것"에 적었다. 그 응답이 정답이고, 해당 조각이 맞춘다.
 - 갱신: 2026-11-02 후속 PR. 결정 7 끝의 `workflow_get_top_failed` 차이를 [ADR 0024](0024-worker-input-trust-and-auth.md)
   결정 6으로 맞췄다고 적었다.
+- 갱신: 2026-11-02 조각 6b. 결정 4 끝 "조각 6b 구현에서 정한 것"에 저장소 콜백 셋, 마이그레이션의 기존 행 채우기,
+  `status` 변환, `int` 넘침, `null` correlationId를 적었다.
 - 갱신: 2026-11-02 조각 6e. 결정 5 끝 "조각 6e가 정한 것"에 구현에서 정한 세부(모르는 자식, 응답 없음의 문구, 대기의
   30초 상한, 변환 실패 문구, `ArchonWeb.Request` 보충)를 적었다.
 
@@ -233,6 +235,27 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   메모리 구현, Postgres 구현, 저장소 계약 시험을 함께 고친다. Postgres는 `workflow` 표에 `workflow_name`, `workflow_version`,
   `correlation_id`, `create_time` 컬럼과 조회 색인을 새 마이그레이션으로 더하고, 기존 행은 `json_data`에서 채운다. 커밋이 이 컬럼을
   함께 쓴다. 컨트롤러가 부를 API는 `Archon.Runtime`의 함수다.
+- **조각 6b 구현에서 정한 것.**
+  - 저장소 콜백은 셋이다. `correlated_workflows(name, correlationIds, includeClosed, includeTasks)`(ID 목록을 한 번에 읽고,
+    상태 거르기와 태스크 읽기도 같은 한 문장에서. POST의 ID가 많아도 저장소 호출은 하나다. upstream은 ID마다 읽지만 응답은
+    같다), `pending_workflow_ids(name)`(`RUNNING`·`PAUSED`, 버전 무시), `workflow_ids_created_between(name, version, start,
+    end)`(양끝 포함, 모든 상태). `Archon.Runtime`의 `correlated_workflows/4`와 `running_workflow_ids/4`가 이것을 부른다.
+  - 새 열은 조회만 읽는다. 그래서 열이 담을 수 없는 값(NUL이 든 이름·correlationId, 열 범위를 넘는 버전·`createTime`)은 커밋을
+    거절하지 않고 열을 `NULL`로 둔다. 그런 이름·correlationId로 묻는 조회는 두 저장소 모두 빈 결과다(메모리 저장소도 같은 규칙).
+  - 기존 행 채우기는 SQL JSON 연산자가 아니라 마이그레이션 안의 Elixir 디코드로 한다. Postgres `json`·`jsonb` 연산자는 escape된
+    NUL(`\u0000`)이 든 문자열 필드에서 실패하는데, `json_data`는 NUL을 escape해서 담기 때문이다(ADR 0021). 값 규칙은 커밋과 같다.
+  - `status`는 Spring `List<String>` 변환대로다. 값이 하나면 `,`로 나누고 각 부분을 Java `String.trim`처럼 다듬는다(`""`는 빈 목록,
+    거르지 않음). 반복된 값은 나누지도 다듬지도 않는다. 비교는 각 값을 대문자로 바꿔서 한다.
+  - 페이지 끝 `start + count`는 Java `int` 덧셈처럼 넘친다(`start=1&count=2147483647`은 400 `"fromIndex(1) > toIndex(-2147483648)"`).
+  - correlated POST body의 `null` 항목은 upstream SQLite DAO의 `Preconditions.checkNotNull`처럼 500 `"correlationId cannot be null"`이다.
+    문자열이 아닌 스칼라는 Jackson처럼 문자열로 바꾸고, 배열이 아닌 값은 한 개짜리 목록이다.
+  - 마이그레이션은 런타임을 멈춘 상태에서 돈다(ADR 0021의 단일 노드 배포). 열 추가부터 색인까지 한 트랜잭션이라 `workflow` 표를
+    끝까지 잠그고, 이전 버전 노드가 그 뒤에 커밋하면 새 열이 비고, 끝난 워크플로우는 다시 커밋되지 않아 조회에 계속 빠지기 때문이다.
+    여러 노드·무중단 배포는 범위 밖이다(ADR 0025 "범위 밖").
+  - 새 열은 커밋마다 다시 쓴다. upstream SQLite는 `correlation_id`와 `workflow_def_to_workflow`를 생성 때만 쓰므로, 나중에
+    correlationId를 바꾸는 rerun(조각 6f) 뒤에는 upstream이 옛 ID로, archon이 새 ID로 찾는다. 6f가 결정 2에서 이 차이를 다룬다.
+  - `running/{name}`의 `startTime`·`endTime`은 `Long` 범위로 읽는다(넘으면 500 변환 오류). 버전은 시간 구간이 없을 때도 `int`로
+    읽으므로 숫자가 아니면 500이다.
 
 ### 5. ref 갱신, signal, 동기 응답
 
@@ -287,7 +310,7 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
     정의 없이 이름이 공백이면 `POST /api/workflow`처럼 400 `"Workflow name must be specified when searching for a definition"`이다.
   - sync ref 갱신의 메서드 검증(`@Valid TaskResult`)은 따로 하지 않는다. 대기 태스크에서 만든 결과는 두 ID가 늘 있다.
   - 그래서 `lib/archon_web/request.ex`(결정 8의 6e 파일 목록 밖)에 `convert_int/4`(필수가 아닌 경로 값, `execute`의 `version`.
-    필수 경로 값은 6c의 `path_integer/2`), `values/2`(반복 쿼리 값), `int/4`의 `"long"` 형을 더했다. 기존 함수의 동작은 같다.
+    필수 경로 값은 6c의 `path_integer/2`), `values/2`(반복 쿼리 값)를 더했다. `timeoutMillis`는 6b의 `long/4`로 읽는다. 기존 함수의 동작은 같다.
 
 ### 6. metadata와 bulk
 

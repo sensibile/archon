@@ -153,7 +153,7 @@ defmodule ArchonWeb.SignalController do
   def signal_sync(conn, %{"workflowId" => id}) do
     with {:ok, status} <- task_status(conn),
          {:ok, strategy} <- strategy(conn),
-         {:ok, timeout_ms} <- query(conn, Request.int(conn, "timeoutMillis", 5000, "long")),
+         {:ok, timeout_ms} <- query(conn, Request.long(conn, "timeoutMillis", 5000, "long")),
          {:ok, output, conn} <- output(conn, @signal_sync_handler) do
       case Tasks.signal(id, status, output) do
         {:ok, nil} ->
