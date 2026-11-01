@@ -13,6 +13,9 @@
   다른 점"을 보강했다. 새로 확인한 사실은 upstream 서버(기준 SHA 빌드, 빈 SQLite)에서 관측했다.
 - 갱신: 2026-11-01 조각 5e가 결정 4(`update-v2` 검증 실패 문구를 Spring 문구 그대로 만듦, 태스크 갱신의 404 문구 구분, 코덱 타입
   오류)와 결정 7(5e의 재생 선행 조건을 실제로 한 방식)을 upstream 서버 관측으로 보강하고, 결정 3에 코덱 오류 수 한도를 더했다.
+- 갱신: 2026-11-01 조각 5d가 결정 3(`StartWorkflowRequest`·`WorkflowStatus`의 세부, 코덱 타입 오류 함수를 `ArchonWeb.Request`로
+  옮김, 시작 정의 채우기의 선형화), 결정 4(워크플로우 경로의 오류 문구와 검사 순서)와 결정 7(5d 파일 목록과 재생 방식)과
+  "upstream과 의도적으로 다른 점"을 upstream 서버(기준 SHA 빌드, 빈 SQLite) 관측으로 보강했다.
 
 ## 맥락
 
@@ -174,6 +177,20 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
     첫 오류만 500 문구에 쓰이고(결정 4), upstream Jackson도 첫 오류에서 멈추므로 응답은 바뀌지 않는다. REST 밖에서 오류 목록 전체가 보이는 곳은 인라인
     `subWorkflowDefinition`의 디코딩 실패 사유(`Archon.Runtime.Step.SubWorkflow`, `inspect` 문자열)뿐이고, 원소 100개 넘게 실패하면 그 문자열이 짧아진다.
     upstream은 이때도 첫 오류만 쓰므로 원래 다른 문자열이었다.
+  - 코덱 타입 오류의 오류 변환(결정 4)은 세 컨트롤러가 같은 모양이라 조각 5d에서 `ArchonWeb.Request.codec_error/1`로 옮겼다
+    (Metadata·Task 컨트롤러의 private 함수를 대신한다).
+  - 시작 정의 채우기의 선형화(조각 5d): `POST /api/workflow`의 인라인 `workflowDef`는 클라이언트가 크기를 정하므로,
+    `Archon.Runtime.populate/1`이 목록(`defaultCase`, `loopOver`, `forkTasks`의 가지와 그 안)을 `acc ++ [x]`로 잇던 것(목록 길이의
+    제곱)을 앞에 붙이고 뒤집는 방식으로 바꿨다. 결과는 같다.
+- **`StartWorkflowRequest`와 `WorkflowStatus`(조각 5d).** `Archon.Domain.StartWorkflowRequest`의 필드와 기본값은 upstream
+  그대로다(`input`·`taskToDomain`은 키가 없으면 빈 맵, `null`이면 `null`, `priority`는 없으면 0, `null`이면 `null`).
+  검증(`validate/2`)은 `name` `@NotNull`(빈 문자열은 통과), `priority` `@Min(0) @Max(99)`(`null`은 통과), `workflowDef`
+  `@Valid`(`WorkflowDef.validate/2`를 `workflowDef` 아래에)다. `createdBy`·`idempotencyKey`·`idempotencyStrategy`는 받되
+  시작에 쓰지 않는다(upstream `StartWorkflowInput`과 같다). 런타임의 시작 맵은 `to_start_input/1`이 요청 필드(`name`,
+  `version`, 인라인 정의, `input`, `correlationId`, `priority`, `taskToDomain`)로만 만든다. 워크플로우 ID와 부모 필드
+  (`parentWorkflowId`, `parentWorkflowTaskId` 등)는 body에 있어도 넣지 않는다(ADR 0024 결정 4). 인라인 정의가 있으면 이름과
+  버전으로 찾지 않는다(upstream `resolveWorkflowDefinition`, 이름이 빈 문자열이거나 없는 정의여도 시작한다).
+  `Archon.Domain.WorkflowStatus.new/3`은 upstream 생성자대로 빈 `correlationId`를 빼고 `output`·`variables`는 요청할 때만 넣는다.
   - `Content-Type`: 비어 있지 않은 body는 Spring의 JSON 변환기처럼 `application/json`이나 `application/*+json`(대소문자·매개변수
     무관)이어야 한다. 그 밖의 타입은 500 `"Content-Type '<타입>;<매개변수>' is not supported"`(charset이 없으면 `charset=UTF-8`을
     붙임), 헤더가 없으면 `application/octet-stream`으로 본 같은 500, `/`가 없으면 500 `Invalid mime type`, 와일드카드는 400이다(모두
@@ -246,6 +263,27 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   `"JSON parse error: "`로 시작하지만 그 뒤는 Jackson 문구가 아니라 코덱 오류의 경로와 이유다(결정 3의 JSON이 아닌 body와 같은 방식).
   관측한 upstream 문구 예: `"JSON parse error: Cannot deserialize value of type `com.netflix.conductor.common.metadata.tasks.TaskResult$Status`
   from String \"BAD\": ..."`.
+- **워크플로우 경로의 오류(조각 5d).** 모두 upstream 서버에서 확인했다.
+  - `POST /api/workflow`: 검증 실패는 400 `validationErrors`, 접두사 `startWorkflow.arg0`(예: `startWorkflow.arg0.name`,
+    `startWorkflow.arg0.priority`의 `"priority: 100 should be maximum 99"`·`"priority: -1 should be minimum 0"`,
+    `startWorkflow.arg0.workflowDef.tasks[0].taskReferenceName`, 클래스 단위 제약은 `startWorkflow.arg0.workflowDef`). 인라인 정의
+    없이 이름이 빈 문자열이거나 공백뿐이면 400 `"Workflow name must be specified when searching for a definition"`
+    (`MetadataMapperService.lookupWorkflowDefinition`의 `IllegalArgumentException`, Java `isBlank`)이다. 런타임은 이 경우를
+    문구 없는 `:not_found`로 다루므로 컨트롤러가 런타임을 부르기 전에 본다. `input`이 `null`이면 400
+    `"NULL input passed when starting workflow"`(런타임), 없는 정의는 404 `"No such workflow defined. name=<n>, version=<v>"`(런타임).
+    `externalInputPayloadStoragePath`가 공백이 아니고 `input`이 없거나 비면 upstream은 외부 저장소에서 입력을 내려받으려다
+    실패한다(외부 저장소가 없는 기본 서버, 500 `"Unable to download payload from external storage path: <p>"`). Archon은 외부
+    저장소가 없으므로 같은 500으로 거절한다. `input`이 있으면 upstream처럼 경로를 쓰지 않는다.
+  - `POST /api/workflow/{name}`: Spring은 인자를 선언 순서로 바꾸므로 쿼리(`version`, `priority`)가 body보다 먼저다(`priority=abc`와
+    배열 body면 `priority` 변환 오류). 그다음 `priority` 검증(400, 경로 `startWorkflow.arg3`, `"0 is the minimum priority value"`·
+    `"99 is the maximum priority value"`, 정의 확인보다 먼저), 그다음 `WorkflowServiceImpl`의 정의 확인이다. 없는 정의는 404
+    `"No such workflow found by name: <n>, version: <v|null>"`(`Archon.Metadata.get_workflow_def/2`, 런타임의 문구와 다르다). body가
+    객체가 아니면 코덱 타입 오류(`"JSON parse error: must be object"`).
+  - 빈 body·`null`의 handler 시그니처: `public java.lang.String ...WorkflowResource.startWorkflow(...StartWorkflowRequest)`와
+    `startWorkflow(java.lang.String,java.lang.Integer,java.lang.String,int,java.util.Map<java.lang.String, java.lang.Object>)`.
+  - 조회·상태·종료의 없는 워크플로우는 404 `"No such workflow found by id: <id>"`(`ExecutionDAOFacade`가 서비스의
+    `"Workflow with id: %s not found."`보다 먼저 던진다). `COMPLETED` 워크플로우 종료는 409 `"Cannot terminate a COMPLETED workflow."`,
+    이미 `TERMINATED`면 200이다. 불리언 쿼리(`includeTasks`, `includeOutput`, `includeVariables`) 변환 실패는 결정 3의 500이다.
 - 문구가 없는 오류(`:not_found`, `:conflict`)는 컨트롤러가 upstream 서비스·실행기의 문구를 붙인다. 예: 조회
   `"No such workflow found by id: <id>"`(픽스처), 정의 `"No such workflow found by name: %s, version: %d"`, 태스크 정의
   `"No such taskType found by name: %s"`, 등록 충돌 `"Workflow with %s already exists!"`(`key()`는 `name.version`). 문구는
@@ -379,6 +417,11 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 - 라우터와 컨트롤러 골격은 5a가 모두 만든다. 그래서 5c·5d·5e는 `router.ex`를 고치지 않고 자기 컨트롤러 파일 하나를 채운다.
   픽스처는 5a와 5f만 더한다(결정 6). 픽스처 등록(`contract_test.exs`, `contract_round_trip_test.exs`, `Archon.Contract.fixture_schemas/0`)도
   5a와 5f만 고친다. 재생 도우미(`contract_case.ex`)의 단계 옵션은 각 조각이 자기 픽스처에 맞게 고칠 수 있다.
+- **5d의 실제 파일과 재생(조각 5d).** 표의 파일에 더해 `lib/archon/runtime.ex`(정의 채우기 선형화, 결정 3),
+  `lib/archon_web/request.ex`와 `lib/archon_web/controllers/{metadata,task}_controller.ex`(`codec_error/1`, 결정 3)를 고쳤다.
+  재생(`test/archon_web/workflow_controller_test.exs`)은 5e와 같은 setup(런타임 저장소에 정의를 넣고 큐를 비움)으로
+  `workflow_start_simple`부터 `workflow_terminate_not_found`까지를 `metadata_*` 교환만 빼고 한 번에 돌린다. 워크플로우·태스크·
+  `health` 교환과 대기가 모두 들어간다. 뒤쪽의 `workflow_get_status_all`이 앞쪽 SIMPLE 워크플로우를 읽으므로 나누지 않는다.
 - **5e의 재생 선행 조건.** 태스크 픽스처는 정의 등록(5c)과 워크플로우 시작(5d) 뒤의 상태다. 5d보다 먼저 끝나는 5e는 정의와
   워크플로우를 `Archon.Metadata`·`Archon.Runtime`으로 직접 만들고 `bind/3`으로 캡처 ID에 묶은 뒤 태스크 단계만 재생한다.
   5e는 5c와 동시에 진행했으므로 `Archon.Metadata` 대신 런타임 저장소(`Archon.Runtime.metadata/0`)에 캡처된 정의(`Archon.RuntimeCase.register_definitions/0`,
@@ -408,6 +451,13 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 - **`GET /api/metadata/taskdefs`는 이름 순이다**(결정 2). upstream은 순서를 정하지 않는다(SQLite는 삽입 순).
 - **일괄 갱신에서 저장 예외의 실패 문구는 고정 문구다**(결정 2). upstream은 예외의 `getMessage()`를 넣는다.
 - **코덱 타입 오류의 문구는 Jackson 문구가 아니다**(결정 4).
+- **외부 입력 경로의 거절이 런타임의 시작 검사보다 먼저다**(결정 4). upstream은 정의 확인, 태스크 정의 채우기, `NULL input`·스키마
+  검사를 모두 마친 뒤 입력을 내려받다 실패한다. 그래서 그 검사 중 하나에 걸리는 시작(없는 정의, 정의 없는 SUB_WORKFLOW)에
+  `externalInputPayloadStoragePath`도 주면 upstream은 그 검사의 오류(404·500)를, Archon은 500을 준다. Archon이 거절하는 스키마를
+  가진 정의도 Archon은 500이다(upstream은 빈 입력이 스키마 검사를 통과하면 내려받기에서 같은 500, 아니면 400). 외부 저장소는 범위 밖이다.
+- **Java `int` 범위를 넘는 정수.** 도메인 코덱은 정수 필드의 범위를 보지 않으므로(ADR 0002 코덱, 5d 이전부터) `StartWorkflowRequest`의
+  `priority`·`version`에 int 범위를 넘는 수를 주면 upstream은 500 `"JSON parse error: Numeric value ... out of range of int"`, Archon은
+  검증 400(`priority`)이나 정의 404(`version`)다. 쿼리 값(`ArchonWeb.Request.int/4`)은 범위를 본다.
 - JSON 객체 키 순서 등 코덱 차이는 ADR 0002의 목록 그대로다.
 
 ## 대안

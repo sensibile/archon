@@ -57,6 +57,51 @@ defmodule Archon.Runtime.RuntimeTest do
     end
   end
 
+  describe "populate/1" do
+    test "keeps the order of every nested list" do
+      task = fn ref ->
+        %WorkflowTask{name: "archon_task_a", task_reference_name: ref, type: "SIMPLE"}
+      end
+
+      definition = %WorkflowDef{
+        name: "archon_order",
+        tasks: [
+          %WorkflowTask{
+            name: "fork",
+            task_reference_name: "fork",
+            type: "FORK_JOIN",
+            fork_tasks: [[task.("a1"), task.("a2")], [task.("b1"), task.("b2"), task.("b3")]]
+          },
+          %WorkflowTask{
+            name: "switch",
+            task_reference_name: "switch",
+            type: "SWITCH",
+            decision_cases: %{"x" => [task.("x1"), task.("x2")]},
+            default_case: [task.("d1"), task.("d2")]
+          },
+          %WorkflowTask{
+            name: "loop",
+            task_reference_name: "loop",
+            type: "DO_WHILE",
+            loop_over: [task.("l1"), task.("l2")]
+          },
+          task.("last")
+        ]
+      }
+
+      assert {:ok, populated} = Runtime.populate(definition)
+      refs = &Enum.map(&1, fn wt -> wt.task_reference_name end)
+      [fork, switch, loop, last] = populated.tasks
+
+      assert Enum.map(fork.fork_tasks, refs) == [~w(a1 a2), ~w(b1 b2 b3)]
+      assert refs.(switch.decision_cases["x"]) == ~w(x1 x2)
+      assert refs.(switch.default_case) == ~w(d1 d2)
+      assert refs.(loop.loop_over) == ~w(l1 l2)
+      assert last.task_reference_name == "last"
+      assert %TaskDef{name: "archon_task_a"} = last.task_definition
+    end
+  end
+
   describe "start_workflow/1" do
     test "embeds the registered task definitions and stamps the workflow" do
       id = start_simple(%{"x" => 1}, priority: 3, task_to_domain: %{"a" => "b"})

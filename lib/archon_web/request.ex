@@ -260,6 +260,16 @@ defmodule ArchonWeb.Request do
   end
 
   @doc """
+  The error for a JSON body the domain codec could not convert (`"retryCount": "abc"`). Jackson
+  stops at the first such value and upstream answers a 500 `"JSON parse error: ..."`; the status
+  and prefix are kept, followed by the codec's first path and reason instead of Jackson's wording
+  (ADR 0023, decisions 3 and 4).
+  """
+  @spec codec_error([Archon.Domain.Codec.error(), ...]) :: {:server_error, String.t()}
+  def codec_error([{path, message} | _rest]),
+    do: {:server_error, "JSON parse error: " <> String.trim("#{path} #{message}")}
+
+  @doc """
   An integer query value. `java_type` names the handler's parameter type in the error message
   (`"int"`, or `"java.lang.Integer"` for a boxed one, which also takes blank text as `default`).
   Like `NumberUtils.parseNumber`, all whitespace is removed and `0x`/`#` hexadecimal is accepted.

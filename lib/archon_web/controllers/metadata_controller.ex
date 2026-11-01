@@ -162,9 +162,5 @@ defmodule ArchonWeb.MetadataController do
   defp list(json, module), do: list([json], module)
 
   defp parse_error({:ok, value}), do: {:ok, value}
-
-  # Jackson stops at the first value it cannot convert; the message has the same shape as
-  # ArchonWeb.TaskController's (ADR 0023, decision 4).
-  defp parse_error({:error, [{path, message} | _rest]}),
-    do: {:error, {:server_error, "JSON parse error: " <> String.trim("#{path} #{message}")}}
+  defp parse_error({:error, errors}), do: {:error, Request.codec_error(errors)}
 end

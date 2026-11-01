@@ -186,15 +186,8 @@ defmodule Archon.Runtime do
   # SUB_WORKFLOW without a version gets the latest one.
   @spec populate(WorkflowDef.t()) :: {:ok, WorkflowDef.t()} | {:error, start_error()}
   def populate(%WorkflowDef{tasks: tasks} = definition) do
-    result =
-      Enum.reduce_while(tasks, {:ok, []}, fn task, {:ok, acc} ->
-        case populate_task(task) do
-          {:ok, task} -> {:cont, {:ok, [task | acc]}}
-          error -> {:halt, error}
-        end
-      end)
-
-    with {:ok, tasks} <- result, do: {:ok, %{definition | tasks: Enum.reverse(tasks)}}
+    with {:ok, tasks} <- map_while(tasks, &populate_task/1),
+         do: {:ok, %{definition | tasks: tasks}}
   end
 
   defp populate_task(nil), do: {:ok, nil}
@@ -218,22 +211,22 @@ defmodule Archon.Runtime do
     end
   end
 
-  defp populate_list(tasks) do
-    Enum.reduce_while(tasks || [], {:ok, []}, fn task, {:ok, acc} ->
-      case populate_task(task) do
-        {:ok, task} -> {:cont, {:ok, acc ++ [task]}}
-        error -> {:halt, error}
-      end
-    end)
-  end
+  defp populate_list(tasks), do: map_while(tasks || [], &populate_task/1)
 
-  defp populate_branches(branches) do
-    Enum.reduce_while(branches || [], {:ok, []}, fn branch, {:ok, acc} ->
-      case populate_list(branch) do
-        {:ok, branch} -> {:cont, {:ok, acc ++ [branch]}}
-        error -> {:halt, error}
-      end
-    end)
+  defp populate_branches(branches), do: map_while(branches || [], &populate_list/1)
+
+  # Each element through `fun` in order, or the first error. Linear in the list (the definition
+  # comes from a REST body, ADR 0023 decision 3).
+  defp map_while(list, fun) do
+    result =
+      Enum.reduce_while(list, {:ok, []}, fn element, {:ok, acc} ->
+        case fun.(element) do
+          {:ok, element} -> {:cont, {:ok, [element | acc]}}
+          error -> {:halt, error}
+        end
+      end)
+
+    with {:ok, list} <- result, do: {:ok, Enum.reverse(list)}
   end
 
   defp populate_map(cases) do
