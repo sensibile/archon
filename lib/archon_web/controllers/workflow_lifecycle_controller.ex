@@ -18,6 +18,12 @@ defmodule ArchonWeb.WorkflowLifecycleController do
   still a skeleton (ADR 0025, decision 7): it answers the 404 of a path without a handler, and the
   contract replay (`ArchonWeb.ContractCase`) skips the steps that reach an action of
   `unimplemented/0` until slice 6f implements it.
+
+  `retry`, `restart` and `resetcallbacks` read no body, so the JSON `Content-Type` check of
+  `ArchonWeb.Request` that keeps a browser's cross-origin "simple" request from an action (ADR 0023,
+  decision 3) does not run for them. A `POST` with a type a browser sends without a CORS preflight
+  (a form or `text/plain`) is refused with that check's 500 instead (ADR 0025, decision 3, a
+  deliberate difference: upstream ignores the body).
   """
 
   use ArchonWeb, :controller
@@ -28,6 +34,11 @@ defmodule ArchonWeb.WorkflowLifecycleController do
   Module.register_attribute(__MODULE__, :unimplemented, persist: true)
 
   @unimplemented [:rerun]
+
+  # The CORS-safelisted request types a browser posts cross-origin without a preflight.
+  @simple_types ["application/x-www-form-urlencoded", "multipart/form-data", "text/plain"]
+
+  plug :refuse_simple_request when action in [:retry, :restart, :reset_callbacks]
 
   @doc "The actions not implemented yet."
   @spec unimplemented() :: [atom()]
@@ -106,6 +117,20 @@ defmodule ArchonWeb.WorkflowLifecycleController do
         result ->
           reply(conn, id, result, &Response.empty/1)
       end
+    end
+  end
+
+  defp refuse_simple_request(conn, _opts) do
+    with [value | _rest] <- get_req_header(conn, "content-type"),
+         type = value |> String.split(";") |> hd() |> String.trim() |> String.downcase(),
+         true <- type in @simple_types do
+      conn
+      |> Errors.send_error(
+        {:server_error, "Content-Type '#{String.trim(value)}' is not supported"}
+      )
+      |> halt()
+    else
+      _other -> conn
     end
   end
 
