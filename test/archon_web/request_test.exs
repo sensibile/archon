@@ -215,6 +215,34 @@ defmodule ArchonWeb.RequestTest do
     end
   end
 
+  describe "long/4" do
+    test "takes Java's long range and names java.lang.Long" do
+      assert Request.long(conn(), "t", nil) == {:ok, nil}
+      assert Request.long(conn("t=%20"), "t", nil) == {:ok, nil}
+
+      assert Request.long(conn("t=-9223372036854775808"), "t", nil) ==
+               {:ok, -9_223_372_036_854_775_808}
+
+      assert Request.long(conn("t=0x7fffffffffffffff"), "t", nil) ==
+               {:ok, 9_223_372_036_854_775_807}
+
+      assert Request.long(conn("t=9223372036854775808"), "t", nil) ==
+               {:error,
+                {:server_error,
+                 "Method parameter 't': Failed to convert value of type 'java.lang.String' " <>
+                   ~s(to required type 'java.lang.Long'; For input string: "9223372036854775808")}}
+    end
+  end
+
+  describe "strings/2" do
+    test "splits a single value at commas, trimming as String.trim, and keeps repeated values" do
+      assert Request.strings(conn(), "s") == nil
+      assert Request.strings(conn("s="), "s") == []
+      assert Request.strings(conn("s=%20a%09,b,,%C2%A0c,"), "s") == ["a", "b", "", "\u00A0c", ""]
+      assert Request.strings(conn("s=%20a,b&s="), "s") == [" a,b", ""]
+    end
+  end
+
   describe "boolean/4" do
     test "missing or empty is the default" do
       assert Request.boolean(conn(), "includeTasks", true) == {:ok, true}

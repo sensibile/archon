@@ -9,7 +9,8 @@
 # Modified by sensibile: ported to ExUnit as a shared contract for every `Archon.Runtime.Store`
 # implementation (ADR 0018, decision 10); writes go through `Archon.Runtime.Commit`, and cases for
 # atomicity, task order and internal fields were added, and the queue operations, outbox,
-# re-evaluation times and limits of a commit (ADR 0021, decisions 3 to 6).
+# re-evaluation times and limits of a commit (ADR 0021, decisions 3 to 6), and the queries by
+# name and correlation ID (ADR 0025, decision 4).
 
 defmodule Archon.Runtime.StoreContract do
   @moduledoc """
@@ -45,6 +46,7 @@ defmodule Archon.Runtime.StoreContract do
       unquote(workflow_cases())
       unquote(task_cases())
       unquote(other_cases())
+      unquote(query_cases())
       unquote(queue_cases())
       unquote(outbox_cases())
       unquote(wake_cases())
@@ -444,6 +446,149 @@ defmodule Archon.Runtime.StoreContract do
 
           assert {:ok, %{worker_id: "workerId2", last_poll_time: 30}} =
                    s(ctx, :get_poll_data, ["taskDef", nil])
+        end
+      end
+    end
+  end
+
+  defp query_cases do
+    quote do
+      describe "Store contract: queries by name and correlation ID" do
+        defp named(id, name, version, overrides),
+          do:
+            workflow(
+              id,
+              [workflow_definition: %WorkflowDef{name: name, version: version}] ++ overrides
+            )
+
+        defp ids(workflows), do: Enum.map(workflows, & &1.workflow_id)
+
+        test "correlated_workflows finds every version of the name, RUNNING only unless closed",
+             ctx do
+          create(
+            ctx,
+            named("c-paused", "flow", 1, correlation_id: "corr", status: :paused, create_time: 10)
+          )
+
+          create(
+            ctx,
+            named("c-done", "flow", 2,
+              correlation_id: "corr",
+              status: :completed,
+              create_time: 30
+            )
+          )
+
+          create(ctx, named("c-v2", "flow", 2, correlation_id: "corr", create_time: 20))
+          # The same create time sorts by ID in binary order ("B" < "a").
+          create(ctx, named("c-a", "flow", 1, correlation_id: "corr", create_time: 20))
+          create(ctx, named("c-B", "flow", 1, correlation_id: "corr", create_time: 20))
+          create(ctx, named("c-other", "other", 1, correlation_id: "corr"))
+          create(ctx, named("c-corr2", "flow", 1, correlation_id: "corr2"))
+          create(ctx, named("c-none", "flow", 1, correlation_id: nil))
+
+          assert ids(s(ctx, :correlated_workflows, ["flow", "corr", false, false])) ==
+                   ["c-B", "c-a", "c-v2"]
+
+          assert ids(s(ctx, :correlated_workflows, ["flow", "corr", true, false])) ==
+                   ["c-paused", "c-B", "c-a", "c-v2", "c-done"]
+
+          assert s(ctx, :correlated_workflows, ["flow", "missing", true, false]) == []
+          assert s(ctx, :correlated_workflows, ["missing", "corr", true, false]) == []
+        end
+
+        test "correlated_workflows reads the tasks in seq order only when asked", ctx do
+          tasks = [task("c1", 2), task("c1", 1)]
+          create(ctx, named("c1", "flow", 1, correlation_id: "corr", tasks: tasks))
+
+          assert [%Workflow{tasks: []} = found] =
+                   s(ctx, :correlated_workflows, ["flow", "corr", false, false])
+
+          assert [%Workflow{tasks: [%Task{seq: 1}, %Task{seq: 2}]} = with_tasks] =
+                   s(ctx, :correlated_workflows, ["flow", "corr", false, true])
+
+          assert {:ok, with_tasks} == s(ctx, :get_workflow, ["c1", true])
+          assert {:ok, found} == s(ctx, :get_workflow, ["c1", false])
+        end
+
+        test "pending_workflow_ids are the RUNNING and PAUSED workflows of the name, any version",
+             ctx do
+          create(ctx, named("p3", "flow", 1, status: :running, create_time: 30))
+          create(ctx, named("p1", "flow", 2, status: :paused, create_time: 10))
+          create(ctx, named("p2", "flow", 7, status: :running, create_time: 20))
+
+          for {status, n} <- Enum.with_index([:completed, :failed, :timed_out, :terminated]),
+              do: create(ctx, named("p-end-#{n}", "flow", 1, status: status))
+
+          create(ctx, named("p-other", "other", 1, status: :running))
+
+          assert s(ctx, :pending_workflow_ids, ["flow"]) == ["p1", "p2", "p3"]
+          assert s(ctx, :pending_workflow_ids, ["missing"]) == []
+        end
+
+        test "workflow_ids_created_between keeps the version and both bounds, any status", ctx do
+          create(ctx, named("t-before", "flow", 1, create_time: 99))
+          create(ctx, named("t-start", "flow", 1, status: :completed, create_time: 100))
+          create(ctx, named("t-mid", "flow", 1, status: :paused, create_time: 150))
+          create(ctx, named("t-end", "flow", 1, status: :terminated, create_time: 200))
+          create(ctx, named("t-after", "flow", 1, create_time: 201))
+          create(ctx, named("t-v2", "flow", 2, create_time: 150))
+          create(ctx, named("t-other", "other", 1, create_time: 150))
+
+          assert s(ctx, :workflow_ids_created_between, ["flow", 1, 100, 200]) ==
+                   ["t-start", "t-mid", "t-end"]
+
+          assert s(ctx, :workflow_ids_created_between, ["flow", 2, 100, 200]) == ["t-v2"]
+          assert s(ctx, :workflow_ids_created_between, ["flow", 1, 200, 100]) == []
+          assert s(ctx, :workflow_ids_created_between, ["flow", 3, 100, 200]) == []
+
+          # Bounds and versions beyond the columns' ranges.
+          assert length(s(ctx, :workflow_ids_created_between, ["flow", 1, -(2 ** 70), 2 ** 70])) ==
+                   5
+
+          assert s(ctx, :workflow_ids_created_between, ["flow", 2 ** 40, 0, 1_000]) == []
+        end
+
+        test "the queries see a commit's new name, version, correlation ID and create time",
+             ctx do
+          create(ctx, named("u1", "flow", 1, correlation_id: "corr", create_time: 5))
+          {:ok, wf} = s(ctx, :get_workflow, ["u1", false])
+
+          updated = %{
+            wf
+            | workflow_definition: %WorkflowDef{name: "flow2", version: 4},
+              correlation_id: "corr2",
+              create_time: 50
+          }
+
+          assert s(ctx, :commit, ["u1", %Commit{workflow: updated}]) == :ok
+
+          assert s(ctx, :correlated_workflows, ["flow", "corr", true, false]) == []
+          assert ids(s(ctx, :correlated_workflows, ["flow2", "corr2", true, false])) == ["u1"]
+          assert s(ctx, :pending_workflow_ids, ["flow"]) == []
+          assert s(ctx, :pending_workflow_ids, ["flow2"]) == ["u1"]
+          assert s(ctx, :workflow_ids_created_between, ["flow2", 4, 50, 50]) == ["u1"]
+
+          assert s(ctx, :remove_workflow, ["u1"]) == :ok
+          assert s(ctx, :pending_workflow_ids, ["flow2"]) == []
+        end
+
+        test "a name or correlation ID with NUL or invalid UTF-8 matches nothing", ctx do
+          assert create(ctx, named("n1", "flow", 1, correlation_id: "c\u0000rr")) == :ok
+          assert create(ctx, named("n2", "fl\u0000ow", 1, correlation_id: "corr")) == :ok
+
+          for {name, correlation_id} <- [
+                {"flow", "c\u0000rr"},
+                {"fl\u0000ow", "corr"},
+                {"flow", <<0xFF>>},
+                {<<0xFF>>, "corr"}
+              ],
+              do: assert(s(ctx, :correlated_workflows, [name, correlation_id, true, true]) == [])
+
+          assert s(ctx, :pending_workflow_ids, ["fl\u0000ow"]) == []
+          assert s(ctx, :pending_workflow_ids, [<<0xFF>>]) == []
+          assert s(ctx, :workflow_ids_created_between, ["fl\u0000ow", 1, 0, 1_000]) == []
+          assert s(ctx, :pending_workflow_ids, ["flow"]) == ["n1"]
         end
       end
     end

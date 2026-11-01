@@ -8,7 +8,8 @@
 # SqlitePollDataDAO.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: an in-memory GenServer holding the structs as they are (ADR 0018,
 # decision 3); a commit is applied in one message, so readers never see half of it, and also holds
-# the outbox, re-evaluation times and limit checks of ADR 0021.
+# the outbox, re-evaluation times and limit checks of ADR 0021, and the ordered queries by name
+# of ADR 0025.
 
 defmodule Archon.Runtime.Store.Memory do
   @moduledoc """
@@ -78,6 +79,54 @@ defmodule Archon.Runtime.Store.Memory do
   @spec running_workflow_ids(GenServer.server()) :: [String.t()]
   def running_workflow_ids(server \\ __MODULE__),
     do: GenServer.call(server, :running_workflow_ids)
+
+  @impl Store
+  @spec correlated_workflows(GenServer.server(), String.t(), String.t(), boolean(), boolean()) ::
+          [Workflow.t()]
+  def correlated_workflows(
+        server \\ __MODULE__,
+        name,
+        correlation_id,
+        include_closed?,
+        include_tasks?
+      )
+      when is_binary(name) and is_binary(correlation_id) and is_boolean(include_closed?) and
+             is_boolean(include_tasks?) do
+    if storable?(name) and storable?(correlation_id),
+      do:
+        GenServer.call(
+          server,
+          {:correlated_workflows, name, correlation_id, include_closed?, include_tasks?}
+        ),
+      else: []
+  end
+
+  @impl Store
+  @spec pending_workflow_ids(GenServer.server(), String.t()) :: [String.t()]
+  def pending_workflow_ids(server \\ __MODULE__, name) when is_binary(name) do
+    if storable?(name), do: GenServer.call(server, {:pending_workflow_ids, name}), else: []
+  end
+
+  @impl Store
+  @spec workflow_ids_created_between(
+          GenServer.server(),
+          String.t(),
+          integer(),
+          integer(),
+          integer()
+        ) ::
+          [String.t()]
+  def workflow_ids_created_between(server \\ __MODULE__, name, version, start_ms, end_ms)
+      when is_binary(name) and is_integer(version) and is_integer(start_ms) and
+             is_integer(end_ms) do
+    if storable?(name),
+      do:
+        GenServer.call(server, {:workflow_ids_created_between, name, version, start_ms, end_ms}),
+      else: []
+  end
+
+  # The Postgres store's index columns cannot hold these, so no stored workflow matches them.
+  defp storable?(value), do: String.valid?(value) and not String.contains?(value, <<0>>)
 
   @impl Store
   @spec remove_workflow(GenServer.server(), String.t()) :: :ok | {:error, :not_found}
@@ -239,6 +288,37 @@ defmodule Archon.Runtime.Store.Memory do
           do: id
 
     {:reply, Enum.sort(ids), state}
+  end
+
+  def handle_call({:correlated_workflows, name, correlation_id, closed?, tasks?}, _from, state) do
+    workflows =
+      state
+      |> by_name(name)
+      |> Enum.filter(
+        &(&1.correlation_id == correlation_id and (closed? or &1.status == :running))
+      )
+      |> Enum.map(&if(tasks?, do: %{&1 | tasks: tasks_of(state, &1.workflow_id)}, else: &1))
+
+    {:reply, workflows, state}
+  end
+
+  def handle_call({:pending_workflow_ids, name}, _from, state) do
+    ids =
+      for workflow <- by_name(state, name),
+          not Workflow.terminal?(workflow.status),
+          do: workflow.workflow_id
+
+    {:reply, ids, state}
+  end
+
+  def handle_call({:workflow_ids_created_between, name, version, start_ms, end_ms}, _from, state) do
+    ids =
+      for %Workflow{create_time: time} = workflow <- by_name(state, name),
+          Workflow.workflow_version(workflow) == version,
+          is_integer(time) and time >= start_ms and time <= end_ms,
+          do: workflow.workflow_id
+
+    {:reply, ids, state}
   end
 
   def handle_call({:remove_workflow, id}, _from, state) do
@@ -403,6 +483,14 @@ defmodule Archon.Runtime.Store.Memory do
         task_ids:
           Map.update!(state.task_ids, workflow_id, &MapSet.difference(&1, MapSet.new(owned)))
     }
+  end
+
+  # Workflows of a definition name, by create time and then ID (a nil time last, as in Postgres).
+  defp by_name(state, name) do
+    state.workflows
+    |> Map.values()
+    |> Enum.filter(&(Workflow.workflow_name(&1) == name))
+    |> Enum.sort_by(&{&1.create_time == nil, &1.create_time, &1.workflow_id})
   end
 
   defp tasks_of(state, workflow_id) do

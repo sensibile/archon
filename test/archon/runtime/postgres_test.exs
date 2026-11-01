@@ -6,10 +6,12 @@ defmodule Archon.Runtime.PostgresTest do
 
   use Archon.PostgresCase
 
-  alias Archon.Domain.Workflow
+  alias Archon.Domain.{Workflow, WorkflowDef}
   alias Archon.Release
 
   @scratch "archon_migration_test"
+  # The first migration: the runtime tables.
+  @first 20_261_031_000_000
 
   describe "new/1" do
     test "defaults to the runtime schema without fencing" do
@@ -38,17 +40,62 @@ defmodule Archon.Runtime.PostgresTest do
     end
 
     test "create the schema, the tables and the node_lease row, and roll back" do
-      assert [_version] = Release.migrate(Repo, @scratch)
+      assert [@first, _query_columns] = Release.migrate(Repo, @scratch)
       assert tables(@scratch) == ~w(meta_task_def meta_workflow_def node_lease outbox poll_data
                                      queue_message schema_migrations task workflow)
       assert Repo.query!(~s(SELECT id, epoch FROM "#{@scratch}".node_lease)).rows == [[1, 0]]
       assert Release.migrate(Repo, @scratch) == []
 
-      assert [_version] = Release.rollback(Repo, @scratch, 0)
+      assert [_query_columns, @first] = Release.rollback(Repo, @scratch, 0)
       assert tables(@scratch) == ["schema_migrations"]
 
-      assert [_version] = Release.migrate(Repo, @scratch)
+      assert [@first, _query_columns] = Release.migrate(Repo, @scratch)
       assert Repo.query!(~s(SELECT id, epoch FROM "#{@scratch}".node_lease)).rows == [[1, 0]]
+    end
+
+    # ADR 0025, decision 4: the query columns of the rows written before the migration.
+    test "the query columns are filled from json_data, a NUL left NULL" do
+      migrate_to(@first)
+
+      rows = [
+        {"w-1",
+         %Workflow{
+           workflow_id: "w-1",
+           status: :paused,
+           workflow_definition: %WorkflowDef{name: "flow", version: 2},
+           correlation_id: "corr",
+           create_time: 1_793_571_042_687
+         }},
+        # A literal backslash before "u0000" is not a NUL.
+        {"w-2",
+         %Workflow{
+           workflow_id: "w-2",
+           status: :completed,
+           workflow_definition: %WorkflowDef{name: "fl\\u0000ow", version: 1},
+           correlation_id: "c\u0000rr",
+           create_time: 5
+         }},
+        {"w-3", %Workflow{workflow_id: "w-3", status: :running}}
+      ]
+
+      for {id, workflow} <- rows do
+        Repo.query!(
+          ~s|INSERT INTO "#{@scratch}".workflow (workflow_id, status, json_data) | <>
+            "VALUES ($1, 'RUNNING', $2)",
+          [id, workflow |> Workflow.to_storage() |> JSON.encode!()]
+        )
+      end
+
+      assert [_query_columns] = Release.migrate(Repo, @scratch)
+
+      assert Repo.query!(
+               "SELECT workflow_id, workflow_name, workflow_version, correlation_id, create_time " <>
+                 ~s|FROM "#{@scratch}".workflow ORDER BY workflow_id|
+             ).rows == [
+               ["w-1", "flow", 2, "corr", 1_793_571_042_687],
+               ["w-2", "fl\\u0000ow", 1, nil, 5],
+               ["w-3", nil, nil, nil, 0]
+             ]
     end
 
     test "node_lease holds a single row" do
@@ -277,6 +324,19 @@ defmodule Archon.Runtime.PostgresTest do
       Repo.query!("SELECT name FROM #{Postgres.table(instance, "meta_task_def")} ORDER BY name")
 
     List.flatten(rows)
+  end
+
+  # Release.migrate/2 runs every migration; this stops after `version`.
+  defp migrate_to(version) do
+    Repo.query!(~s(CREATE SCHEMA IF NOT EXISTS "#{@scratch}"))
+    previous = Code.get_compiler_option(:ignore_module_conflict)
+    Code.put_compiler_option(:ignore_module_conflict, true)
+
+    try do
+      Ecto.Migrator.run(Repo, :up, to: version, prefix: @scratch, log: false)
+    after
+      Code.put_compiler_option(:ignore_module_conflict, previous)
+    end
   end
 
   defp tables(schema) do
