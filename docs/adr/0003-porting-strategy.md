@@ -29,6 +29,7 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
    | Phase 3 | OTP 런타임: 워크플로우 인스턴스당 GenServer, 레지스트리, DynamicSupervisor | [ADR 0018](0018-phase3-otp-runtime.md) |
    | Phase 4 | 영속성과 큐: PostgreSQL 우선 | [ADR 0021](0021-phase4-postgres-persistence.md) |
    | Phase 5 | Phoenix REST: MVP 엔드포인트부터 | [ADR 0023](0023-phase5-rest.md), [ADR 0024](0024-worker-input-trust-and-auth.md) |
+   | Phase 6 | 워크플로우 운영 REST: 생명주기, 정리, 조회, signal, 동기 실행, metadata 목록·삭제, bulk | [ADR 0025](0025-phase6-workflow-operations-rest.md) |
 
 4. **MVP 태스크 타입은 SIMPLE, SWITCH, FORK_JOIN, JOIN, DO_WHILE, SUB_WORKFLOW, WAIT로 제한한다.**
    AI, HTTP, JQ, Event 같은 나머지 타입은 그 뒤에 붙인다.
@@ -49,4 +50,5 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
   (비고: Phase 2는 [ADR 0014](0014-phase2-decider.md)의 조각 2a~2e로, Phase 3은 [ADR 0018](0018-phase3-otp-runtime.md)의
   조각 3a~3f로, Phase 4는 [ADR 0021](0021-phase4-postgres-persistence.md)의 조각 4a~4h로 구현했다.
   Phase 5는 [ADR 0023](0023-phase5-rest.md)의 조각 5a~5f와 [ADR 0024](0024-worker-input-trust-and-auth.md)로 구현했다(2026-11-01,
-  MVP REST 19개 경로, 두 백엔드에서 골든 픽스처 전체 재생). Later 경로와 인증은 그 뒤다.)
+  MVP REST 19개 경로, 두 백엔드에서 골든 픽스처 전체 재생). Later 경로와 인증은 그 뒤다.
+  Phase 6은 2026-11-01 [ADR 0025](0025-phase6-workflow-operations-rest.md)로 설계했고 조각 6a~6h로 구현한다.)
