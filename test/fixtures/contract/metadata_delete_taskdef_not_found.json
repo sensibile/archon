@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/metadata/taskdefs/archon_missing",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "No such task definition",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

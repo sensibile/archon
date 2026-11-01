@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/workflow/a455111c-a176-4b3d-bd19-acb866aa8347/resume",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/workflow/fa96e64b-1502-4f57-8eb8-f3e604136068/remove",
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "content_type": "application/json",
+    "body": {
+      "status": 404,
+      "message": "No such workflow found by id: fa96e64b-1502-4f57-8eb8-f3e604136068",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

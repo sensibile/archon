@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/metadata/workflow/archon_ops/versions",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": [
+      {
+        "name": "archon_ops",
+        "version": 1,
+        "createTime": 1793571048519
+      },
+      {
+        "name": "archon_ops",
+        "version": 2,
+        "createTime": 1793571048557
+      }
+    ]
+  }
+}

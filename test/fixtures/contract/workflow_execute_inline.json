@@ -1,0 +1,150 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/execute/archon_ops_inline/1?requestId=archon-request-10",
+    "body": {
+      "input": {
+        "k": 10
+      },
+      "workflowDef": {
+        "name": "archon_ops_inline",
+        "version": 1,
+        "schemaVersion": 2,
+        "tasks": [
+          {
+            "name": "archon_wait",
+            "taskReferenceName": "inline_wait_ref",
+            "type": "WAIT"
+          }
+        ]
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "responseType": "TARGET_WORKFLOW",
+      "targetWorkflowId": "deb82af4-66af-4a50-b844-786c95169817",
+      "targetWorkflowStatus": "RUNNING",
+      "requestId": "archon-request-10",
+      "workflowId": "deb82af4-66af-4a50-b844-786c95169817",
+      "input": {
+        "k": 10,
+        "_systemMetadata": {
+          "dynamic": true
+        }
+      },
+      "output": {},
+      "signalTimeout": false,
+      "priority": 0,
+      "variables": {},
+      "tasks": [
+        {
+          "taskType": "WAIT",
+          "status": "IN_PROGRESS",
+          "inputData": {},
+          "referenceTaskName": "inline_wait_ref",
+          "retryCount": 0,
+          "seq": 1,
+          "pollCount": 0,
+          "taskDefName": "archon_wait",
+          "scheduledTime": 1793571054516,
+          "startTime": 1793571054515,
+          "endTime": 0,
+          "updateTime": 0,
+          "startDelayInSeconds": 0,
+          "retried": false,
+          "executed": false,
+          "callbackFromWorker": true,
+          "responseTimeoutSeconds": 0,
+          "workflowInstanceId": "deb82af4-66af-4a50-b844-786c95169817",
+          "workflowType": "archon_ops_inline",
+          "taskId": "8b4bf2f7-a7ff-4177-9aff-039f899fcf6b",
+          "callbackAfterSeconds": 2147483647,
+          "outputData": {},
+          "workflowTask": {
+            "name": "archon_wait",
+            "taskReferenceName": "inline_wait_ref",
+            "inputParameters": {},
+            "type": "WAIT",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_wait",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          },
+          "rateLimitPerFrequency": 0,
+          "rateLimitFrequencyInSeconds": 0,
+          "workflowPriority": 0,
+          "iteration": 0,
+          "subworkflowChanged": false,
+          "firstStartTime": 0,
+          "executionMetadata": {
+            "additionalContext": {},
+            "additionalContextMap": {},
+            "empty": true
+          },
+          "taskDefinition": {
+            "createTime": 0,
+            "updateTime": 0,
+            "name": "archon_wait",
+            "retryCount": 0,
+            "timeoutSeconds": 0,
+            "inputKeys": [],
+            "outputKeys": [],
+            "runtimeMetadata": [],
+            "timeoutPolicy": "TIME_OUT_WF",
+            "retryLogic": "FIXED",
+            "retryDelaySeconds": 60,
+            "responseTimeoutSeconds": 0,
+            "inputTemplate": {},
+            "rateLimitPerFrequency": 0,
+            "rateLimitFrequencyInSeconds": 1,
+            "backoffScaleFactor": 1,
+            "maxRetryDelaySeconds": 0,
+            "backoffJitterMs": 0,
+            "totalTimeoutSeconds": 0,
+            "taskStatusListenerEnabled": true,
+            "enforceSchema": false
+          },
+          "queueWaitTime": -1,
+          "loopOverTask": false
+        }
+      ],
+      "createTime": 1793571054513,
+      "status": "RUNNING",
+      "updateTime": 1793571054517
+    }
+  }
+}

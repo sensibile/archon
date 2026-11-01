@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/execute/archon_ops_idle/1?requestId=archon-request-9&waitForSeconds=1&returnStrategy=BLOCKING_TASK",
+    "body": {}
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "value",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

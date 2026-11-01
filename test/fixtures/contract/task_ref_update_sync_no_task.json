@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks/c5096c5d-404c-4dca-ba2a-1f9d533ec29e/task_a_ref/COMPLETED/sync",
+    "body": {}
+  },
+  "response": {
+    "status": 404,
+    "content_type": "application/json",
+    "body": {
+      "status": 404,
+      "message": "Found no running task task_a_ref of workflow c5096c5d-404c-4dca-ba2a-1f9d533ec29e to update",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

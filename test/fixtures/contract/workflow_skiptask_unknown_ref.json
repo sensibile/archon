@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/workflow/c5b33dfa-c42e-4f16-a186-8ea31355fa14/skiptask/archon_missing_ref",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "The task referenced by archon_missing_ref does not exist in the WorkflowDefinition archon_simple",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

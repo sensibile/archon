@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/c5096c5d-404c-4dca-ba2a-1f9d533ec29e/resetcallbacks",
+    "body": null
+  },
+  "response": {
+    "status": 409,
+    "content_type": "application/json",
+    "body": {
+      "status": 409,
+      "message": "Workflow is in terminal state. Status = COMPLETED",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

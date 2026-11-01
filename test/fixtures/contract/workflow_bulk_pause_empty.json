@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/workflow/bulk/pause",
+    "body": []
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Validation failed, check below errors for detail.",
+      "retryable": false,
+      "validationErrors": [
+        {
+          "path": "pauseWorkflow.arg0",
+          "message": "WorkflowIds list cannot be null."
+        }
+      ]
+    }
+  }
+}

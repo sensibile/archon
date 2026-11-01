@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/workflow/bulk/pause",
+    "body": "\"5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01\""
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "bulkErrorResults": {},
+      "bulkSuccessfulResults": [
+        "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01"
+      ]
+    }
+  }
+}

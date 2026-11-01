@@ -1,0 +1,191 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/execute/archon_ops_noop/0?requestId=archon-request-5",
+    "body": {}
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "responseType": "TARGET_WORKFLOW",
+      "targetWorkflowId": "7cb34a47-7371-4f22-b132-39a89f78c9b1",
+      "targetWorkflowStatus": "COMPLETED",
+      "requestId": "archon-request-5",
+      "workflowId": "7cb34a47-7371-4f22-b132-39a89f78c9b1",
+      "input": {},
+      "output": {
+        "evaluationResult": [
+          "null"
+        ],
+        "selectedCase": "null"
+      },
+      "signalTimeout": false,
+      "priority": 0,
+      "variables": {},
+      "tasks": [
+        {
+          "taskType": "SWITCH",
+          "status": "COMPLETED",
+          "inputData": {
+            "case": "null",
+            "route": null
+          },
+          "referenceTaskName": "noop_ref",
+          "retryCount": 0,
+          "seq": 1,
+          "pollCount": 0,
+          "taskDefName": "SWITCH",
+          "scheduledTime": 1793571051974,
+          "startTime": 1793571051973,
+          "endTime": 1793571051976,
+          "updateTime": 1793571051975,
+          "startDelayInSeconds": 0,
+          "retried": false,
+          "executed": false,
+          "callbackFromWorker": true,
+          "responseTimeoutSeconds": 0,
+          "workflowInstanceId": "7cb34a47-7371-4f22-b132-39a89f78c9b1",
+          "workflowType": "archon_ops_noop",
+          "taskId": "2287407b-1d47-4887-af19-e333381d35c6",
+          "callbackAfterSeconds": 0,
+          "outputData": {
+            "evaluationResult": [
+              "null"
+            ],
+            "selectedCase": "null"
+          },
+          "workflowTask": {
+            "name": "route",
+            "taskReferenceName": "noop_ref",
+            "inputParameters": {
+              "route": "${workflow.input.route}"
+            },
+            "type": "SWITCH",
+            "decisionCases": {
+              "x": [
+                {
+                  "name": "archon_ops_idle",
+                  "taskReferenceName": "noop_idle_ref",
+                  "inputParameters": {},
+                  "type": "SIMPLE",
+                  "decisionCases": {},
+                  "defaultCase": [],
+                  "forkTasks": [],
+                  "startDelay": 0,
+                  "joinOn": [],
+                  "optional": false,
+                  "taskDefinition": {
+                    "createTime": 1793571048483,
+                    "updateTime": 0,
+                    "createdBy": "",
+                    "name": "archon_ops_idle",
+                    "retryCount": 0,
+                    "timeoutSeconds": 3600,
+                    "inputKeys": [],
+                    "outputKeys": [],
+                    "runtimeMetadata": [],
+                    "timeoutPolicy": "TIME_OUT_WF",
+                    "retryLogic": "FIXED",
+                    "retryDelaySeconds": 0,
+                    "responseTimeoutSeconds": 3600,
+                    "inputTemplate": {},
+                    "rateLimitPerFrequency": 0,
+                    "rateLimitFrequencyInSeconds": 1,
+                    "backoffScaleFactor": 1,
+                    "maxRetryDelaySeconds": 0,
+                    "backoffJitterMs": 0,
+                    "totalTimeoutSeconds": 0,
+                    "taskStatusListenerEnabled": true,
+                    "enforceSchema": false
+                  },
+                  "defaultExclusiveJoinTask": [],
+                  "asyncComplete": false,
+                  "loopOver": [],
+                  "onStateChange": {},
+                  "permissive": false,
+                  "metadata": {}
+                }
+              ]
+            },
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "route",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "evaluatorType": "value-param",
+            "expression": "route",
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          },
+          "rateLimitPerFrequency": 0,
+          "rateLimitFrequencyInSeconds": 0,
+          "workflowPriority": 0,
+          "iteration": 0,
+          "subworkflowChanged": false,
+          "firstStartTime": 0,
+          "executionMetadata": {
+            "additionalContext": {},
+            "additionalContextMap": {},
+            "empty": true
+          },
+          "taskDefinition": {
+            "createTime": 0,
+            "updateTime": 0,
+            "name": "route",
+            "retryCount": 0,
+            "timeoutSeconds": 0,
+            "inputKeys": [],
+            "outputKeys": [],
+            "runtimeMetadata": [],
+            "timeoutPolicy": "TIME_OUT_WF",
+            "retryLogic": "FIXED",
+            "retryDelaySeconds": 60,
+            "responseTimeoutSeconds": 0,
+            "inputTemplate": {},
+            "rateLimitPerFrequency": 0,
+            "rateLimitFrequencyInSeconds": 1,
+            "backoffScaleFactor": 1,
+            "maxRetryDelaySeconds": 0,
+            "backoffJitterMs": 0,
+            "totalTimeoutSeconds": 0,
+            "taskStatusListenerEnabled": true,
+            "enforceSchema": false
+          },
+          "queueWaitTime": -1,
+          "loopOverTask": false
+        }
+      ],
+      "createTime": 1793571051971,
+      "status": "COMPLETED",
+      "updateTime": 1793571051977
+    }
+  }
+}

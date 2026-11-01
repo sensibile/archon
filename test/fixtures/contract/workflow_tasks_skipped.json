@@ -1,0 +1,72 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/2974ed5d-ea12-4aaf-862b-b9bf3869f999/tasks?status=SKIPPED",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 1,
+      "results": [
+        {
+          "taskType": "archon_ops_b",
+          "status": "SKIPPED",
+          "inputData": {},
+          "referenceTaskName": "ops_b_ref",
+          "retryCount": 0,
+          "seq": 0,
+          "correlationId": "archon-ops-skip",
+          "pollCount": 0,
+          "taskDefName": "archon_ops_b",
+          "scheduledTime": 1793571058755,
+          "startTime": 0,
+          "endTime": 1793571058754,
+          "updateTime": 0,
+          "startDelayInSeconds": 0,
+          "retried": false,
+          "executed": false,
+          "callbackFromWorker": true,
+          "responseTimeoutSeconds": 0,
+          "workflowInstanceId": "2974ed5d-ea12-4aaf-862b-b9bf3869f999",
+          "taskId": "0f22a93d-e820-4efd-a968-956fd4f2baf0",
+          "callbackAfterSeconds": 0,
+          "outputData": {},
+          "workflowTask": {
+            "name": "archon_ops_b",
+            "taskReferenceName": "ops_b_ref",
+            "inputParameters": {},
+            "type": "SIMPLE",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          },
+          "rateLimitPerFrequency": 0,
+          "rateLimitFrequencyInSeconds": 0,
+          "workflowPriority": 7,
+          "iteration": 0,
+          "subworkflowChanged": false,
+          "firstStartTime": 0,
+          "executionMetadata": {
+            "additionalContext": {},
+            "additionalContextMap": {},
+            "empty": true
+          },
+          "taskDefinition": null,
+          "queueWaitTime": 0,
+          "loopOverTask": false
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/c5b33dfa-c42e-4f16-a186-8ea31355fa14/restart",
+    "body": null
+  },
+  "response": {
+    "status": 409,
+    "content_type": "application/json",
+    "body": {
+      "status": 409,
+      "message": "Workflow: archon_simple.1/c5b33dfa-c42e-4f16-a186-8ea31355fa14.RUNNING is not in terminal state, unable to restart.",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

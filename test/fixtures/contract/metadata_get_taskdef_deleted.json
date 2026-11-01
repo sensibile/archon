@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/metadata/taskdefs/archon_ops_idle",
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "content_type": "application/json",
+    "body": {
+      "status": 404,
+      "message": "No such taskType found by name: archon_ops_idle",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks/00000000-0000-0000-0000-000000000000/task_a_ref/COMPLETED",
+    "body": {}
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

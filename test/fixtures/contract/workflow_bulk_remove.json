@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/workflow/bulk/remove?archiveWorkflow=false",
+    "body": [
+      "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01",
+      "00000000-0000-0000-0000-000000000000"
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "bulkErrorResults": {
+        "00000000-0000-0000-0000-000000000000": "No such workflow found by id: 00000000-0000-0000-0000-000000000000"
+      },
+      "bulkSuccessfulResults": [
+        "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01"
+      ]
+    }
+  }
+}

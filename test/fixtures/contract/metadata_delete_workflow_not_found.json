@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/metadata/workflow/archon_missing/1",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "No such workflow definition: archon_missing version: 1",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

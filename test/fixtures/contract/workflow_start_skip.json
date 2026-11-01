@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_ops?correlationId=archon-ops-skip&priority=7",
+    "body": {
+      "x": 3
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "2974ed5d-ea12-4aaf-862b-b9bf3869f999"
+  }
+}

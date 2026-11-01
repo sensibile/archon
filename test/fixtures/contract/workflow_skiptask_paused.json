@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/workflow/a455111c-a176-4b3d-bd19-acb866aa8347/skiptask/ops_b_ref",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "The workflow a455111c-a176-4b3d-bd19-acb866aa8347 is not running so the task referenced by ops_b_ref cannot be skipped",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

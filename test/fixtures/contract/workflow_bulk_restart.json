@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/bulk/restart?useLatestDefinitions=true",
+    "body": [
+      "c5096c5d-404c-4dca-ba2a-1f9d533ec29e",
+      "97fc2f6c-86d6-4785-855b-dc522f3d545c",
+      "00000000-0000-0000-0000-000000000000"
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "bulkErrorResults": {
+        "97fc2f6c-86d6-4785-855b-dc522f3d545c": "Workflow: archon_ops.2/97fc2f6c-86d6-4785-855b-dc522f3d545c.PAUSED is not in terminal state, unable to restart.",
+        "00000000-0000-0000-0000-000000000000": "No such workflow found by id: 00000000-0000-0000-0000-000000000000"
+      },
+      "bulkSuccessfulResults": [
+        "c5096c5d-404c-4dca-ba2a-1f9d533ec29e"
+      ]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/execute/archon_ops_noop/1?requestId=archon-request-6&returnStrategy=BLOCKING_TASK",
+    "body": {}
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "The mapper [com.netflix.conductor.rest.controllers.WorkflowSignalResponder$$Lambda/0x000000f801cc7240] returned a null value.",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

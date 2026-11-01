@@ -5,6 +5,8 @@
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 다섯 가지(범위, 동기 대기, remove의 의미, L3와 `:invalid_state`, 픽스처)는 2026-11-01 BOSS가 이 문서의
   추천안으로 정했다.
+- 갱신: 2026-11-02 조각 6a. 캡처에서 확인한 upstream 응답 중 이 문서의 기술과 다르거나 더 자세한 것을 결정 7 끝
+  "조각 6a의 캡처에서 확인한 것"에 적었다. 그 응답이 정답이고, 해당 조각이 맞춘다.
 
 ## 맥락
 
@@ -325,6 +327,36 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   `route_later_metadata_names`의 `expect: :no_route`)는 6a가 upstream 픽스처의 응답을 기대하는 보통 단계로 바꾸고, 같은 건너뛰기
   규칙을 붙인다. 6a는 기존 시나리오의 `expect: :no_route` 단계를 모두 결정 1의 경로 목록과 대조한다.
   그래서 다른 조각은 시나리오를 고치지 않고 자기 컨트롤러의 목록만 비운다. 6h가 이 장치를 없앤다.
+- **조각 6a의 캡처에서 확인한 것(2026-11-02).** 픽스처 이름은 괄호 안. 앞 결정의 기술과 다르면 픽스처가 정답이다.
+  - resume은 `RUNNING`이면 아무것도 하지 않고 200이다(`workflow_resume_running`). 500 `"... is not PAUSED so cannot resume.
+    ..."`은 끝난 워크플로우다(`workflow_resume_completed`). 이미 `PAUSED`인 pause는 200(`workflow_pause_paused`), 끝난 pause는
+    409 `"Workflow <name>.<v>/<id> has ended, status cannot be updated."`(`workflow_pause_completed`).
+  - 재시도의 오류는 409 둘이 아니라, 성공으로 끝난 워크플로우의 409 `"There are no retryable tasks! Use restart if you want to
+    attempt entire workflow execution again."`(`workflow_retry_completed`)와 실행 중의 404 `"Workflow is still running.
+    status=RUNNING"`(`workflow_retry_running`)이다.
+  - 재시도된 SUB_WORKFLOW의 첫 자식 안 태스크를 rerun하면 upstream 응답 뒤에는 중간 워크플로우가 다시 결정해 두 번째 시도의
+    `FAILED`(재시도 소진)로 다시 `FAILED`가 되고, 첫 자식을 종료하며(`TERMINATED`, 태스크 `CANCELED`), 최상위는 `RUNNING`(SUB_WORKFLOW
+    태스크 `IN_PROGRESS`)으로 남는다(`workflow_get_rerun_{top,mid,child_first}`). 결정 2의 "응답 때 경로의 워크플로우는 모두
+    `RUNNING`"은 이 경우 upstream과 다르다. 조각 6f가 이 픽스처에 맞추고 설계를 이 결정에 적는다.
+  - `{id}/tasks`의 `status`는 값이 하나일 때만 쉼표로 나뉜다(Spring 변환). `status=SCHEDULED,COMPLETED`는 둘을 거르고
+    (`workflow_tasks_status_comma`), `status=scheduled,completed&status=FAILED`는 `"SCHEDULED,COMPLETED"`와 `"FAILED"` 두 값이라
+    아무것도 남지 않는다(`workflow_tasks_status_list`). 음수 `count`는 400 `"fromIndex(0) > toIndex(-1)"`, 음수 `start`는 500
+    `"fromIndex = -1"`이다.
+  - ref 갱신 sync는 없는 워크플로우도 404 `"Found no running task <ref> of workflow <id> to update"`다
+    (`task_ref_update_sync_workflow_not_found`).
+  - signal sync는 대상 WAIT이 없으면 기다리지 않고 404 `"Found no blocked task ..."`다(`task_signal_sync_no_wait`). 시간 초과는
+    `TARGET_WORKFLOW`로 200이다(`task_signal_sync_timeout`).
+  - execute의 끝난 워크플로우 `BLOCKING_TASK`는 500이고 문구가 Reactor의 `"The mapper [<JVM 람다 클래스>] returned a null value."`라서
+    재생은 `message`를 뺀다(`workflow_execute_completed_blocking_task`). 시간 초과 `BLOCKING_TASK`는 500 `"value"`다.
+  - Unsupported `PUT /api/workflow/decide/{id}`는 upstream이 결정을 돌리고 없는 워크플로우에 404를 준다. archon은 경로 없음 404다
+    (`route_unsupported_workflow_decide`, ADR 0001 그대로). task log GET은 upstream 204다(`route_later_task_log`).
+  - 의도하지 않은 archon 차이 하나를 찾았다(Phase 5까지의 동작): 자식이 실패하면 archon은 자식의 최종 출력을 SUB_WORKFLOW 태스크
+    출력에 합쳐 `subWorkflowId`가 손자의 ID가 되고, upstream 태스크는 자기가 시작한 자식의 ID를 지킨다
+    (`workflow_get_top_failed`). 6a는 재생에서 그 두 경로를 빼고 따로 고친다.
+  - upstream 타이밍이 정하는 값: JOIN의 `pollCount`(관측 2·3·11), `update-v2` 두 필드 오류의 순서, `lastRetriedTime`(시각 키에
+    더함). 앞의 둘은 기존 픽스처와 같은 값이 나온 캡처를 골랐다(`test/fixtures/contract/README.md`).
+  - 재생 도우미에 단계 옵션 셋을 더했다: `until:`(비동기 단계를 기다림, 자식 시작 등), `only: :bound_ids`(공유 런타임의 다른
+    시험 워크플로우를 뺌), `unordered: true`(순서 없는 목록). `only: :expected_names`는 이름 목록과 이름 키 맵도 거른다.
 
 ### 8. 구현 조각
 

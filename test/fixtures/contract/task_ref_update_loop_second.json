@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks/0ca10d04-8bea-4b3a-88ec-80b60b2e82c9/loop_b_ref__2/COMPLETED",
+    "body": {
+      "i": 2
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "59bb62e0-5d5c-4a1d-8f6b-73489c8a3fb7"
+  }
+}

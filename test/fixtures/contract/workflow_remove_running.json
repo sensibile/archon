@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/workflow/c5b33dfa-c42e-4f16-a186-8ea31355fa14/remove",
+    "body": null
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Cannot archive workflow: c5b33dfa-c42e-4f16-a186-8ea31355fa14 with status: RUNNING",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

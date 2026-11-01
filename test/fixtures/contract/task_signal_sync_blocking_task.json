@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks/30fdc33d-9699-4cbd-b2a8-e96053c01911/COMPLETED/signal/sync?returnStrategy=BLOCKING_TASK",
+    "body": {
+      "s": 3
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "responseType": "BLOCKING_TASK",
+      "targetWorkflowId": "30fdc33d-9699-4cbd-b2a8-e96053c01911",
+      "targetWorkflowStatus": "RUNNING",
+      "requestId": "792cc038-f015-4904-a95f-d812316d3766",
+      "workflowId": "30fdc33d-9699-4cbd-b2a8-e96053c01911",
+      "input": {},
+      "output": {},
+      "signalTimeout": false,
+      "taskType": "WAIT",
+      "taskId": "391cff53-5c66-401e-ae6a-40055342c229",
+      "referenceTaskName": "wait4_ref",
+      "retryCount": 0,
+      "taskDefName": "archon_wait",
+      "workflowType": "archon_ops_waits",
+      "priority": 0,
+      "createTime": 1793571055058,
+      "updateTime": 0,
+      "status": "IN_PROGRESS"
+    }
+  }
+}
