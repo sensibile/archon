@@ -142,16 +142,21 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   - 같은 ID를 돌려준다. 동적 FORK(`FORK_JOIN_DYNAMIC`)는 MVP 태스크 타입이 아니므로(ADR 0003 결정 4) 그 분기는 옮기지 않는다.
 - **skiptask(새 기능).** upstream `skipTaskFromWorkflow`다. `RUNNING`이 아니면, 정의에 그 ref가 없으면, 이미 그 ref의 태스크가
   있으면 각각 upstream 문구의 `:invalid_state`(500)다. 통과하면 `SKIPPED` 태스크(`taskType`은 정의 태스크의 `name`, 새 ID,
-  `endTime`이 지금)를 더하고 결정한다.
+  `endTime`이 지금, `correlationId`와 `workflowPriority`는 워크플로우에서 복사)를 더하고 결정한다. 픽스처는 correlationId와 0이 아닌
+  우선순위를 가진 워크플로우로 캡처한다.
   `SkipTaskRequest`는 upstream 핸들러에 `@RequestBody`가 없어 JSON body가 무시된다(Spring `@ModelAttribute` 바인딩). archon도 body를
   읽지 않고 `taskInput`·`taskOutput` 없이 만든다. 쿼리로 맵을 채우는 Spring 바인딩은 옮기지 않는다(의도적 차이).
   upstream의 건너뛴 태스크에는 `seq`가 없다(0). archon 저장소는 태스크를 `seq` 순으로 읽으므로 조각 6d가 다른 태스크와의 순서를
   픽스처(조회 응답의 태스크 순서)로 확인하고 정한다.
 - **resetcallbacks(새 기능).** upstream `resetCallbacksForWorkflow`다. 끝난 워크플로우는 409
   `"Workflow is in terminal state. Status = <STATUS>"`다. 시스템 태스크가 아니고 `SCHEDULED`이며 `callbackAfterSeconds > 0`인 태스크마다
-  큐 메시지의 지연을 없애고(큐 `postpone`을 0으로), 큐에 그 메시지가 있어 지연을 없앴을 때만(upstream `resetOffsetTime`이 참일 때)
+  큐 메시지의 지연을 없애고, 큐에 그 메시지가 있어 지연을 없앴을 때만(upstream `resetOffsetTime`이 참일 때)
   `callbackAfterSeconds`를 0으로 저장한다. archon의 내부 필드 `callback_after_ms`(`wire: false`)도 같은 의미이므로 함께 0으로 한다.
-  큐에 메시지가 있는지는 규칙이 직접 읽지 않고 `WorkflowServer.env/2`가 이 이벤트의 환경으로 채운다(ADR 0018의 Env 방식). 성공은 204다.
+  지연 없애기는 `postpone`(지우고 다시 넣음)이나 "있는지 읽은 뒤 postpone"으로 하지 않는다. 그 사이 메시지가 poll·ack로
+  사라지면 메시지를 되살리기 때문이다. upstream `resetOffsetTime`처럼 있는 메시지만 갱신하고 갱신했는지를 돌려주는 큐 콜백
+  `reset_offset/2`를 `Archon.Runtime.Queue`에 더하고(메모리·Postgres 구현과 큐 계약 시험), `WorkflowServer.env/2`가 이 이벤트의 환경을
+  만들 때 태스크마다 부른 결과를 규칙에 넘긴다(ADR 0018의 Env 방식). 규칙은 참인 태스크만 `callbackAfterSeconds`를 0으로 커밋한다.
+  큐 갱신과 커밋은 한 트랜잭션이 아니다(upstream도 큐 갱신 뒤 태스크를 따로 저장한다). 성공은 204다.
 - 새 이벤트 셋은 `Archon.Runtime.Step.Lifecycle`(규칙)과 `Archon.Runtime.Lifecycle`(API), `WorkflowServer`(메시지)에 더한다.
   ADR 0018 결정 9의 방식(이벤트 하나가 커밋 하나, 답은 커밋과 그 뒤 결정이 저장된 뒤)을 따른다.
 
@@ -175,8 +180,9 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
     1. 프로세스는 지우기 이벤트를 받은 그 자리에서 판정하고 바로 답한다. 기다리거나 답을 미루지 않는다(그 사이 outbox 실행기의
        결과와 재시도 메시지를 처리해야 하고, 미룬 답은 호출자 timeout 뒤에 지우는 일을 만든다). outbox 실행기 상태
        `runner`가 `nil`이 아니거나(`{:running, _}`, `{:blocked, _, _}`, `{:delayed, _}`, 프로세스가 멈출 수 있는지 보는 `ending?`와 같은
-       조건) `pending_outbox`가 비어 있지 않으면 지우지 않고 "전달 대기" 오류로 답한다. 비어 있으면 그 자리에서 `archiveWorkflow` 조건을
-       본 뒤 지우고 `:ok`로 답한 다음 멈춘다.
+       조건) `pending_outbox`가 비어 있지 않으면 지우지 않고 "전달 대기" 오류로 답한다. 비어 있으면 지우고 `:ok`로 답한 다음 멈춘다.
+       `archiveWorkflow` 조건(위의 400 둘)은 outbox보다 먼저 본다. 그래서 전달이 막힌 `RUNNING` 워크플로우의 기본 remove도 upstream처럼
+       바로 400이다.
     2. `Archon.Runtime.Lifecycle.remove`는 "전달 대기"를 받으면 짧은 간격(100ms)으로 같은 이벤트를 다시 보낸다. 마감(호출 timeout보다
        짧게, 예 10초)까지 비지 않으면 아무것도 지우지 않고 500 `retryable` 참으로 답한다. 판정이 매번 프로세스 안에서 새로 되므로
        그 사이 다른 클라이언트의 retry·restart가 워크플로우를 되살렸으면 `archiveWorkflow` 조건이 다시 걸린다.
@@ -308,6 +314,9 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   목록에 든 액션으로 가는 단계를 건너뛴다. 뒤 단계가 앞 단계의 상태 변화(예: pause 뒤의 조회, remove 뒤의 목록)에 기대는지는
   기계로 알 수 없으므로, 6a가 새 단계마다 기대는 액션을 단계 옵션 `requires: [{컨트롤러, 액션}, ...]`으로 적고 재생 도우미는 그중
   하나라도 미구현이면 그 단계도 건너뛴다. 새 단계는 시나리오 끝에 두므로 기존 MVP 단계는 Phase 6 단계 뒤에 오지 않는다.
+  기존 시나리오에서 이 Phase가 여는 경로를 Archon의 404로 기대하던 단계(`route_later_workflow_running`,
+  `route_later_metadata_names`의 `expect: :no_route`)는 6a가 upstream 픽스처의 응답을 기대하는 보통 단계로 바꾸고, 같은 건너뛰기
+  규칙을 붙인다. 6a는 기존 시나리오의 `expect: :no_route` 단계를 모두 결정 1의 경로 목록과 대조한다.
   그래서 다른 조각은 시나리오를 고치지 않고 자기 컨트롤러의 목록만 비운다. 6h가 이 장치를 없앤다.
 
 ### 8. 구현 조각
@@ -327,7 +336,7 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
 | 6a | 픽스처 캡처 전부(결정 7), 라우터(33개 경로와 남는 Later·Unsupported 리터럴), 새 컨트롤러 골격과 미구현 목록, 재생 도우미의 건너뛰기와 `requires:` | 기존 127개 재캡처 비교, 경로 해석 라우터 시험(결정 1), 건너뛰기를 뺀 전체 재생 | 없음 | `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`, `test/fixtures/contract/README.md`, `test/archon/contract_test.exs`, `test/archon/domain/contract_round_trip_test.exs`, `test/support/contract.ex`, `test/support/archon_web/contract_case.ex`, `lib/archon_web/router.ex`, `lib/archon_web/controllers/{workflow_lifecycle,workflow_query,signal,workflow_bulk}_controller.ex`(골격), `lib/archon_web/controllers/metadata_controller.ex`(새 액션 골격만), `test/archon_web/router_test.exs` |
 | 6b | 결정 4: 저장소 조회 콜백과 Postgres 마이그레이션, `{id}/tasks`·correlated 둘·`running/{name}`, `SearchResult` 모델 | 조회 픽스처 재생(두 백엔드), 저장소 계약 시험, 마이그레이션의 기존 행 채우기 시험 | 6a | `lib/archon/runtime/store.ex`, `lib/archon/runtime/store/{memory,postgres}.ex`, `priv/repo/migrations/*`(새 파일), `test/support/runtime/store_contract.ex`, `lib/archon/runtime.ex`(조회 함수), `lib/archon/domain/search_result.ex`, `lib/archon_web/controllers/workflow_query_controller.ex` |
 | 6c | 결정 6의 metadata: behaviour 콜백 셋, `Archon.Metadata`의 목록·삭제·validate, `WorkflowDefSummary` 모델, Metadata 컨트롤러 여덟 액션 | `metadata_*` 새 픽스처 재생, 메타데이터 계약 시험 | 6a | `lib/archon/runtime/metadata.ex`, `lib/archon/runtime/metadata/{memory,postgres}.ex`, `test/support/runtime/metadata_contract.ex`, `lib/archon/metadata.ex`, `lib/archon/domain/workflow_def_summary.ex`, `lib/archon_web/controllers/metadata_controller.ex`, `test/archon/metadata_test.exs`, `test/archon_web/metadata_controller_test.exs` |
-| 6d | 결정 2·3: pause·resume·retry·restart 컨트롤러, skiptask·resetcallbacks·remove 이벤트, remove·terminate-remove, "전달 대기" 오류와 호출 timeout의 `retryable` | 생명주기·정리 픽스처 재생, 이벤트 단위 시험(두 백엔드), 지운 부모에게 자식이 알리는 시험, terminate-remove의 outbox 시험(결정 3), 대기 중 retry 경합 | 6a | `lib/archon/runtime/step/lifecycle.ex`, `lib/archon/runtime/lifecycle.ex`, `lib/archon/runtime/workflow_server.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/step/event.ex`, `lib/archon_web/errors.ex`, `lib/archon_web/controllers/workflow_lifecycle_controller.ex`, 해당 시험 |
+| 6d | 결정 2·3: pause·resume·retry·restart 컨트롤러, skiptask·resetcallbacks·remove 이벤트, 큐 콜백 `reset_offset/2`, remove·terminate-remove, "전달 대기" 오류와 호출 timeout의 `retryable` | 생명주기·정리 픽스처 재생, 이벤트 단위 시험(두 백엔드), 지운 부모에게 자식이 알리는 시험, terminate-remove의 outbox 시험(결정 3), 대기 중 retry 경합 | 6a | `lib/archon/runtime/step/lifecycle.ex`, `lib/archon/runtime/lifecycle.ex`, `lib/archon/runtime/workflow_server.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/step/event.ex`, `lib/archon_web/errors.ex`, `lib/archon/runtime/queue.ex`, `lib/archon/runtime/queue/{memory,postgres}.ex`, `test/support/runtime/queue_contract.ex`, `lib/archon_web/controllers/workflow_lifecycle_controller.ex`, 해당 시험 |
 | 6e | 결정 5: ref 갱신 둘, signal 둘, 동기 응답기, `execute`, `SignalResponse`·`WorkflowRun`·`TaskRun`·`WorkflowSignalReturnStrategy` 모델 | ref·signal·execute 픽스처 재생, 응답기 단위 시험(시간 초과, 자식으로 내려가기, 소유권) | 6a | `lib/archon/runtime/tasks.ex`, `lib/archon/domain/{signal_response,workflow_run,task_run}.ex`, `lib/archon_web/signal_responder.ex`, `lib/archon_web/controllers/signal_controller.ex`, 해당 시험 |
 | 6f | 결정 2의 rerun과 `RerunWorkflowRequest` 모델 | rerun 픽스처 재생, 자식 안의 태스크 rerun과 부모 되살림 시험(두 번 되살림 포함, 두 백엔드) | 6d | `lib/archon/runtime/step/lifecycle.ex`, `lib/archon/runtime/lifecycle.ex`, `lib/archon/runtime/workflow_server.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/step/event.ex`, `lib/archon/domain/rerun_workflow_request.ex`, `lib/archon_web/controllers/workflow_lifecycle_controller.ex`(rerun 액션) |
 | 6g | 결정 6의 bulk 일곱 경로 | bulk 픽스처 재생, 1000개 한도 시험 | 6d | `lib/archon_web/controllers/workflow_bulk_controller.ex`, 해당 시험 |
