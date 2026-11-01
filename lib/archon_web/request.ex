@@ -15,8 +15,14 @@ defmodule ArchonWeb.Request do
   its last value. Upstream answers a body that is not JSON with a 500 whose message is Jackson's
   (`"JSON parse error: ..."`); Archon keeps the status and the prefix but cannot reproduce
   Jackson's wording, except for blank text and Jackson's `StreamReadConstraints` (nesting deeper
-  than 1000, a number longer than 1000 digits), whose messages are upstream's. A leading UTF-8 byte order mark is skipped, as Jackson does. The `Content-Type` is not checked (upstream answers a non-JSON one with a
-  500).
+  than 1000, a number longer than 1000 digits), whose messages are upstream's. A leading UTF-8
+  byte order mark is skipped, as Jackson does.
+
+  A non-empty body needs a JSON `Content-Type`, as for Spring's JSON message converter:
+  `application/json` or `application/*+json`, in any case and with any parameters. Any other type,
+  or none (Spring reads it as `application/octet-stream`), is a 500
+  `"Content-Type '<type>' is not supported"`. This also keeps a browser's cross-origin "simple"
+  request (`text/plain`, a form), which needs no CORS preflight, from reaching an action.
 
   ## Query values
 
@@ -51,10 +57,71 @@ defmodule ArchonWeb.Request do
   @spec read_json(Plug.Conn.t(), handler: String.t()) ::
           {:ok, Archon.Domain.Codec.json(), Plug.Conn.t()} | {:error, term(), Plug.Conn.t()}
   def read_json(conn, opts \\ []) do
-    case read_all(conn, []) do
-      {:ok, text, conn} -> decode(text, opts, conn)
+    with {:ok, text, conn} <- read_all(conn, []),
+         :ok <- json_content_type(conn, text) do
+      decode(text, opts, conn)
+    else
+      {:error, reason} -> {:error, reason, conn}
       {:error, reason, conn} -> {:error, reason, conn}
     end
+  end
+
+  # An empty body is the missing body whatever its type (decode/3).
+  defp json_content_type(_conn, ""), do: :ok
+
+  defp json_content_type(conn, _text) do
+    case Plug.Conn.get_req_header(conn, "content-type") do
+      # Spring takes a missing type as application/octet-stream and adds no charset to it.
+      [] -> {:error, {:server_error, "Content-Type 'application/octet-stream' is not supported"}}
+      [value | _rest] -> check_media_type(String.trim(value))
+    end
+  end
+
+  # Spring's MediaType parsing and AbstractJackson2HttpMessageConverter#canRead, with the messages
+  # observed upstream.
+  defp check_media_type(value) do
+    [type_part | params] = value |> String.split(";") |> Enum.map(&String.trim/1)
+
+    case String.split(type_part, "/", parts: 2) do
+      [_no_slash] ->
+        {:error, {:server_error, ~s(Invalid mime type "#{value}": does not contain '/')}}
+
+      [type, subtype] ->
+        type = String.downcase(type)
+        subtype = String.downcase(subtype)
+
+        cond do
+          wildcard?(type, subtype) ->
+            {:error, {:invalid, "Content-Type cannot contain wildcard #{wildcard(type)} '*'"}}
+
+          json?(type, subtype) ->
+            :ok
+
+          true ->
+            unsupported(type_part, Enum.reject(params, &(&1 == "")))
+        end
+    end
+  end
+
+  defp wildcard?(type, subtype),
+    do: type == "*" or subtype == "*" or String.starts_with?(subtype, "*+")
+
+  defp json?(type, subtype),
+    do: type == "application" and (subtype == "json" or String.ends_with?(subtype, "+json"))
+
+  defp wildcard("*"), do: "type"
+  defp wildcard(_type), do: "subtype"
+
+  # Spring writes the type with its parameters joined by ";" and adds charset=UTF-8 when the
+  # request names none.
+  defp unsupported(type, params) do
+    params =
+      if Enum.any?(params, &(&1 |> String.downcase() |> String.starts_with?("charset="))),
+        do: params,
+        else: params ++ ["charset=UTF-8"]
+
+    {:error,
+     {:server_error, "Content-Type '#{Enum.join([type | params], ";")}' is not supported"}}
   end
 
   defp read_all(conn, acc) do

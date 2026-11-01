@@ -14,8 +14,15 @@ defmodule ArchonWeb.RequestTest do
     Plug.Adapters.Test.Conn.conn(%Plug.Conn{}, "POST", "/x?" <> query, body)
   end
 
-  defp read(body, opts \\ []) do
-    case Request.read_json(conn("", body), opts) do
+  defp read(body, opts \\ [], content_type \\ "application/json") do
+    conn = conn("", body)
+
+    conn =
+      if content_type,
+        do: Plug.Conn.put_req_header(conn, "content-type", content_type),
+        else: conn
+
+    case Request.read_json(conn, opts) do
       {:ok, json, _conn} -> {:ok, json}
       {:error, reason, _conn} -> {:error, reason}
     end
@@ -108,6 +115,41 @@ defmodule ArchonWeb.RequestTest do
                read(~s([1e#{digits.(999)}]))
 
       assert read(~s({"#{digits.(2000)}": "#{digits.(2000)}"})) |> elem(0) == :ok
+    end
+
+    # Observed upstream (Spring's JSON message converter).
+    test "a non-empty body needs a JSON Content-Type" do
+      for type <- [
+            "application/json;charset=UTF-8",
+            "APPLICATION/JSON",
+            "application/merge-patch+json",
+            "application/json; foo=bar"
+          ] do
+        assert read("{}", [], type) == {:ok, %{}}, type
+      end
+
+      unsupported = &{:error, {:server_error, "Content-Type '#{&1}' is not supported"}}
+      assert read("{}", [], nil) == unsupported.("application/octet-stream")
+      assert read("{}", [], "text/plain") == unsupported.("text/plain;charset=UTF-8")
+
+      assert read("{}", [], "text/plain; charset=ISO-8859-1") ==
+               unsupported.("text/plain;charset=ISO-8859-1")
+
+      assert read("{}", [], "application/x-ndjson") ==
+               unsupported.("application/x-ndjson;charset=UTF-8")
+
+      assert read("{}", [], "multipart/form-data; boundary=x") ==
+               unsupported.("multipart/form-data;boundary=x;charset=UTF-8")
+
+      assert read("{}", [], "application/*+json") ==
+               {:error, {:invalid, "Content-Type cannot contain wildcard subtype '*'"}}
+
+      assert read("{}", [], "garbage") ==
+               {:error, {:server_error, ~s(Invalid mime type "garbage": does not contain '/')}}
+
+      # An empty body is the missing body whatever its type.
+      assert read("", [], "text/plain") ==
+               {:error, {:server_error, "Required request body is missing"}}
     end
 
     test "a UTF-8 byte order mark is skipped" do

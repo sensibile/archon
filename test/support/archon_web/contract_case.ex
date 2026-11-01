@@ -71,6 +71,7 @@ defmodule ArchonWeb.ContractCase do
   @endpoint ArchonWeb.Endpoint
 
   # Polls and waits give up after 10 s.
+  @deadline_ms 10_000
   @attempts 400
   @attempt_ms 25
 
@@ -285,19 +286,22 @@ defmodule ArchonWeb.ContractCase do
     fixture = Contract.fixture(name)
 
     actual =
-      Enum.reduce_while(1..@attempts, nil, fn attempt, _last ->
-        {_state, actual} = send_fixture(fixture, state)
-
-        if done?.(actual) or attempt == @attempts do
-          {:halt, actual}
-        else
-          Process.sleep(@attempt_ms)
-          {:cont, actual}
-        end
-      end)
+      repeat_until(fixture, state, done?, System.monotonic_time(:millisecond) + @deadline_ms)
 
     {state, _actual} = prepare_request(fixture["request"], state)
     check(name, fixture, actual, state, [])
+  end
+
+  # The deadline counts the requests' own time (a poll can wait for its timeout).
+  defp repeat_until(fixture, state, done?, deadline) do
+    {_state, actual} = send_fixture(fixture, state)
+
+    if done?.(actual) or System.monotonic_time(:millisecond) >= deadline do
+      actual
+    else
+      Process.sleep(@attempt_ms)
+      repeat_until(fixture, state, done?, deadline)
+    end
   end
 
   defp wait_status(name, id, status, 0),

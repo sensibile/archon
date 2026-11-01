@@ -132,7 +132,7 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   - body: Jackson처럼 첫 JSON 값만 읽고 뒤는 무시한다(`{} x`는 `{}`). 객체의 같은 키는 마지막 값이다(내장 `JSON.decode/1`은 첫
     값이라 `:json.decode/3`에 디코더를 준다). 빈 body와 `null`은 `"Required request body is missing: <handler 시그니처>"`(500),
     공백뿐인 body는 `"JSON parse error: No content to map due to end-of-input"`(500)이다. JSON이 아닌 body는 500이고 문구는
-    `"JSON parse error: "`로 시작하지만 그 뒤의 Jackson 문구는 옮기지 않는다(재생에서 `message`를 뺀다). `Content-Type`은 보지 않는다.
+    `"JSON parse error: "`로 시작하지만 그 뒤의 Jackson 문구는 옮기지 않는다(재생에서 `message`를 뺀다).
     body는 8 MB(`Plug.Parsers` 기본값)까지 읽고 넘으면 413이다.
   - 쿼리: Spring `@RequestParam` 변환(`CustomNumberEditor`, `CustomBooleanEditor`)을 따른다. 값이 없거나 정확히 `""`이면 기본값이다.
     숫자는 공백을 모두 지우고 `0x`·`#` 16진수를 받는다. primitive `int`는 공백뿐인 값이 `For input string: ""` 실패이고, boxed
@@ -143,7 +143,14 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   - body 한도: 첫 JSON 값에서 배열·객체가 1000단을 넘거나 숫자가 1000자리(정수부·소수부·지수부 자릿수, 부호 제외)를 넘으면
     디코딩 전에 거절한다. upstream Jackson의 `StreamReadConstraints`(`getMaxNestingDepth`, `getMaxNumberLength`)와 같은 한도와
     문구(`"JSON parse error: Document nesting depth (1001) exceeds ..."`, `"JSON parse error: Number value length (<n>) exceeds ..."`)다.
-    거대한 중첩·숫자를 만드는 데 드는 메모리·CPU를 막는다. body 앞의 UTF-8 BOM은 Jackson처럼 건너뛴다. upstream은 `1e<999자리>`
+    거대한 중첩·숫자를 만드는 데 드는 메모리·CPU를 막는다.
+  - `Content-Type`: 비어 있지 않은 body는 Spring의 JSON 변환기처럼 `application/json`이나 `application/*+json`(대소문자·매개변수
+    무관)이어야 한다. 그 밖의 타입은 500 `"Content-Type '<타입>;<매개변수>' is not supported"`(charset이 없으면 `charset=UTF-8`을
+    붙임), 헤더가 없으면 `application/octet-stream`으로 본 같은 500, `/`가 없으면 500 `Invalid mime type`, 와일드카드는 400이다(모두
+    upstream 관측). 인증이 없는 MVP(ADR 0024 결정 4)에서 이 검사는 브라우저가 CORS preflight 없이 보내는 교차 출처 "단순 요청"
+    (`text/plain`, 폼)이 액션에 닿지 않게 한다. `application/json` 교차 출처 요청은 preflight가 필요한데 Archon은 OPTIONS에 CORS
+    헤더 없이 404로 답하므로 브라우저가 보내지 않는다. DNS rebinding처럼 같은 출처로 위장하는 경로는 upstream과 같이 남고, 인증
+    ADR(Later)이 다룬다. body 앞의 UTF-8 BOM은 Jackson처럼 건너뛴다. upstream은 `1e<999자리>`
     같은 큰 지수를 받지만 Archon은 실수로 만들 수 없어 500 parse error다. 루트가 스칼라면 뒤에 공백이나
     끝이 와야 한다(upstream은 `"123abc"`, `"01"`을 거절).
 
@@ -309,8 +316,8 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 - **500의 문구.** `TransientException`·매핑 없는 예외로 가는 런타임 오류(결정 4 표의 마지막 두 줄)는 upstream이 `th.getMessage()`를
   주는 자리에 고정 문구(`"Temporary server error, retry the request"`, `"Internal server error"`)를 준다. Elixir 용어를 내보내지
   않기 위해서다. 400대 Plug 예외도 예외 문구 대신 HTTP 상태 문구를 준다.
-- **요청 읽기의 차이**(결정 3): JSON이 아닌 body의 Jackson 문구를 옮기지 않고, `Content-Type`을 보지 않으며(upstream은 JSON이
-  아니면 500), 8 MB 넘는 body는 413이다(upstream은 제한이 없다). 실수로 나타낼 수 없는 지수(`1e999`)는 500 parse error다
+- **요청 읽기의 차이**(결정 3): JSON이 아닌 body의 Jackson 문구를 옮기지 않고, 8 MB 넘는 body는 413이다(upstream은 제한이
+  없다). 실수로 나타낼 수 없는 지수(`1e999`)는 500 parse error다
   (upstream은 `BigDecimal`로 받는다).
 - JSON 객체 키 순서 등 코덱 차이는 ADR 0002의 목록 그대로다.
 
