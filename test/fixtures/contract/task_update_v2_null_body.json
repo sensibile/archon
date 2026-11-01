@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks/update-v2",
+    "body": "null"
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Required request body is missing: public org.springframework.http.ResponseEntity<com.netflix.conductor.common.metadata.tasks.Task> com.netflix.conductor.rest.controllers.TaskResource.updateTaskV2(com.netflix.conductor.common.metadata.tasks.TaskResult)",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

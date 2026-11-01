@@ -23,7 +23,8 @@ defmodule ArchonWeb.ContractCase do
       wait is not a fixture.
 
   A fixture request body is sent as JSON, except a string, which is sent as the raw text it holds
-  (the capture script stores a body that is not JSON as a string; no fixture sends a JSON string).
+  (the capture script stores a body that is not a JSON object, array, number or boolean as a
+  string: an empty body, `null`, text that is not JSON).
 
   Exchange options record the deliberate differences from upstream:
 
@@ -62,7 +63,8 @@ defmodule ArchonWeb.ContractCase do
   Fixtures depend on the state earlier steps left, as the capture ran on an empty server. The
   runtime under test is shared with other tests, so a test replaying a list response (such as
   `metadata_list_taskdefs`) has to keep other tests' definitions out of it (`only:`), and a test
-  replaying registrations has to remove the fixtures' definitions other tests stored first.
+  replaying registrations has to remove the fixtures' definitions other tests stored first
+  (`remove_definitions/1`).
   """
 
   use ExUnit.CaseTemplate
@@ -205,7 +207,55 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "route_method_put_task", @no_route},
     {:exchange, "request_body_not_json", @jackson_message},
     {:exchange, "request_query_not_number"},
-    {:exchange, "request_query_not_boolean"}
+    {:exchange, "request_query_not_boolean"},
+    # slice 5f: missing and null bodies, one route each
+    {:exchange, "metadata_register_taskdefs_missing_body"},
+    {:exchange, "metadata_update_taskdef_null_body"},
+    {:exchange, "metadata_register_workflow_missing_body"},
+    {:exchange, "metadata_update_workflows_null_body"},
+    {:exchange, "workflow_start_request_missing_body"},
+    {:exchange, "workflow_start_null_body"},
+    {:exchange, "task_update_missing_body"},
+    {:exchange, "task_update_v2_null_body"},
+    # metadata validation prefixes and null elements
+    {:exchange, "metadata_register_workflow_no_name"},
+    {:exchange, "metadata_register_workflow_overwrite_invalid"},
+    {:exchange, "metadata_update_taskdef_invalid"},
+    {:exchange, "metadata_update_workflows_null_element"},
+    {:exchange, "metadata_register_taskdefs_null_element"},
+    # values Jackson cannot convert
+    {:exchange, "metadata_register_taskdefs_wrong_type", @jackson_message},
+    {:exchange, "task_update_wrong_type", @jackson_message},
+    {:exchange, "workflow_start_request_wrong_type", @jackson_message},
+    {:exchange, "workflow_start_not_object", @jackson_message},
+    # query values that do not convert
+    {:exchange, "metadata_register_workflow_query_not_boolean"},
+    {:exchange, "metadata_get_workflow_query_not_number"},
+    {:exchange, "workflow_start_query_not_number"},
+    {:exchange, "workflow_get_status_query_not_boolean"},
+    # task routes
+    {:exchange, "task_update_v2_invalid_both"},
+    {:exchange, "task_batch_poll_timeout_too_long"},
+    {:exchange, "task_batch_poll_count_zero"},
+    {:exchange, "task_poll_domain_empty"},
+    # start errors
+    {:exchange, "workflow_start_request_no_name"},
+    {:exchange, "workflow_start_request_priority_too_high"},
+    {:exchange, "workflow_start_request_invalid_definition"},
+    {:exchange, "workflow_start_request_blank_name"},
+    {:exchange, "workflow_start_request_null_input"},
+    {:exchange, "workflow_start_request_external_input"},
+    {:exchange, "workflow_start_priority_too_low"},
+    {:exchange, "workflow_start_version_not_found"},
+    # status without a correlation ID, terminating a TERMINATED workflow
+    {:exchange, "workflow_get_status_no_correlation"},
+    {:exchange, "workflow_terminate_terminated"},
+    # starts with defaults, an inline definition under another name, the query options
+    {:exchange, "workflow_start_request_defaults"},
+    {:exchange, "workflow_get_request_defaults"},
+    {:exchange, "workflow_start_request_inline_other_name"},
+    {:exchange, "workflow_start_options"},
+    {:exchange, "workflow_get_options"}
   ]
 
   @doc "Every captured exchange in capture order, with the waits between them."
@@ -256,6 +306,38 @@ defmodule ArchonWeb.ContractCase do
             }
         end
     end
+  end
+
+  @doc """
+  Removes the definitions named `names` from the runtime's store, whichever backend it is (there
+  is no remove operation in `Archon.Runtime.Metadata`, as the MVP has no delete route). A test
+  replaying registrations calls it first: the capture ran on an empty server.
+  """
+  @spec remove_definitions([String.t()]) :: :ok
+  def remove_definitions(names) do
+    case Archon.Runtime.metadata() do
+      Archon.Runtime.Metadata.Memory ->
+        :sys.replace_state(Archon.Runtime.Metadata.Memory, fn state ->
+          %{
+            state
+            | task_defs: Map.drop(state.task_defs, names),
+              workflow_defs:
+                Map.reject(state.workflow_defs, fn {{name, _version}, _def} -> name in names end)
+          }
+        end)
+
+      Archon.Runtime.Metadata.Postgres ->
+        instance = Archon.Runtime.Postgres.runtime()
+
+        for table <- ["meta_task_def", "meta_workflow_def"] do
+          Archon.Repo.query!(
+            "DELETE FROM #{Archon.Runtime.Postgres.table(instance, table)} WHERE name = ANY($1)",
+            [names]
+          )
+        end
+    end
+
+    :ok
   end
 
   @doc "Replays `steps`, asserting every response; returns the ID mapping for the next steps."
@@ -467,7 +549,9 @@ defmodule ArchonWeb.ContractCase do
       body: comparable(actual.body, ignore)
     }
 
-    assert got == want, "#{name}: Archon's response differs from the fixture"
+    assert got == want,
+           "#{name}: Archon's response differs from the fixture\n" <>
+             "Archon:  #{inspect(got)}\nfixture: #{inspect(want)}"
 
     case Contract.fixture_schemas() do
       %{^name => {:response, schema}} ->

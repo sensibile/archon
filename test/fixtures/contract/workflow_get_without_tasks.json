@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/workflow/50d58a73-7cf6-4617-ac94-c8e003a298d6?includeTasks=false",
+    "path": "/api/workflow/1a03ebb0-f036-4108-9455-b17405104628?includeTasks=false",
     "body": null
   },
   "response": {
@@ -9,11 +9,11 @@
     "content_type": "application/json",
     "body": {
       "ownerApp": "",
-      "createTime": 1793502387312,
-      "updateTime": 1793502388116,
+      "createTime": 1793520125140,
+      "updateTime": 1793520125869,
       "status": "COMPLETED",
-      "endTime": 1793502388116,
-      "workflowId": "50d58a73-7cf6-4617-ac94-c8e003a298d6",
+      "endTime": 1793520125869,
+      "workflowId": "1a03ebb0-f036-4108-9455-b17405104628",
       "tasks": [],
       "input": {
         "x": 1
@@ -25,7 +25,7 @@
       "taskToDomain": {},
       "failedReferenceTaskNames": [],
       "workflowDefinition": {
-        "createTime": 1793502386954,
+        "createTime": 1793520124805,
         "updateTime": 0,
         "name": "archon_simple",
         "description": "Two sequential SIMPLE tasks",
@@ -45,7 +45,7 @@
             "joinOn": [],
             "optional": false,
             "taskDefinition": {
-              "createTime": 1793502386720,
+              "createTime": 1793520124583,
               "updateTime": 0,
               "createdBy": "",
               "name": "archon_task_a",
@@ -93,7 +93,7 @@
             "joinOn": [],
             "optional": false,
             "taskDefinition": {
-              "createTime": 1793502386766,
+              "createTime": 1793520124626,
               "updateTime": 0,
               "createdBy": "",
               "name": "archon_task_b",
@@ -147,7 +147,7 @@
       "failedTaskNames": [],
       "history": [],
       "rateLimited": false,
-      "startTime": 1793502387312,
+      "startTime": 1793520125140,
       "workflowName": "archon_simple",
       "workflowVersion": 1
     }

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/metadata/workflow/archon_simple?version=abc",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Method parameter 'version': Failed to convert value of type 'java.lang.String' to required type 'java.lang.Integer'; For input string: \"abc\"",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

@@ -52,7 +52,10 @@ defmodule Archon.Contract do
     "workflow_get_completed_switch" => {:response, :workflow},
     "workflow_get_completed_fork" => {:response, :workflow},
     "workflow_get_without_tasks" => {:response, :workflow},
-    "workflow_get_terminated" => {:response, :workflow}
+    "workflow_get_terminated" => {:response, :workflow},
+    "task_batch_poll_count_zero" => {:response, {:list, :task}},
+    "workflow_get_request_defaults" => {:response, :workflow},
+    "workflow_get_options" => {:response, :workflow}
   }
 
   # Keys holding wall-clock timestamps or durations derived from them. Generated IDs are UUIDs and

@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/taskdefs",
+    "body": [
+      {
+        "name": "archon_task_x",
+        "retryCount": "abc"
+      }
+    ]
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "JSON parse error: Cannot deserialize value of type `int` from String \"abc\": not a valid `int` value",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

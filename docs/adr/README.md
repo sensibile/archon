@@ -34,10 +34,10 @@ Archon의 합의된 기술·운영 결정을 누적합니다. 파일 이름은 `
 | [0015](0015-script-evaluator.md) | 스크립트 평가기를 격리된 QuickJS-ng 프로세스로 실행 | 승인 |
 | [0016](0016-taeguk-review-order-and-model.md) | 태극 번들 갱신과 로컬 리뷰 순서·모델 변경 | 승인 |
 | [0017](0017-taeguk-dev003-worktree.md) | 태극 번들 갱신과 작업 전용 워크트리 규칙(DEV-003) 적용 | 승인 |
-| [0018](0018-phase3-otp-runtime.md) | Phase 3 OTP 런타임 설계 | 승인 (일부 0021·0024가 대체) |
+| [0018](0018-phase3-otp-runtime.md) | Phase 3 OTP 런타임 설계 | 승인 (일부 0021·0023·0024가 대체) |
 | [0019](0019-taeguk-codex-purpose-context.md) | 태극 번들 갱신과 Codex 리뷰 목적 맥락 적용 | 승인 |
 | [0020](0020-taeguk-codex-transmission-list-removal.md) | 태극 번들 갱신과 Codex 전송 저장소 허용 목록 제거 | 승인 |
 | [0021](0021-phase4-postgres-persistence.md) | Phase 4 PostgreSQL 영속성과 큐 설계 | 승인 |
 | [0022](0022-taeguk-validation-health.md) | 태극 검증 건강도 워커 적용과 주간 CI 실행 | 제안 |
-| [0023](0023-phase5-rest.md) | Phase 5 REST 설계 (MVP 엔드포인트) | 제안 |
+| [0023](0023-phase5-rest.md) | Phase 5 REST 설계 (MVP 엔드포인트) | 승인 |
 | [0024](0024-worker-input-trust-and-auth.md) | worker 입력의 신뢰 경계와 MVP 인증 | 승인 |

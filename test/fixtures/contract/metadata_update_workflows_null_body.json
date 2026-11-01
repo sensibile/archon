@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/metadata/workflow",
+    "body": "null"
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Required request body is missing: public com.netflix.conductor.common.model.BulkResponse<java.lang.String> com.netflix.conductor.rest.controllers.MetadataResource.update(java.util.List<com.netflix.conductor.common.metadata.workflow.WorkflowDef>)",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

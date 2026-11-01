@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": ""
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Required request body is missing: public void com.netflix.conductor.rest.controllers.MetadataResource.create(com.netflix.conductor.common.metadata.workflow.WorkflowDef,boolean)",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

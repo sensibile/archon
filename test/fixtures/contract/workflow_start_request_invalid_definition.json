@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow",
+    "body": {
+      "name": "archon_inline",
+      "workflowDef": {
+        "name": "archon_inline",
+        "tasks": [
+          {
+            "name": "archon_task_c",
+            "type": "SIMPLE"
+          }
+        ]
+      }
+    }
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Validation failed, check below errors for detail.",
+      "retryable": false,
+      "validationErrors": [
+        {
+          "path": "startWorkflow.arg0.workflowDef.tasks[0].taskReferenceName",
+          "message": "WorkflowTask taskReferenceName name cannot be empty or null"
+        }
+      ]
+    }
+  }
+}

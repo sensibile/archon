@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks",
+    "body": ""
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Required request body is missing: public java.lang.String com.netflix.conductor.rest.controllers.TaskResource.updateTask(com.netflix.conductor.common.metadata.tasks.TaskResult)",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

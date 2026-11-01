@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow",
+    "body": {
+      "name": "archon_simple",
+      "priority": "abc"
+    }
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "JSON parse error: Cannot deserialize value of type `java.lang.Integer` from String \"abc\": not a valid `java.lang.Integer` value",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

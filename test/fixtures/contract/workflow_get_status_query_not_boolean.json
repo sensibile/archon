@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/1a03ebb0-f036-4108-9455-b17405104628/status?includeOutput=abc",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Method parameter 'includeOutput': Failed to convert value of type 'java.lang.String' to required type 'boolean'; Invalid boolean value [abc]",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/metadata/workflow",
+    "body": [
+      null
+    ]
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Validation failed, check below errors for detail.",
+      "retryable": false,
+      "validationErrors": [
+        {
+          "path": "updateWorkflowDef.arg0[0].<list element>",
+          "message": "WorkflowDef cannot be null"
+        }
+      ]
+    }
+  }
+}

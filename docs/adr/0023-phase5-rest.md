@@ -1,6 +1,6 @@
 # ADR 0023: Phase 5 REST 설계 (MVP 엔드포인트)
 
-- 상태: 제안
+- 상태: 승인
 - 날짜: 2026-11-01
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(웹 계층, worker 입력 신뢰와 인증, 스키마 검증, MVP 범위)는 2026-11-01 BOSS가 이 문서와
@@ -16,6 +16,8 @@
 - 갱신: 2026-11-01 조각 5d가 결정 3(`StartWorkflowRequest`·`WorkflowStatus`의 세부, 코덱 타입 오류 함수를 `ArchonWeb.Request`로
   옮김, 시작 정의 채우기의 선형화), 결정 4(워크플로우 경로의 오류 문구와 검사 순서)와 결정 7(5d 파일 목록과 재생 방식)과
   "upstream과 의도적으로 다른 점"을 upstream 서버(기준 SHA 빌드, 빈 SQLite) 관측으로 보강했다.
+- 갱신: 2026-11-01 조각 5f가 결정 6(픽스처 40개 추가와 한 번의 재캡처, 캡처 스크립트의 요청 body 저장 규칙, 전체 재생,
+  캡처하지 않은 경우)과 결정 7(5f의 실제 파일, 서버 연기 시험)을 보강하고 상태를 `승인`으로 바꿨다. Phase 5가 끝났다.
 
 ## 맥락
 
@@ -394,6 +396,27 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   없어 메모리는 프로세스 상태, Postgres는 행을 직접 지운다) 끝나면 다시 지운 뒤 `RuntimeCase`의 정의를 되돌린다. 재생은 두
   구간(`metadata_register_taskdefs`~`metadata_get_workflow_not_found`, `metadata_list_taskdefs`~`metadata_update_workflows_empty`)이고,
   사이의 워크플로우 단계는 정의를 바꾸지 않으므로 둘째 구간 앞에서 첫 구간의 등록만 다시 한다.
+- **5f 캡처와 전체 재생(조각 5f).**
+  - 앞 조각들이 upstream 서버에서 보고 시험에 손으로 적은 응답 중 캡처할 수 있는 것 40개를 시나리오 끝에 더했다(모두 127개):
+    body를 받는 경로 여덟 개의 빈 body·`null` body, 검증 접두사(`registerWorkflowDef.arg0`, `overwrite`의 `updateWorkflowDef.arg0`,
+    `updateTaskDef.arg0`), `[null]` 원소 둘, 코덱 타입 오류 넷, 쿼리 변환 실패 넷, `update-v2`의 오류 둘, batch poll의 `timeout`·`count`,
+    도메인 poll, 시작 오류 여덟, `correlationId` 없는 상태 요약, `TERMINATED` 재종료, 기본값·인라인 정의·쿼리 옵션 시작 셋과 조회 둘.
+    상태를 바꾸지 않는 오류를 먼저, 큐에 태스크를 남기는 시작을 마지막에 둔다. 목록과 캡처하지 않은 경우의 이유는
+    `test/fixtures/contract/README.md`에 있다.
+  - 새 픽스처가 앞 단계의 워크플로우 ID를 쓰므로 127개 모두 한 번의 캡처에서 가져왔다. 기존 87개는 `normalize/1` 기준으로
+    `metadata_register_taskdefs_coerced`의 `validationErrors` 순서만 달랐다(재생은 순서 없이 비교한다).
+  - 캡처 스크립트의 `call`은 넷째 인자가 있으면 빈 문자열이어도 JSON `Content-Type`으로 보낸다. 요청 body는 JSON 객체·배열·숫자·
+    불리언이면 파싱한 값으로, 그 밖(빈 body, `null`, JSON 문자열, JSON이 아님)은 보낸 문자열 그대로 저장한다. 재생 도우미는
+    문자열 body를 원문으로 보내므로 픽스처의 `null` body(요청 body 없음)와 `"null"`(body가 `null`)이 구분된다. 기존 87개의 저장
+    모양은 그대로다.
+  - 코덱 타입 오류 넷은 `ignore: [["message"]]`다(결정 4). 나머지는 문구까지 같다.
+  - `ArchonWeb.ContractReplayTest`는 `scenario/0` 전부를 한 번에 REST로 돌린다. 정의 지우기는 `ArchonWeb.ContractCase.remove_definitions/1`로
+    옮겨 Metadata 시험과 함께 쓴다. 다른 시험이 등록한 픽스처 정의를 지우고 큐를 비운 뒤 재생하고, 끝나면 다시 지우고
+    `RuntimeCase`의 정의를 되돌린다. 두 백엔드에서 돈다.
+  - 손으로 적은 upstream 문구 중 같은 요청이 픽스처로 재생되는 시험(이름 없는 정의, `overwrite=abc`, `PUT`의 `[null]`, `version=abc`,
+    `updateTaskDef.arg0.name`, `timeout=5001`, `count=x`,
+    `POST /api/workflow`의 `{}`·`input: null`, `version=7`의 404)은 지웠고, `update-v2` 두 오류 문구는 픽스처 값과 비교한다. 같은 규칙의
+    다른 표본(모든 경로의 빈 body·`null`, 다른 필드의 코덱 오류 등)은 단위 시험에 남겼다.
 - 시나리오 시험 밖의 단위 시험은 컨트롤러마다 오류 변환과 쿼리 기본값을 본다.
 
 ### 7. 구현 조각
@@ -422,6 +445,13 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
   재생(`test/archon_web/workflow_controller_test.exs`)은 5e와 같은 setup(런타임 저장소에 정의를 넣고 큐를 비움)으로
   `workflow_start_simple`부터 `workflow_terminate_not_found`까지를 `metadata_*` 교환만 빼고 한 번에 돌린다. 워크플로우·태스크·
   `health` 교환과 대기가 모두 들어간다. 뒤쪽의 `workflow_get_status_all`이 앞쪽 SIMPLE 워크플로우를 읽으므로 나누지 않는다.
+- **5f의 실제 파일과 서버 연기 시험(조각 5f).** 표의 파일에 더해 `test/support/archon_web/contract_case.ex`(시나리오 40단계,
+  `remove_definitions/1`, 다를 때 양쪽 값을 보이는 실패 문구), `test/support/contract.ex`(`fixture_schemas/0` 셋),
+  `test/archon/domain/contract_round_trip_test.exs`(새 픽스처 분류), `test/fixtures/contract/README.md`,
+  `test/archon_web/{metadata,task}_controller_test.exs`(픽스처와 겹친 시험 정리)를 고쳤다. `test/archon_web/server_test.exs`는 Phoenix가
+  `server: true`일 때 쓰는 `Bandit.PhoenixAdapter.child_specs/2`로 Bandit을 띄우고 주소는 `config/runtime.exs`가 읽은 값(`PORT=0`, 기본
+  `127.0.0.1`)을 쓴다. 듣는 주소가 `127.0.0.1`인지, `/health`·HEAD, 시작·조회·종료, 없는 경로 404, JSON이 아닌 `Content-Type`의 500을
+  실제 소켓(`:httpc`)으로 본다.
 - **5e의 재생 선행 조건.** 태스크 픽스처는 정의 등록(5c)과 워크플로우 시작(5d) 뒤의 상태다. 5d보다 먼저 끝나는 5e는 정의와
   워크플로우를 `Archon.Metadata`·`Archon.Runtime`으로 직접 만들고 `bind/3`으로 캡처 ID에 묶은 뒤 태스크 단계만 재생한다.
   5e는 5c와 동시에 진행했으므로 `Archon.Metadata` 대신 런타임 저장소(`Archon.Runtime.metadata/0`)에 캡처된 정의(`Archon.RuntimeCase.register_definitions/0`,
@@ -479,7 +509,7 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 
 ## 결과
 
-- 이 ADR은 결정만 담는다. 구현은 결정 7의 조각 5a~5f로 하며, 마지막 조각이 머지되면 `승인`으로 바꾼다.
+- 이 ADR은 결정만 담는다. 구현은 결정 7의 조각 5a~5f로 했고, 마지막 조각 5f의 PR에서 `승인`으로 바꿨다.
 - 정의 등록 REST를 열기 전에 스키마 검증을 정하라는 ADR 0018 결과 절의 조건은 결정 5로 채운다. 그 절은 검증기 채택을 요구했으나
   이 ADR은 거절로 대신한다. 또 ADR 0018 결정 7의 REST 호출 경계에 `Archon.Metadata`를 더한다(결정 2). 그래서 `승인`으로 바꿀 때
   ADR 0018의 목록 상태에 "일부 0023이 대체"(결과 절의 스키마 검증, 결정 7의 호출 경계)를 적는다.

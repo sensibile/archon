@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow",
+    "body": {
+      "name": " "
+    }
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Workflow name must be specified when searching for a definition",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

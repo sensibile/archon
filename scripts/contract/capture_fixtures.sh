@@ -6,7 +6,8 @@
 # The server must start empty (fresh SQLite file). Each exchange is written as one JSON file:
 #   {"request": {"method", "path", "body"}, "response": {"status", "content_type", "body"}}
 # JSON bodies are stored parsed, other bodies (text/plain responses, a request body that is not
-# JSON) as strings, empty bodies as null.
+# a JSON object, array, number or boolean: empty, `null`, a JSON string, not JSON) as strings,
+# absent bodies as null.
 # Fixtures are written verbatim except that the server hostname in error bodies is redacted;
 # volatile fields are documented in test/fixtures/contract/README.md.
 set -euo pipefail
@@ -19,19 +20,25 @@ mkdir -p "$OUT"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# call NAME METHOD PATH [BODY_JSON]
+# call NAME METHOD PATH [BODY]
 # Writes $OUT/NAME.json and leaves the response body in $tmp/body, status in $tmp/status.
+# A BODY argument is sent as JSON even when it is empty ('' sends an empty body).
 call() {
-  local name="$1" method="$2" path="$3" body="${4:-}"
+  local name="$1" method="$2" path="$3" body="${4:-}" has_body=$(($# >= 4))
   local args=(-sS -X "$method" -o "$tmp/body" -D "$tmp/headers" -w '%{http_code}')
-  if [[ -n "$body" ]]; then
+  if ((has_body)); then
     args+=(-H 'Content-Type: application/json' --data "$body")
   fi
   curl "${args[@]}" "$BASE_URL$path" >"$tmp/status"
 
   local req_body='null'
-  if [[ -n "$body" ]]; then
-    if jq . >/dev/null 2>&1 <<<"$body"; then req_body="$body"; else req_body="$(jq -n --arg b "$body" '$b')"; fi
+  if ((has_body)); then
+    if [[ -n "$body" ]] &&
+      jq -e 'type | IN("object", "array", "number", "boolean")' >/dev/null 2>&1 <<<"$body"; then
+      req_body="$body"
+    else
+      req_body="$(jq -n --arg b "$body" '$b')"
+    fi
   fi
 
   local status ctype
@@ -315,3 +322,73 @@ call route_method_put_task PUT /api/tasks/00000000-0000-0000-0000-000000000000 '
 call request_body_not_json POST /api/metadata/taskdefs 'not json'
 call request_query_not_number GET "/api/tasks/poll/batch/archon_task_a?workerid=$WORKER&count=abc"
 call request_query_not_boolean GET "/api/workflow/$inline_id?includeTasks=maybe"
+
+# --- slice 5f (ADR 0023, decision 6): the answers the other slices wrote in their tests --------
+# Errors first: none of them changes what the server holds.
+
+# A missing or null body names the handler, one route each.
+call metadata_register_taskdefs_missing_body POST /api/metadata/taskdefs ''
+call metadata_update_taskdef_null_body PUT /api/metadata/taskdefs 'null'
+call metadata_register_workflow_missing_body POST /api/metadata/workflow ''
+call metadata_update_workflows_null_body PUT /api/metadata/workflow 'null'
+call workflow_start_request_missing_body POST /api/workflow ''
+call workflow_start_null_body POST /api/workflow/archon_simple 'null'
+call task_update_missing_body POST /api/tasks ''
+call task_update_v2_null_body POST /api/tasks/update-v2 'null'
+
+# Validation prefixes and null elements of the metadata routes.
+call metadata_register_workflow_no_name POST /api/metadata/workflow \
+  '{"tasks": [{"name": "archon_task_a", "taskReferenceName": "task_a_ref", "type": "SIMPLE"}]}'
+call metadata_register_workflow_overwrite_invalid POST '/api/metadata/workflow?overwrite=true' \
+  '{"name": "archon_simple", "version": 1, "tasks": []}'
+call metadata_update_taskdef_invalid PUT /api/metadata/taskdefs '{"name": ""}'
+call metadata_update_workflows_null_element PUT /api/metadata/workflow '[null]'
+call metadata_register_taskdefs_null_element POST /api/metadata/taskdefs '[null]'
+
+# A value Jackson cannot convert (Archon writes its own message, ADR 0023 decision 4).
+call metadata_register_taskdefs_wrong_type POST /api/metadata/taskdefs \
+  '[{"name": "archon_task_x", "retryCount": "abc"}]'
+call task_update_wrong_type POST /api/tasks \
+  '{"workflowInstanceId": "00000000-0000-0000-0000-000000000000", "taskId": "x", "status": "BAD"}'
+call workflow_start_request_wrong_type POST /api/workflow '{"name": "archon_simple", "priority": "abc"}'
+call workflow_start_not_object POST /api/workflow/archon_simple '[]'
+
+# Query values that do not convert.
+call metadata_register_workflow_query_not_boolean POST '/api/metadata/workflow?overwrite=abc' \
+  "$(jq -c .request.body "$OUT/metadata_register_workflow_simple.json")"
+call metadata_get_workflow_query_not_number GET '/api/metadata/workflow/archon_simple?version=abc'
+call workflow_start_query_not_number POST '/api/workflow/archon_simple?version=abc' '{}'
+call workflow_get_status_query_not_boolean GET "/api/workflow/$simple_id/status?includeOutput=abc"
+
+# Task routes.
+call task_update_v2_invalid_both POST /api/tasks/update-v2 '{}'
+call task_batch_poll_timeout_too_long GET "/api/tasks/poll/batch/archon_task_a?workerid=$WORKER&timeout=5001"
+call task_batch_poll_count_zero GET "/api/tasks/poll/batch/archon_task_a?workerid=$WORKER&count=0"
+call task_poll_domain_empty GET "/api/tasks/poll/archon_task_a?workerid=$WORKER&domain=archon_domain"
+
+# Start errors.
+call workflow_start_request_no_name POST /api/workflow '{}'
+call workflow_start_request_priority_too_high POST /api/workflow '{"name": "archon_simple", "priority": 100}'
+call workflow_start_request_invalid_definition POST /api/workflow \
+  '{"name": "archon_inline", "workflowDef": {"name": "archon_inline", "tasks": [
+     {"name": "archon_task_c", "type": "SIMPLE"}]}}'
+call workflow_start_request_blank_name POST /api/workflow '{"name": " "}'
+call workflow_start_request_null_input POST /api/workflow '{"name": "archon_simple", "input": null}'
+call workflow_start_request_external_input POST /api/workflow \
+  '{"name": "archon_simple", "externalInputPayloadStoragePath": "archon/input.json"}'
+call workflow_start_priority_too_low POST '/api/workflow/archon_simple?priority=-1' '{}'
+call workflow_start_version_not_found POST '/api/workflow/archon_simple?version=7' '{}'
+
+# Status without a correlation ID, terminating a TERMINATED workflow.
+call workflow_get_status_no_correlation GET "/api/workflow/$fork_id/status"
+call workflow_terminate_terminated DELETE "/api/workflow/$term_id"
+
+# Starts last: they leave tasks in the queues.
+call workflow_start_request_defaults POST /api/workflow \
+  '{"name": "archon_simple", "priority": null, "taskToDomain": null, "input": {"x": 5}}'
+call workflow_get_request_defaults GET "/api/workflow/$(body)?includeTasks=false"
+call workflow_start_request_inline_other_name POST /api/workflow \
+  "$(jq -c '.name = "archon_missing"' <<<"$(inline_request 3)")"
+call workflow_start_options POST '/api/workflow/archon_simple?version=1&correlationId=archon-corr-4&priority=5' \
+  '{"x": 7}'
+call workflow_get_options GET "/api/workflow/$(body)?includeTasks=false"

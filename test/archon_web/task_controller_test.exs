@@ -139,16 +139,6 @@ defmodule ArchonWeb.TaskControllerTest do
   end
 
   describe "batch poll" do
-    test "a timeout over 5 s is a 400, as upstream's IllegalArgumentException" do
-      conn = get(build_conn(), "/api/tasks/poll/batch/archon_task_a?timeout=5001")
-
-      assert %{
-               "status" => 400,
-               "message" => "Long Poll Timeout value cannot be more than 5 seconds",
-               "retryable" => false
-             } = json(conn, 400)
-    end
-
     test "count and timeout default to 1 and 100; a zero or negative count is an empty list" do
       for _ <- 1..2, do: RuntimeCase.start_simple(%{"x" => 1})
 
@@ -157,14 +147,6 @@ defmodule ArchonWeb.TaskControllerTest do
 
       for query <- ["count=0", "count=-1", "timeout=-1&count=0"],
           do: assert(json(get(build_conn(), "/api/tasks/poll/batch/zz_none?#{query}"), 200) == [])
-    end
-
-    test "a count that is not a number is Spring's conversion error" do
-      conn = get(build_conn(), "/api/tasks/poll/batch/archon_task_a?count=x")
-
-      assert json(conn, 500)["message"] ==
-               "Method parameter 'count': Failed to convert value of type 'java.lang.String' " <>
-                 "to required type 'int'; For input string: \"x\""
     end
   end
 
@@ -211,25 +193,8 @@ defmodule ArchonWeb.TaskControllerTest do
     end
 
     test "update-v2 with both IDs missing is Spring's message, as the upstream server wrote it" do
-      # Observed from the upstream server at the reference commit for the body {}.
-      expected =
-        "Validation failed for argument [0] in public org.springframework.http.ResponseEntity" <>
-          "<com.netflix.conductor.common.metadata.tasks.Task> com.netflix.conductor.rest." <>
-          "controllers.TaskResource.updateTaskV2(com.netflix.conductor.common.metadata.tasks." <>
-          "TaskResult) with 2 errors: [Field error in object 'taskResult' on field 'taskId': " <>
-          "rejected value [null]; codes [NotEmpty.taskResult.taskId,NotEmpty.taskId," <>
-          "NotEmpty.java.lang.String,NotEmpty]; arguments [org.springframework.context.support." <>
-          "DefaultMessageSourceResolvable: codes [taskResult.taskId,taskId]; arguments []; " <>
-          "default message [taskId]]; default message [Task ID cannot be null or empty]] " <>
-          "[Field error in object 'taskResult' on field 'workflowInstanceId': rejected value " <>
-          "[null]; codes [NotEmpty.taskResult.workflowInstanceId,NotEmpty.workflowInstanceId," <>
-          "NotEmpty.java.lang.String,NotEmpty]; arguments [org.springframework.context.support." <>
-          "DefaultMessageSourceResolvable: codes [taskResult.workflowInstanceId," <>
-          "workflowInstanceId]; arguments []; default message [workflowInstanceId]]; default " <>
-          "message [Workflow Id cannot be null or empty]] "
-
-      conn = post_json("/api/tasks/update-v2", "{}")
-      assert %{"status" => 500, "message" => ^expected, "retryable" => false} = json(conn, 500)
+      # The server's answer to the body {} (replayed in order by ArchonWeb.ContractReplayTest).
+      expected = Contract.fixture("task_update_v2_invalid_both")["response"]["body"]["message"]
 
       assert TaskController.spring_validation_message(
                TaskResult.validate(%TaskResult{}) |> elem(1),
