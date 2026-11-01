@@ -123,13 +123,18 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   - **rerun의 실행 순서.** `Archon.Runtime.Lifecycle.rerun`이 `retry(id, true)`처럼 프로세스 밖에서 다음 순서로 한다.
     1. 읽기만으로 검증한다: 최상위가 끝나지 않았으면 409, 그다음 위의 깊이 우선 순서로 자식마다 409·404·소유권을 보고 대상을 가진
        가장 깊은 워크플로우를 정한다. 대상이 없으면 400.
-    2. 그 워크플로우에 경우 1·2의 이벤트를 보낸다. 이 이벤트는 부모 되살림(`child_revived`)을 outbox에 남긴다.
-    3. 그 답을 받은 뒤 최상위 워크플로우가 대상 워크플로우가 아니면 최상위에 경우 3의 이벤트(입력·correlationId 반영, `RUNNING`, 자식
-       태스크 `IN_PROGRESS`, 결정)를 보내고 그 답 뒤에 응답한다. 그래서 응답 때 최상위는 `RUNNING`이고 준 입력이 반영돼 있다.
-       upstream도 최상위에만 입력·correlationId를 반영한다.
-    4. 중간 워크플로우와 최상위의 조상은 `child_revived`로 따라온다. 최상위가 3의 이벤트와 `child_revived`로 두 번 되살려지는 것이
-       결과를 바꾸지 않는지 조각 6f가 시험한다. 자식이 아직 `FAILED`일 때 최상위가 결정하지 않도록 2의 답(자식 커밋과 결정 저장)을
-       받은 뒤에 3을 보낸다.
+    2. 그 워크플로우에 경우 1·2의 이벤트를 보낸다. 이벤트는 프로세스 안에서 끝났는지와 대상이 있는지를 다시 본다(1은 읽기만
+       했으므로). 이 이벤트는 부모 되살림(`child_revived`)을 outbox에 남긴다.
+    3. 그 답을 받은 뒤 경로에 있는 위 워크플로우마다, 대상의 부모부터 최상위까지 차례로 경우 3의 이벤트(`RUNNING`, 자식으로 가는
+       SUB_WORKFLOW 태스크의 `retried`를 거짓으로 하고 `IN_PROGRESS`, 결정)를 보내고 마지막 답 뒤에 응답한다. 입력·correlationId는
+       최상위의 이벤트에만 싣는다(upstream도 재귀 호출에는 `null`을 넘긴다). 그래서 응답 때 경로의 워크플로우는 모두 `RUNNING`이고
+       최상위에 준 입력이 반영돼 있다. `child_revived`만으로 두지 않는 것은, 경로가 재시도된 SUB_WORKFLOW 태스크(이전 시도의 자식)를
+       지나면 `child_revived`가 그 태스크를 건너뛰어(`Step.Lifecycle.child_revived/2`) 중간 워크플로우가 `FAILED`로 남기 때문이다.
+       upstream `rerunWF`는 재시도된 태스크도 찾고 모든 단계에서 경우 3을 한다.
+    4. 경우 3의 이벤트는 이미 `RUNNING`인 워크플로우도 받는다(2가 남긴 `child_revived`가 먼저 닿았을 수 있다). 그 SUB_WORKFLOW 태스크가
+       아직 있는지만 본다. 경로 밖의 조상(최상위의 부모 등)은 `child_revived`로 따라온다. 같은 워크플로우가 경우 3과
+       `child_revived`로 두 번 되살려지는 것이 결과를 바꾸지 않는지, 재시도된 자식 안의 대상을 rerun하는 경우를 조각 6f가 시험한다.
+       자식이 아직 `FAILED`일 때 위가 결정하지 않도록 2의 답(자식 커밋과 결정 저장)을 받은 뒤에 3을 보낸다.
   - 같은 ID를 돌려준다. 동적 FORK(`FORK_JOIN_DYNAMIC`)는 MVP 태스크 타입이 아니므로(ADR 0003 결정 4) 그 분기는 옮기지 않는다.
 - **skiptask(새 기능).** upstream `skipTaskFromWorkflow`다. `RUNNING`이 아니면, 정의에 그 ref가 없으면, 이미 그 ref의 태스크가
   있으면 각각 upstream 문구의 `:invalid_state`(500)다. 통과하면 `SKIPPED` 태스크(`taskType`은 정의 태스크의 `name`, 새 ID,
@@ -164,16 +169,18 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
     시작을 outbox로 비동기 전달하고, 이 전달은 호출자가 답을 받은 뒤에 돈다(ADR 0021 결정 4). upstream은 이 일을 종료 안에서
     동기로 끝낸 뒤 지운다. outbox를 같이 지우면 이 전달이 사라지므로 다음처럼 한다.
     1. 프로세스는 지우기 이벤트를 받은 그 자리에서 판정하고 바로 답한다. 기다리거나 답을 미루지 않는다(그 사이 outbox 실행기의
-       결과와 재시도 메시지를 처리해야 하고, 미룬 답은 호출자 timeout 뒤에 지우는 일을 만든다). 실행기가 돌고 있거나
-       `pending_outbox`가 비어 있지 않으면 지우지 않고 "전달 대기" 오류로 답한다. 비어 있으면 그 자리에서 `archiveWorkflow` 조건을
+       결과와 재시도 메시지를 처리해야 하고, 미룬 답은 호출자 timeout 뒤에 지우는 일을 만든다). outbox 실행기 상태
+       `runner`가 `nil`이 아니거나(`{:running, _}`, `{:blocked, _, _}`, `{:delayed, _}`, 프로세스가 멈출 수 있는지 보는 `ending?`와 같은
+       조건) `pending_outbox`가 비어 있지 않으면 지우지 않고 "전달 대기" 오류로 답한다. 비어 있으면 그 자리에서 `archiveWorkflow` 조건을
        본 뒤 지우고 `:ok`로 답한 다음 멈춘다.
     2. `Archon.Runtime.Lifecycle.remove`는 "전달 대기"를 받으면 짧은 간격(100ms)으로 같은 이벤트를 다시 보낸다. 마감(호출 timeout보다
        짧게, 예 10초)까지 비지 않으면 아무것도 지우지 않고 500 `retryable` 참으로 답한다. 판정이 매번 프로세스 안에서 새로 되므로
        그 사이 다른 클라이언트의 retry·restart가 워크플로우를 되살렸으면 `archiveWorkflow` 조건이 다시 걸린다.
     3. "전달 대기"는 `ArchonWeb.Errors`가 `TransientException`처럼 바꾸는 새 오류 태그다(고정 문구, ADR 0023 결정 4). 같이,
        `WorkflowServer.call/4`가 exit를 바꾼 `{:error, :timeout}`이 지금 `retryable` 거짓 500인 것(ADR 0023 결정 4 표의 "호출
-       timeout·exit"와 어긋난 Phase 5 코드)도 6d가 `retryable` 참으로 고치고 시험한다. 이 수정은 종료 등 기존 경로의 timeout 응답도
-       바꾼다.
+       timeout·exit"와 어긋난 Phase 5 코드)도 6d가 `retryable` 참으로 고치고 시험한다. timeout만이 아니라 `call/4`가 돌려주는 모든 exit(`:shutdown`, `:killed`, 두 번째 시도의
+       `:noproc` 등)와 활성화 실패 `{:error, :unavailable}`도 `{:error, {:exit, 이유}}`로 바꿔 `retryable` 참으로 한다(`ArchonWeb.Errors`가
+       이미 그렇게 다룬다. outbox의 `Outbox.classify`는 둘 다 재시도로 보므로 동작이 같다). 이 수정은 종료 등 기존 경로의 응답도 바꾼다.
     그래서 `Store.remove_workflow/1`이 outbox를 지울 때 남은 항목은 없다. 조각 6d는 "실행 중 자식이 있는 부모의
     terminate-remove"(자식이 종료됨)와 "부모가 기다리는 자식의 terminate-remove"(부모 태스크가 반영됨)를 두 백엔드에서 시험한다.
   - 성공은 200 body 없음이다(terminate-remove도 같다).
@@ -257,7 +264,8 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   cannot be null."`와 `@Size(max = 1000) "Cannot process more than 1000 workflows. Please use multiple requests."`(400)다. 응답은 기존
   `Archon.Domain.BulkResponse`(이름 자리에 workflowId)다. ID마다 차례로 단건 함수를 부르고, 실패는 그 ID의 문구로 넣고 계속한다.
   `retry`는 `resumeSubworkflowTasks`가 늘 거짓이다. 쿼리는 upstream 그대로다: `restart`의 `useLatestDefinitions`(기본 false),
-  `terminate`의 `reason`, `remove`의 `archiveWorkflow`(기본 true), `terminate-remove`의 `archiveWorkflow`(기본 true)와 `reason`. `terminate-remove`는 upstream
+  `terminate`의 `reason`, `remove`의 `archiveWorkflow`(기본 true), `terminate-remove`의 `archiveWorkflow`(기본 true)와 `reason`.
+  `remove`·`terminate-remove`는 단건과 같은 `Archon.Runtime.Lifecycle` 함수를 ID마다 부르므로 결정 3의 전달 대기도 ID마다 한다. `terminate-remove`는 upstream
   `WorkflowBulkServiceImpl`의 두 `try`를 그대로 따른다: 종료와 지우기 각각이 성공하면 ID를 성공 목록에 더하므로(성공한 ID는 두 번
   나옴) `COMPLETED` 워크플로우는 종료 실패로 오류에 들어가면서도 지워진다. 단건 terminate-remove와 다르지만 upstream 응답 그대로다.
   오류 문구가 없는 오류(`null` 메시지)는 upstream처럼 값이 `null`인 항목이다. Elixir 용어를 내보내지 않는 규칙(ADR 0023 결정 4)은
@@ -341,6 +349,9 @@ ADR 0023의 목록에 더해 다음이 생긴다.
 - **목록 순서**(결정 4·6): correlated, `running/{name}`, `latest-versions`는 정해진 순서다. upstream은 순서를 정하지 않는다.
 - **`validate`의 스키마 거절**(결정 6): ADR 0023 결정 5의 거절을 등록 전에 알려 준다. upstream은 통과시킨다.
 - **rerun의 동적 FORK 분기**(결정 2): MVP 태스크 타입 밖이라 옮기지 않는다.
+- **remove의 전달 대기 500**(결정 3): outbox 전달이 마감(예 10초)까지 끝나지 않으면 `archiveWorkflow`와 상관없이 아무것도 지우지
+  않고 500 `retryable` 참이다. upstream은 종료의 부수 효과를 동기로 끝내므로 이 응답이 없다. bulk remove·terminate-remove는 ID마다
+  이 대기를 하므로 전달이 계속 실패하는 ID가 많으면 요청이 길어진다(받아들이는 비용).
 - **task 실행 로그**(결정 1): Later. `TaskResult.logs`를 저장하지 않는다(Phase 5와 같음).
 
 ## 대안
