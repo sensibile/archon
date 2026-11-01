@@ -27,9 +27,12 @@ ADR 0021 결과 절은 이 경로를 태스크 갱신 REST가 외부에 열리�
   taskId를 조회 API로 알 수 있고, upstream처럼 시스템 태스크도 갱신할 수 있다(WAIT 등을 밖에서 끝내는 용도).
 - **대체값.** `Archon.Domain.Task.sub_workflow_id/1`은 저장된 값이 비면 `outputData["subWorkflowId"]`, 그다음
   `inputData["subWorkflowId"]`를 쓴다(upstream `getSubWorkflowId`). 저장된 값이 아직 없는 태스크의 종료(`Step.Terminate`)는 그
-  ID를 대상으로 삼는다. 출력의 키는 worker가 넣을 수 있다. 입력의 키는 SUB_WORKFLOW 매퍼가 정의의 `inputParameters`를
-  `workflowInput` 아래에만 넣으므로(upstream `SubWorkflowTaskMapper`) 정의로는 생기지 않고, 저장된 옛 데이터에만 있을 수 있다.
-  (2026-11-01 조각 5b 정정: 처음 이 절은 `inputParameters.subWorkflowId`가 정의만으로 이 경로를 만든다고 적었다.)
+  ID를 대상으로 삼는다. 출력의 키는 worker가 넣을 수 있다. 입력의 키는 처음 스케줄할 때는 생기지 않는다. SUB_WORKFLOW 매퍼가
+  정의의 `inputParameters`를 `workflowInput` 아래에만 넣기 때문이다(upstream `SubWorkflowTaskMapper`). 그러나 schemaVersion 2
+  워크플로우에서 태스크를 재시도하면 `inputParameters`를 다시 계산해 입력에 그대로 병합한다(upstream `DeciderService#retry`,
+  `Archon.Decider.Retry`). 그래서 `inputParameters`에 `subWorkflowId`(예: `${workflow.parentWorkflowId}`)를 넣은 정의는,
+  재시도 태스크가 아직 자식을 시작하지 않은 동안(재시도 지연) 그 ID를 종료 대상으로 만든다. 이 경로는 worker 없이 정의만으로
+  생긴다. (2026-11-01 조각 5b 정정: 처음 이 절은 첫 스케줄에도 이 경로가 생긴다고 적었다.)
 - **사용처.** 부모 종료의 자식 취소(`Step.Terminate`, 종료 경로 `pre`의 `Effects` → `SubWorkflows.terminate_child/4`, outbox의
   `:terminate_sub_workflow`), 형제 실패 자식 재시도(`:retry_sub_workflow`, `SubWorkflows.retry_child/2`), `resumeSubworkflowTasks`
   하강(`Archon.Runtime.Lifecycle.last_failed/3`), 자식 상태 읽기와 반영(`WorkflowServer.workflows/1`·`failed_children/2`가
@@ -127,9 +130,9 @@ L7은 서로를 자식으로 가리키는 워크플로우가 생길 수 없으�
 - 시험
   - worker가 SUB_WORKFLOW 태스크에 다른 워크플로우의 ID를 넣어 갱신해도 저장된 `subWorkflowId`와 출력이 바뀌지 않는다.
   - 부모 종료가 관계없는 워크플로우(L8), 부모 자신, 조상을 취소하지 않고 그 프로세스를 활성화하지 않는다.
-  - 조부모 A를 종료할 때, 자식 P의 SUB_WORKFLOW 태스크에 저장된 `subWorkflowId`가 A여도(결정 1 전에 저장된 데이터) call
-    timeout 없이 끝난다(지금 `cancel_later/2`가 막는 교착). 처음에는 `inputParameters.subWorkflowId`로 만들 계획이었으나 그
-    값은 태스크 입력의 `subWorkflowId`가 되지 않으므로(맥락의 대체값 정정) 저장소에 직접 쓴 데이터로 시험한다.
+  - 조부모 A를 종료할 때, 자식 P의 SUB_WORKFLOW 재시도 태스크(저장된 `subWorkflowId` 없음)의 `inputParameters.subWorkflowId`가
+    `${workflow.parentWorkflowId}`(즉 A)여도 call timeout 없이 끝난다(지금 `cancel_later/2`가 막는 교착). 맥락의 정정대로
+    이 값은 재시도 태스크에만 생긴다. 저장된 `subWorkflowId`가 A인 옛 데이터로도 같은 것을 시험한다.
   - 저장된 태스크의 `subWorkflowId`들이 서로를 가리켜 순환을 이루도록 위조해도(부모 필드는 순환 없음) 종료가 call timeout 없이
     끝난다(L7). 부모 필드 자체가 손상된 저장 데이터는 범위 밖이다.
   - 형제 자식 재시도가 소유권이 맞지 않는 대상을 호출하지 않고 ack된다.

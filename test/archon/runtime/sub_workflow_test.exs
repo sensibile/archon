@@ -696,6 +696,10 @@ defmodule Archon.Runtime.SubWorkflowTest do
         Runtime.store().commit(id, %Archon.Runtime.Commit{
           upsert_tasks: [%{sub_task | sub_workflow_id: child_id}]
         })
+
+      # nothing activated the workflow again in between to save its own state over it
+      assert WorkflowServer.whereis(id) == nil
+      assert task(id, ref).sub_workflow_id == child_id
     end
 
     test "a worker's subWorkflowId leaves the stored child and output alone" do
@@ -742,8 +746,9 @@ defmodule Archon.Runtime.SubWorkflowTest do
     end
 
     # The deadlock cancel_later/2 used to prevent: the grandparent's pre termination calls the
-    # parent, whose own pre termination would call the grandparent back.
-    test "a child ID naming the parent's parent ends without a call timeout (L6, L7)" do
+    # parent, whose own pre termination would call the grandparent back. Here the stored ID names
+    # it; the next test reaches the same through a definition.
+    test "a stored child ID naming the parent's parent ends without a call timeout (L6, L7)" do
       input = %{
         "param1" => "p1 value",
         "param2" => "p2 value",
@@ -763,6 +768,53 @@ defmodule Archon.Runtime.SubWorkflowTest do
       assert workflow(grandparent).status == :terminated
       assert await_status(parent, :terminated)
       assert task(parent, "t2").status == :canceled
+    end
+
+    # The definition-only path (ADR 0024, context): a retried SUB_WORKFLOW task takes its
+    # inputParameters again (schemaVersion 2, upstream DeciderService#retry), so until the retry
+    # starts its child, Task.sub_workflow_id/1 is the input's subWorkflowId.
+    @names_parent ~S"""
+    {"name": "ownership_names_parent", "version": 1, "schemaVersion": 2, "tasks": [
+      {"name": "sub_workflow_task", "taskReferenceName": "st", "type": "SUB_WORKFLOW",
+       "inputParameters": {"subWorkflowId": "${workflow.parentWorkflowId}"},
+       "subWorkflowParam": {"name": "sub_workflow", "version": 1}, "retryCount": 1}]}
+    """
+
+    @grandparent ~S"""
+    {"name": "ownership_grandparent", "version": 1, "tasks": [
+      {"name": "sub_workflow_task", "taskReferenceName": "st", "type": "SUB_WORKFLOW",
+       "inputParameters": {},
+       "subWorkflowParam": {"name": "ownership_names_parent", "version": 1}, "retryCount": 0}]}
+    """
+
+    test "a retried task whose input names the parent's parent ends without a call timeout" do
+      define(@names_parent)
+      define(@grandparent)
+      grandparent = start("ownership_grandparent", %{})
+      parent = child_of(grandparent, "st")
+      leaf = child_of(parent, "st")
+      t = poll(leaf, "t1")
+
+      WorkflowServer.update(%TaskResult{
+        workflow_instance_id: leaf,
+        task_id: t.task_id,
+        status: :failed
+      })
+
+      retried =
+        eventually(fn ->
+          case Enum.filter(workflow(parent).tasks, &(&1.reference_task_name == "st")) do
+            [_failed, %Task{status: :scheduled} = retried] -> retried
+            _other -> nil
+          end
+        end)
+
+      assert {retried.sub_workflow_id, Task.sub_workflow_id(retried)} == {nil, grandparent}
+
+      {micros, :ok} = :timer.tc(fn -> Runtime.terminate_workflow(grandparent, "stop") end)
+      assert micros < 2_000_000
+      assert workflow(grandparent).status == :terminated
+      assert await_status(parent, :terminated)
     end
 
     # Stored subWorkflowIds that point at each other while the parent fields do not loop.
@@ -827,7 +879,9 @@ defmodule Archon.Runtime.SubWorkflowTest do
 
       assert :ok = Runtime.Lifecycle.retry(id, true)
       assert await_status(id, :running)
+      assert eventually(fn -> Runtime.store().pending_outbox(id) == [] end)
       assert workflow(other_child).status == :failed
+      assert WorkflowServer.whereis(other_child) == nil
     end
   end
 

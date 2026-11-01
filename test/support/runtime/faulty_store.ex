@@ -14,6 +14,8 @@ defmodule Archon.FaultyStore do
 
   @behaviour Archon.Runtime.Store
 
+  alias Archon.Runtime.Store
+
   @key {__MODULE__, :installed}
 
   @doc "Puts the store in front of the runtime's for the rest of the test."
@@ -32,7 +34,7 @@ defmodule Archon.FaultyStore do
     :ok
   end
 
-  for {name, arity} <- Archon.Runtime.Store.behaviour_info(:callbacks) do
+  for {name, arity} <- Store.behaviour_info(:callbacks) do
     args = Macro.generate_arguments(arity, __MODULE__)
 
     @impl true
