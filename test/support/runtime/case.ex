@@ -14,7 +14,7 @@ defmodule Archon.RuntimeCase do
   alias Archon.Contract
   alias Archon.Domain.{Task, WorkflowDef}
   alias Archon.Runtime
-  alias Archon.Runtime.WorkflowServer
+  alias Archon.Runtime.{Recovery, Waker, WorkflowServer}
 
   using do
     quote do
@@ -74,6 +74,61 @@ defmodule Archon.RuntimeCase do
 
       value ->
         value
+    end
+  end
+
+  @doc """
+  Empties `queues`, shared with other tests, for a test that polls them, and keeps them so: a
+  workflow left by another test that is activated would have its recovery or wake check queue its
+  scheduled task again. So `Archon.Runtime.Waker` is suspended until the test exits, the
+  `Archon.Runtime.Recovery` run of a runtime restart is waited for, and the workflow processes
+  and outbox runners left running are stopped before the messages are removed.
+  """
+  @spec isolate_queues([String.t()]) :: :ok
+  def isolate_queues(queues) do
+    :ok = :sys.suspend(Waker)
+
+    ExUnit.Callbacks.on_exit(fn ->
+      with(pid when is_pid(pid) <- Process.whereis(Waker), do: :sys.resume(pid))
+    end)
+
+    eventually(fn -> not recovery_running?() end, 3_000)
+    stop_workflows()
+    for queue <- queues, id <- pop_all(queue), do: Runtime.queue().remove(queue, id)
+    :ok
+  end
+
+  defp recovery_running? do
+    Archon.Runtime.Supervisor
+    |> Supervisor.which_children()
+    |> Enum.any?(&match?({Recovery, pid, _type, _modules} when is_pid(pid), &1))
+  end
+
+  # A runner may activate a workflow and a process may start a runner, so until neither is left.
+  defp stop_workflows do
+    runners = Elixir.Task.Supervisor.children(Archon.Runtime.TaskSupervisor)
+
+    servers =
+      for {_id, pid, _type, _modules} <-
+            DynamicSupervisor.which_children(Archon.Runtime.WorkflowSupervisor),
+          is_pid(pid),
+          do: pid
+
+    if runners != [] or servers != [] do
+      for pid <- runners,
+          do: Elixir.Task.Supervisor.terminate_child(Archon.Runtime.TaskSupervisor, pid)
+
+      for pid <- servers,
+          do: DynamicSupervisor.terminate_child(Archon.Runtime.WorkflowSupervisor, pid)
+
+      stop_workflows()
+    end
+  end
+
+  defp pop_all(queue) do
+    case Runtime.queue().pop(queue, 100, 0) do
+      [] -> []
+      ids -> ids ++ pop_all(queue)
     end
   end
 
