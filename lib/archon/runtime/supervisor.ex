@@ -11,7 +11,7 @@ defmodule Archon.Runtime.Supervisor do
       ├── Archon.Runtime.Postgres.NodeLock   (Postgres backend: one node, write epoch)
       ├── metadata, store and queue          (memory backend, the default)
       ├── Archon.Runtime.Registry            (workflow ID → process, {:outbox, ID} → runner)
-      ├── Archon.Runtime.TaskSupervisor      (outbox runners and ancestor cancels, ADR 0021)
+      ├── Archon.Runtime.TaskSupervisor      (outbox runners, ADR 0021)
       ├── Archon.Runtime.WorkflowSupervisor  (a DynamicSupervisor of Archon.Runtime.WorkflowServer)
       ├── Archon.Runtime.Recovery            (activates the workflows to run, once)
       └── Archon.Runtime.Waker               (activates the due workflows periodically)

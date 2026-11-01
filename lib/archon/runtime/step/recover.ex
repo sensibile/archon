@@ -8,7 +8,8 @@
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the repair runs in the workflow's own process when it is activated, after
 # an isolated exception and on a :wake that changed nothing, and also covers what the effects
-# around a commit may have left undone (ADR 0018, decisions 2 and 7).
+# around a commit may have left undone (ADR 0018, decisions 2 and 7); a task's child counts only
+# when it belongs to the task (ADR 0024, decision 2).
 
 defmodule Archon.Runtime.Step.Recover do
   @moduledoc """
@@ -35,7 +36,7 @@ defmodule Archon.Runtime.Step.Recover do
   """
 
   alias Archon.Domain.{Task, Workflow}
-  alias Archon.Runtime.Step.{Async, Decide, Lifecycle, Schedule, State, Terminate}
+  alias Archon.Runtime.Step.{Async, Decide, Env, Lifecycle, Schedule, State, Terminate}
 
   @doc "The recovery check of a `:recover` event."
   @spec recover(State.t()) :: State.t()
@@ -143,9 +144,9 @@ defmodule Archon.Runtime.Step.Recover do
           task.task_type == "SUB_WORKFLOW",
           task.status == :canceled,
           {:terminate_sub_workflow, id, _reason} = effect = Terminate.cancel_child(wf, task),
-          match?({:ok, %Workflow{}}, Map.fetch(env.workflows, id)),
-          not Workflow.terminal?(env.workflows[id].status),
-          not Lifecycle.revived_after?(env.workflows[id], wf),
+          {:ok, %Workflow{} = child} <- [Env.child(env, task, id)],
+          not Workflow.terminal?(child.status),
+          not Lifecycle.revived_after?(child, wf),
           reduce: state do
         state -> State.post(state, effect)
       end

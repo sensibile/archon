@@ -9,7 +9,8 @@ defmodule Archon.Runtime.OutboxTest do
   delay after a failure, never by two runners at once, and keep a terminal workflow's process
   alive; a parent's notice is a call that is sent again until the parent saved it (L1); a child
   that ran again after its parent ended is neither terminated by a termination run again nor by
-  its own recovery check (L2); an ancestor is cancelled under the task supervisor (L6).
+  its own recovery check (L2); an entry on a workflow that is not the owner's child calls nothing,
+  and a failed ownership read runs the entry again (ADR 0024, decision 2).
   """
 
   use Archon.RuntimeCase
@@ -542,50 +543,70 @@ defmodule Archon.Runtime.OutboxTest do
     end
   end
 
-  describe "an ancestor named as a child (L6)" do
-    test "is cancelled from a task under the task supervisor" do
-      grandparent = start("outbox_grandparent")
-      parent = child_of(grandparent)
-      sub_task = eventually(fn -> (st = task(parent, "st")) && st.sub_workflow_id && st end)
+  describe "the ownership check before a call (ADR 0024, decision 2)" do
+    test "a store read that fails keeps the termination, which runs again" do
+      {parent, child} = parent_and_child()
       test = self()
+      first? = once()
 
-      assert %Task{} =
-               WorkflowServer.update(%TaskResult{
-                 workflow_instance_id: parent,
-                 task_id: sub_task.task_id,
-                 status: :in_progress,
-                 sub_workflow_id: grandparent
-               })
+      Archon.FaultyStore.install(fn
+        :get_workflow, [^child, false] ->
+          if first?.() do
+            send(test, :raised)
+            raise "store down"
+          end
 
-      RuntimeHooks.install(
-        hook: fn
-          :env, ^grandparent, {:cancel_by_parent, _reason, nil} ->
-            send(test, {:cancelling, self()})
+        _callback, _args ->
+          :ok
+      end)
 
-            receive do
-              :release -> :ok
-            after
-              5_000 -> :ok
-            end
+      activate_with(parent, [{:terminate_sub_workflow, child, "stop"}])
 
-          _point, _id, _data ->
-            :ok
-        end
-      )
+      assert_receive :raised, 2_000
+      assert await_status(child, :terminated)
+      assert eventually(fn -> pending(parent) == [] end, 500)
+    end
 
-      assert :ok = Runtime.terminate_workflow(parent, "stop")
-      assert_receive {:cancelling, grandparent_pid}, 2_000
+    test "a store read that fails keeps the retry of a child, which runs again" do
+      {parent, child} = parent_and_child()
+      assert %Task{status: :failed} = finish(child, :failed)
+      assert await_status(parent, :failed)
+      test = self()
+      first? = once()
 
-      # the outbox runners are registered as {:outbox, id}; the cancel is not
-      cancels =
-        for pid <- Elixir.Task.Supervisor.children(Archon.Runtime.TaskSupervisor),
-            Registry.keys(Archon.Runtime.Registry, pid) == [],
-            do: pid
+      Archon.FaultyStore.install(fn
+        :get_workflow, [^child, false] ->
+          if first?.() do
+            send(test, :raised)
+            raise "store down"
+          end
 
-      assert cancels != []
+        _callback, _args ->
+          :ok
+      end)
 
-      send(grandparent_pid, :release)
-      assert await_status(grandparent, :terminated)
+      activate_with(parent, [{:retry_sub_workflow, child}])
+
+      assert_receive :raised, 2_000
+      assert await_status(child, :running)
+      assert eventually(fn -> pending(parent) == [] end, 500)
+    end
+
+    test "the retry of a workflow that is not a child is acked without calling it" do
+      {other, other_child} = parent_and_child()
+      assert %Task{status: :failed} = finish(other_child, :failed)
+      assert await_status(other, :failed)
+      await_down(other_child)
+      parent = start("outbox_parent")
+
+      for target <- [other_child, other, parent, missing()] do
+        activate_with(parent, [{:retry_sub_workflow, target}])
+        assert eventually(fn -> pending(parent) == [] end)
+      end
+
+      assert workflow(other_child).status == :failed
+      assert workflow(other).status == :failed
+      assert WorkflowServer.whereis(other_child) == nil
     end
   end
 end

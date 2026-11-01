@@ -8,7 +8,8 @@
 # core/.../execution/tasks/Join.java (getEvaluationOffset) and core/.../execution/tasks/Wait.java
 # (getEvaluationOffset) at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the workflow process evaluates its asynchronous system tasks when an
-# event calls for it instead of polling a system task queue (ADR 0018, decision 6).
+# event calls for it instead of polling a system task queue (ADR 0018, decision 6), and a
+# SUB_WORKFLOW reads its child only when the child belongs to it (ADR 0024, decision 2).
 
 defmodule Archon.Runtime.Step.Async do
   @moduledoc """
@@ -26,7 +27,7 @@ defmodule Archon.Runtime.Step.Async do
   alias Archon.Decider.SystemTask.Join
   alias Archon.Decider.SystemTask.SubWorkflow, as: SubWorkflowTask
   alias Archon.Domain.{Task, Workflow, WorkflowTask}
-  alias Archon.Runtime.Step.{Schedule, State, SubWorkflow, Tasks}
+  alias Archon.Runtime.Step.{Env, Schedule, State, SubWorkflow, Tasks}
 
   # TaskDef.ONE_HOUR
   @one_hour 3600
@@ -76,7 +77,7 @@ defmodule Archon.Runtime.Step.Async do
   # Due on a :wake: a task whose delay is over (a running SUB_WORKFLOW also needs its child to
   # have been read).
   defp due?(%State{env: env}, %Task{task_type: "SUB_WORKFLOW", status: :in_progress} = task),
-    do: Map.has_key?(env.workflows, Task.sub_workflow_id(task) || "")
+    do: Env.child(env, task, Task.sub_workflow_id(task)) != :error
 
   defp due?(%State{now: now}, task), do: due_time(task) <= now
 
@@ -183,7 +184,12 @@ defmodule Archon.Runtime.Step.Async do
     do: wf |> Join.execute(task) |> elem(1)
 
   defp execute(%State{env: env}, %Task{task_type: "SUB_WORKFLOW"} = task) do
-    child = Map.get(env.workflows, Task.sub_workflow_id(task) || "")
+    child =
+      case Env.child(env, task, Task.sub_workflow_id(task)) do
+        {:ok, child} -> child
+        :error -> nil
+      end
+
     task |> SubWorkflowTask.execute(child) |> elem(1)
   end
 

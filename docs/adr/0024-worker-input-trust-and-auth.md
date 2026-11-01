@@ -26,9 +26,10 @@ ADR 0021 결과 절은 이 경로를 태스크 갱신 REST가 외부에 열리�
   `WorkflowExecutorOps.updateTask`의 `task.setSubWorkflowId(taskResult.getSubWorkflowId())`). worker는 SUB_WORKFLOW 태스크의
   taskId를 조회 API로 알 수 있고, upstream처럼 시스템 태스크도 갱신할 수 있다(WAIT 등을 밖에서 끝내는 용도).
 - **대체값.** `Archon.Domain.Task.sub_workflow_id/1`은 저장된 값이 비면 `outputData["subWorkflowId"]`, 그다음
-  `inputData["subWorkflowId"]`를 쓴다(upstream `getSubWorkflowId`). 정의를 쓰는 쪽이 SUB_WORKFLOW 태스크의 `inputParameters`에
-  `subWorkflowId`(예: `${workflow.parentWorkflowId}`)를 넣으면, 저장된 값이 아직 없는 태스크의 종료(`Step.Terminate`)가 그 ID를
-  대상으로 삼는다. 이 경로는 worker 없이 정의만으로 생긴다.
+  `inputData["subWorkflowId"]`를 쓴다(upstream `getSubWorkflowId`). 저장된 값이 아직 없는 태스크의 종료(`Step.Terminate`)는 그
+  ID를 대상으로 삼는다. 출력의 키는 worker가 넣을 수 있다. 입력의 키는 SUB_WORKFLOW 매퍼가 정의의 `inputParameters`를
+  `workflowInput` 아래에만 넣으므로(upstream `SubWorkflowTaskMapper`) 정의로는 생기지 않고, 저장된 옛 데이터에만 있을 수 있다.
+  (2026-11-01 조각 5b 정정: 처음 이 절은 `inputParameters.subWorkflowId`가 정의만으로 이 경로를 만든다고 적었다.)
 - **사용처.** 부모 종료의 자식 취소(`Step.Terminate`, 종료 경로 `pre`의 `Effects` → `SubWorkflows.terminate_child/4`, outbox의
   `:terminate_sub_workflow`), 형제 실패 자식 재시도(`:retry_sub_workflow`, `SubWorkflows.retry_child/2`), `resumeSubworkflowTasks`
   하강(`Archon.Runtime.Lifecycle.last_failed/3`), 자식 상태 읽기와 반영(`WorkflowServer.workflows/1`·`failed_children/2`가
@@ -60,7 +61,7 @@ OpenAPI 스냅샷(`priv/contract/openapi.json`)에 없다.
 ### 2. 자식으로 쓰는 워크플로우는 소유권을 확인한다
 
 어떤 워크플로우 C를 워크플로우 P의 SUB_WORKFLOW 태스크 T의 자식으로 쓰려면 C가 P의 자식이어야 한다. 이 확인은 ID가 어디서
-왔든(worker, 정의 입력의 대체값, 저장된 옛 데이터) 적용하고, 두 필드는 바뀌지 않으므로 확인과 사용 사이에 경합이 없다.
+왔든(worker, 출력·입력의 대체값, 저장된 옛 데이터) 적용하고, 두 필드는 바뀌지 않으므로 확인과 사용 사이에 경합이 없다.
 
 - **호출은 보내는 쪽이 먼저 확인한다.** 자식 취소(`SubWorkflows.terminate_child/4`, 종료 경로 `pre`와 outbox 모두)와 형제 자식
   재시도(`SubWorkflows.retry_child/2`)는 대상을 호출하기 전에 저장소에서 대상을 읽어(`Runtime.get_workflow(id, false)`)
@@ -101,7 +102,7 @@ OpenAPI 스냅샷(`priv/contract/openapi.json`)에 없다.
 - `SubWorkflows`의 `ancestor?/3`, `cancel_later/2`, `terminate_child/4`의 `in_process:` 옵션과 조상 분기, `Effects`가 그 옵션을 넘기는
   곳. 종료 경로 `pre`의 조상 취소 Task가 없어지므로 L6의 남은 빈틈도 없어진다.
 - `retry_child/2`의 조상 건너뛰기.
-- `Lifecycle.last_failed/3`의 `seen`은 결정 2로 필요 없어지지만, 저장소가 손상된 경우의 방어로 남겨도 된다(조각이 정한다).
+- `Lifecycle.last_failed/3`의 `seen`은 결정 2로 필요 없어지지만, 저장소가 손상된 경우의 방어로 남겨도 된다(조각이 정한다). 조각 5b는 남겼다.
 
 L7은 서로를 자식으로 가리키는 워크플로우가 생길 수 없으므로 닫힌다. L8은 관계없는 워크플로우가 소유권 확인을 통과할 수
 없으므로 닫힌다.
@@ -126,8 +127,9 @@ L7은 서로를 자식으로 가리키는 워크플로우가 생길 수 없으�
 - 시험
   - worker가 SUB_WORKFLOW 태스크에 다른 워크플로우의 ID를 넣어 갱신해도 저장된 `subWorkflowId`와 출력이 바뀌지 않는다.
   - 부모 종료가 관계없는 워크플로우(L8), 부모 자신, 조상을 취소하지 않고 그 프로세스를 활성화하지 않는다.
-  - 조부모 A를 종료할 때, 자식 P의 SUB_WORKFLOW 태스크(저장된 `subWorkflowId` 없음)의 `inputParameters.subWorkflowId`가
-    `${workflow.parentWorkflowId}`(즉 A)여도 call timeout 없이 끝난다(지금 `cancel_later/2`가 막는 교착).
+  - 조부모 A를 종료할 때, 자식 P의 SUB_WORKFLOW 태스크에 저장된 `subWorkflowId`가 A여도(결정 1 전에 저장된 데이터) call
+    timeout 없이 끝난다(지금 `cancel_later/2`가 막는 교착). 처음에는 `inputParameters.subWorkflowId`로 만들 계획이었으나 그
+    값은 태스크 입력의 `subWorkflowId`가 되지 않으므로(맥락의 대체값 정정) 저장소에 직접 쓴 데이터로 시험한다.
   - 저장된 태스크의 `subWorkflowId`들이 서로를 가리켜 순환을 이루도록 위조해도(부모 필드는 순환 없음) 종료가 call timeout 없이
     끝난다(L7). 부모 필드 자체가 손상된 저장 데이터는 범위 밖이다.
   - 형제 자식 재시도가 소유권이 맞지 않는 대상을 호출하지 않고 ack된다.
@@ -136,9 +138,9 @@ L7은 서로를 자식으로 가리키는 워크플로우가 생길 수 없으�
   - 소유권 확인의 저장소 읽기가 실패하면 outbox 항목이 ack되지 않고 재시도된다.
   - 기존 런타임 시험 전부를 두 백엔드에서 통과한다. 위조 ID를 전제로 한 기존 시험(자기·조상 취소 등)은 새 규칙의 기대값으로 바꾼다.
 - 건드리는 파일: `lib/archon/runtime/step/{tasks,env,async,lifecycle,recover}.ex`,
-  `lib/archon/runtime/{sub_workflows,lifecycle,effects}.ex`, `test/archon/runtime/{sub_workflow,lifecycle,outbox,step_tasks,tasks,
-  recovery,step}_test.exs`. `workflow_server.ex`(자식 읽기는 그대로)와 `step/terminate.ex`(취소 대상 선택은 그대로, 확인은
-  `terminate_child/4`가 함)는 고치지 않는다. Effect·outbox 항목 모양을 바꾸지 않으므로 `Store.Postgres`의 인코딩과 `outbox.ex`도
+  `lib/archon/runtime/{sub_workflows,lifecycle,effects}.ex`, `test/archon/runtime/{sub_workflow,lifecycle,outbox,step_tasks,
+  step}_test.exs`, 저장소 읽기 실패를 주입하는 시험용 래퍼 `test/support/runtime/faulty_store.ex`. `workflow_server.ex`(자식
+  읽기는 그대로)와 `step/terminate.ex`(취소 대상 선택은 그대로, 확인은 `terminate_child/4`가 함)는 고치지 않는다. Effect·outbox 항목 모양을 바꾸지 않으므로 `Store.Postgres`의 인코딩과 `outbox.ex`도
   고치지 않는다.
 
 ## upstream과 의도적으로 다른 점
@@ -156,8 +158,7 @@ L7은 서로를 자식으로 가리키는 워크플로우가 생길 수 없으�
   프로세스를 다시 호출하는 동안 확인할 수 없어 교착이 남는다. 메시지와 outbox 항목 모양도 바뀐다. 보내는 쪽 확인을 고른다.
 - **소유권 확인만, `subWorkflowId` 반영은 유지:** 취소·재시도는 막지만 worker가 저장값을 바꾸면 부모가 자기 자식을 잃는다(읽기에서
   걸러져 "자식 없음"이 된다). 결정 1로 저장값을 지킨다.
-- **`subWorkflowId` 고정만, 소유권 확인 없음:** worker 경로는 닫지만 정의의 `inputParameters.subWorkflowId` 대체값과 저장된 옛
-  데이터가 남는다.
+- **`subWorkflowId` 고정만, 소유권 확인 없음:** worker 경로는 닫지만 출력·입력의 대체값과 저장된 옛 데이터가 남는다.
 - **공유 토큰 인증 추가:** 설정하면 모든 `/api` 요청에 고정 토큰을 요구한다. stock SDK는 key/secret → 토큰 흐름만 있어 헤더를
   직접 넣는 클라이언트만 붙는다. BOSS가 Later로 미뤘다.
 - **Orkes 호환 토큰과 애플리케이션별 권한:** stock SDK의 key/secret 설정으로 붙지만 OSS 계약·픽스처에 없는 경로이고 조각이 2~3개

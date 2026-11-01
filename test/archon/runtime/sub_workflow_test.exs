@@ -634,61 +634,6 @@ defmodule Archon.Runtime.SubWorkflowTest do
   end
 
   describe "the effects on their own" do
-    test "a worker-supplied child ID naming the parent does not block the parent's termination" do
-      {id, child_id} = start_with_child("sub_workflow")
-      sub_task = task(id, "t2")
-
-      assert %Task{sub_workflow_id: ^id} =
-               WorkflowServer.update(%TaskResult{
-                 workflow_instance_id: id,
-                 task_id: sub_task.task_id,
-                 status: :in_progress,
-                 sub_workflow_id: id
-               })
-
-      assert Runtime.terminate_workflow(id, "stop") == :ok
-      assert workflow(id).status == :terminated
-      assert task(id, "t2").status == :canceled
-      # the task no longer names the real child: it is not cancelled now (the recovery check ends
-      # it later)
-      assert workflow(child_id).status == :running
-    end
-
-    test "a worker-supplied child ID naming an ancestor terminates it without a deadlock" do
-      input = %{
-        "param1" => "p1 value",
-        "param2" => "p2 value",
-        "subwf" => "integration_test_wf_with_sub_wf",
-        "nextSubwf" => "sub_workflow"
-      }
-
-      grandparent = start("integration_test_wf_with_sub_wf", input)
-      complete(grandparent, "t1")
-      parent = child_of(grandparent, "t2")
-      complete(parent, "t1")
-
-      sub_task =
-        eventually(fn ->
-          t = task(parent, "t2")
-          t.sub_workflow_id && t
-        end)
-
-      assert %Task{} =
-               WorkflowServer.update(%TaskResult{
-                 workflow_instance_id: parent,
-                 task_id: sub_task.task_id,
-                 status: :in_progress,
-                 sub_workflow_id: grandparent
-               })
-
-      # a synchronous cancel would wait for the grandparent, which calls back into the parent
-      {micros, :ok} = :timer.tc(fn -> Runtime.terminate_workflow(parent, "stop") end)
-      assert micros < 5_000_000
-      assert workflow(parent).status == :terminated
-      # the grandparent ends by the cancel or by the parent's notice, whichever comes first
-      assert await_status(grandparent, :terminated).status == :terminated
-    end
-
     test "a child ID that names the parent itself fails the ownership check" do
       {id, _child_id} = start_with_child("sub_workflow")
       sub_task = task(id, "t2")
@@ -731,6 +676,158 @@ defmodule Archon.Runtime.SubWorkflowTest do
                  workflow_id: Runtime.new_id()
              }) ==
                {:error, "No such workflow defined. name=archon_missing, version=null"}
+    end
+  end
+
+  describe "worker input and the ownership of a child (ADR 0024)" do
+    defp stop_process(id) do
+      with pid when is_pid(pid) <- WorkflowServer.whereis(id),
+           do: :ok = DynamicSupervisor.terminate_child(Archon.Runtime.WorkflowSupervisor, pid)
+
+      await_down(id)
+    end
+
+    # A stored child ID the runtime did not give (a worker's, saved before ADR 0024).
+    defp forge_child(id, ref, child_id) do
+      sub_task = task(id, ref)
+      stop_process(id)
+
+      :ok =
+        Runtime.store().commit(id, %Archon.Runtime.Commit{
+          upsert_tasks: [%{sub_task | sub_workflow_id: child_id}]
+        })
+    end
+
+    test "a worker's subWorkflowId leaves the stored child and output alone" do
+      {id, child_id} = start_with_child("sub_workflow")
+      other = start("sub_workflow", %{})
+      sub_task = task(id, "t2")
+
+      assert %Task{sub_workflow_id: ^child_id, output_data: output} =
+               WorkflowServer.update(%TaskResult{
+                 workflow_instance_id: id,
+                 task_id: sub_task.task_id,
+                 status: :in_progress,
+                 output_data: %{"subWorkflowId" => other, "x" => 1},
+                 sub_workflow_id: other
+               })
+
+      assert output == %{"subWorkflowId" => child_id, "x" => 1}
+      assert %Task{sub_workflow_id: ^child_id} = task(id, "t2")
+
+      assert Runtime.terminate_workflow(id, "stop") == :ok
+      assert await_status(child_id, :terminated)
+      assert workflow(other).status == :running
+    end
+
+    test "a parent's termination calls neither an unrelated workflow nor itself (L8)" do
+      victim = start("sub_workflow", %{})
+      stop_process(victim)
+
+      for target <- [victim, :self] do
+        {id, child_id} = start_with_child("sub_workflow")
+        target = if target == :self, do: id, else: target
+        forge_child(id, "t2", target)
+
+        {micros, :ok} = :timer.tc(fn -> Runtime.terminate_workflow(id, "stop") end)
+        assert micros < 2_000_000
+        assert workflow(id).status == :terminated
+        assert eventually(fn -> Runtime.store().pending_outbox(id) == [] end)
+        # the real child is no longer named: the recovery check of its own process ends it
+        assert workflow(child_id).status == :running
+      end
+
+      assert workflow(victim).status == :running
+      assert WorkflowServer.whereis(victim) == nil
+    end
+
+    # The deadlock cancel_later/2 used to prevent: the grandparent's pre termination calls the
+    # parent, whose own pre termination would call the grandparent back.
+    test "a child ID naming the parent's parent ends without a call timeout (L6, L7)" do
+      input = %{
+        "param1" => "p1 value",
+        "param2" => "p2 value",
+        "subwf" => "integration_test_wf_with_sub_wf",
+        "nextSubwf" => "sub_workflow"
+      }
+
+      grandparent = start("integration_test_wf_with_sub_wf", input)
+      complete(grandparent, "t1")
+      parent = child_of(grandparent, "t2")
+      complete(parent, "t1")
+      child_of(parent, "t2")
+      forge_child(parent, "t2", grandparent)
+
+      {micros, :ok} = :timer.tc(fn -> Runtime.terminate_workflow(grandparent, "stop") end)
+      assert micros < 2_000_000
+      assert workflow(grandparent).status == :terminated
+      assert await_status(parent, :terminated)
+      assert task(parent, "t2").status == :canceled
+    end
+
+    # Stored subWorkflowIds that point at each other while the parent fields do not loop.
+    test "children that name each other end without a call timeout (L7)" do
+      {a, a_child} = start_with_child("sub_workflow")
+      {b, b_child} = start_with_child("sub_workflow")
+      forge_child(a, "t2", b)
+      forge_child(b, "t2", a)
+
+      {micros, :ok} = :timer.tc(fn -> Runtime.terminate_workflow(a, "stop") end)
+      assert micros < 2_000_000
+      assert workflow(a).status == :terminated
+      assert eventually(fn -> Runtime.store().pending_outbox(a) == [] end)
+      assert workflow(b).status == :running
+
+      {micros, :ok} = :timer.tc(fn -> Runtime.terminate_workflow(b, "stop") end)
+      assert micros < 2_000_000
+      assert workflow(b).status == :terminated
+      assert Enum.map([a_child, b_child], &workflow(&1).status) == [:running, :running]
+    end
+
+    test "terminate_child calls no workflow that is not the owner's child" do
+      {other, other_child} = start_with_child("sub_workflow")
+      {id, _child_id} = start_with_child("sub_workflow")
+
+      assert SubWorkflows.terminate_child(id, other_child, "stop") == :ok
+      assert SubWorkflows.terminate_child(id, other_child, "stop", end_count: 0) == :ok
+      assert SubWorkflows.terminate_child(id, other, "stop") == :ok
+      assert SubWorkflows.terminate_child(id, id, "stop") == :ok
+
+      assert workflow(other_child).status == :running
+      assert workflow(other).status == :running
+      assert workflow(id).status == :running
+    end
+
+    test "resumeSubworkflowTasks does not go down to a workflow that is not the task's child" do
+      {id, child_id} = start_with_child("sub_workflow")
+      {_other, other_child} = start_with_child("sub_workflow")
+
+      # The other child fails, and so does this parent's own child.
+      for wf <- [other_child, child_id] do
+        t = poll(wf, "t1")
+
+        WorkflowServer.update(%TaskResult{
+          workflow_instance_id: wf,
+          task_id: t.task_id,
+          status: :failed
+        })
+      end
+
+      assert await_status(id, :failed)
+      assert await_status(other_child, :failed)
+
+      # The stored task names the other child (data saved before ADR 0024).
+      sub_task = task(id, "t2")
+      stop_process(id)
+
+      :ok =
+        Runtime.store().commit(id, %Archon.Runtime.Commit{
+          upsert_tasks: [%{sub_task | sub_workflow_id: other_child}]
+        })
+
+      assert :ok = Runtime.Lifecycle.retry(id, true)
+      assert await_status(id, :running)
+      assert workflow(other_child).status == :failed
     end
   end
 

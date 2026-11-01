@@ -8,7 +8,8 @@
 # extendLease, isLazyEvaluateWorkflow) at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the owning workflow process applies one polled task or one update to its
 # state; queue changes become effects and the decider queue adjustment pulls the :wake timer
-# (ADR 0018, decisions 6 and 7).
+# (ADR 0018, decisions 6 and 7). A SUB_WORKFLOW task keeps its subWorkflowId (ADR 0024,
+# decision 1).
 
 defmodule Archon.Runtime.Step.Tasks do
   @moduledoc """
@@ -21,7 +22,9 @@ defmodule Archon.Runtime.Step.Tasks do
       (ADR 0021, decision 5). Recording the poll data and acking the message stay with the
       caller, which polled the whole batch.
     * `update/2` - upstream `WorkflowExecutorOps#updateTask` up to the decide, which
-      `lazy_evaluate?/2` (`isLazyEvaluateWorkflow`) may skip.
+      `lazy_evaluate?/2` (`isLazyEvaluateWorkflow`) may skip. A `SUB_WORKFLOW` task keeps the
+      `subWorkflowId` the runtime gave it (ADR 0024, decision 1): the result's is ignored and an
+      output `subWorkflowId` key takes the stored value (or is dropped without one).
   """
 
   alias Archon.Domain.{Task, TaskDef, TaskResult, Workflow, WorkflowDef, WorkflowTask}
@@ -132,12 +135,15 @@ defmodule Archon.Runtime.Step.Tasks do
         do: :scheduled,
         else: result.status
 
+    sub_workflow_id = sub_workflow_id(task, result)
     output = result.output_data || %{}
 
     output =
-      if Map.has_key?(output, "subWorkflowId"),
-        do: Map.put(output, "subWorkflowId", result.sub_workflow_id),
-        else: output
+      cond do
+        not Map.has_key?(output, "subWorkflowId") -> output
+        sub_workflow_id == nil -> Map.delete(output, "subWorkflowId")
+        true -> Map.put(output, "subWorkflowId", sub_workflow_id)
+      end
 
     task = %{
       task
@@ -147,7 +153,7 @@ defmodule Archon.Runtime.Step.Tasks do
         callback_after_seconds: result.callback_after_seconds,
         callback_after_ms: 0,
         output_data: output,
-        sub_workflow_id: result.sub_workflow_id
+        sub_workflow_id: sub_workflow_id
     }
 
     task =
@@ -160,6 +166,11 @@ defmodule Archon.Runtime.Step.Tasks do
 
     if Task.terminal?(task.status), do: %{task | end_time: now}, else: task
   end
+
+  # ADR 0024, decision 1: a SUB_WORKFLOW task keeps the child the runtime started; any other task
+  # stores the result's, as upstream does.
+  defp sub_workflow_id(%Task{task_type: "SUB_WORKFLOW", sub_workflow_id: id}, _result), do: id
+  defp sub_workflow_id(_task, %TaskResult{sub_workflow_id: id}), do: id
 
   defp queue_effect(%Task{status: status} = task, result) do
     if Task.terminal?(status),

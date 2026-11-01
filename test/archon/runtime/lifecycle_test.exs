@@ -1466,6 +1466,7 @@ defmodule Archon.Runtime.LifecycleTest do
         task_type: "SUB_WORKFLOW",
         status: :failed,
         reference_task_name: "st",
+        workflow_instance_id: "parent",
         sub_workflow_id: "child",
         workflow_task: %Archon.Domain.WorkflowTask{name: "st", task_reference_name: "st"}
       }
@@ -1478,7 +1479,13 @@ defmodule Archon.Runtime.LifecycleTest do
         workflow_definition: %WorkflowDef{name: "p", version: 1, tasks: []}
       }
 
-      child = %Workflow{workflow_id: "child", status: :completed, output: %{"o" => 1}}
+      child = %Workflow{
+        workflow_id: "child",
+        status: :completed,
+        output: %{"o" => 1},
+        parent_workflow_id: "parent",
+        parent_workflow_task_id: "sub"
+      }
 
       {:ok, stored, [], _commit, _post} =
         Step.run(
@@ -1488,6 +1495,18 @@ defmodule Archon.Runtime.LifecycleTest do
         )
 
       assert [%Task{status: :completed, output_data: %{"o" => 1}}] = stored.tasks
+
+      # ADR 0024, decision 2: a workflow of another parent is not read as the child
+      other = %{child | parent_workflow_id: "other"}
+
+      {:ok, stored, [], _commit, _post} =
+        Step.run(
+          wf,
+          {:child_revived, "sub"},
+          Env.new(now: 1000, workflows: %{"child" => other})
+        )
+
+      assert [%Task{status: :in_progress}] = stored.tasks
     end
 
     test "a revived workflow asks its own parent after its commit" do
