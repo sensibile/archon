@@ -221,9 +221,9 @@ defmodule Archon.Runtime.LifecycleCleanupTest do
       message = "Cannot archive workflow: #{child} with status: RUNNING"
       assert_receive {:removed, {:error, {:invalid, ^message}}}, 2_000
       assert workflow(child).status == :running
-      # the parent's task follows the child that runs again (its revive_parent entry)
-      assert eventually(fn -> task(parent, "st").status == :in_progress end)
+      # the held notice and the retry's revive_parent are delivered to the parent and acked
       assert eventually(fn -> Runtime.store().pending_outbox(child) == [] end)
+      assert task(parent, "st").status == :in_progress
     end
 
     test "a child that tells its removed parent finds none and goes on" do
