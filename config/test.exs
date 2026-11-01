@@ -33,3 +33,10 @@ config :archon, start_runtime: false
 
 # Postgres tests share one database without the Ecto sandbox (ADR 0021, decision 9).
 config :archon, Archon.Repo, pool_size: 10, log: false
+
+# Tests call the endpoint through Phoenix.ConnTest without a listening socket (ADR 0023,
+# decision 1); test/test_helper.exs starts it after the runtime.
+config :archon, ArchonWeb.Endpoint, server: false
+
+# No request log lines in the test output.
+config :phoenix, :logger, false

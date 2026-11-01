@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/taskdefs",
+    "body": "not json"
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "JSON parse error: Unrecognized token 'not': was expecting (JSON String, Number, Array, Object or token 'null', 'true' or 'false')",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

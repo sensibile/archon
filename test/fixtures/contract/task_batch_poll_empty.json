@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/poll/batch/archon_task_a?workerid=archon-contract&count=2&timeout=100",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": []
+  }
+}

@@ -3,30 +3,10 @@ defmodule Archon.ContractTest do
 
   alias Archon.Contract
 
-  # Which part of each captured exchange is checked against which schema. Every fixture must be
-  # listed here or in @unschematized, so a newly captured fixture cannot be skipped silently.
-  @schematized %{
-    "metadata_register_taskdefs" => {:request, {:list, :task_def}},
-    "metadata_register_workflow_simple" => {:request, :workflow_def},
-    "metadata_register_workflow_switch" => {:request, :workflow_def},
-    "metadata_register_workflow_fork" => {:request, :workflow_def},
-    "metadata_get_taskdef" => {:response, :task_def},
-    "metadata_get_workflow" => {:response, :workflow_def},
-    "metadata_get_workflow_switch" => {:response, :workflow_def},
-    "metadata_get_workflow_fork" => {:response, :workflow_def},
-    "task_poll_simple_a" => {:response, :task},
-    "task_poll_simple_b" => {:response, :task},
-    "task_poll_switch_b" => {:response, :task},
-    "task_poll_fork_b" => {:response, :task},
-    "task_batch_poll_fork_a" => {:response, {:list, :task}},
-    "task_get" => {:response, :task},
-    "workflow_get_running" => {:response, :workflow},
-    "workflow_get_completed_simple" => {:response, :workflow},
-    "workflow_get_completed_switch" => {:response, :workflow},
-    "workflow_get_completed_fork" => {:response, :workflow},
-    "workflow_get_without_tasks" => {:response, :workflow},
-    "workflow_get_terminated" => {:response, :workflow}
-  }
+  # Which part of each captured exchange is checked against which schema
+  # (Archon.Contract.fixture_schemas/0). Every fixture must be listed there or in @unschematized,
+  # so a newly captured fixture cannot be skipped silently.
+  @schematized Contract.fixture_schemas()
 
   # Exchanges whose bodies have no upstream JSON schema, with the response shape upstream returned.
   @unschematized %{
@@ -49,7 +29,50 @@ defmodule Archon.ContractTest do
     "workflow_terminate" => :empty,
     "task_poll_empty" => :no_content,
     "task_update_v2_simple_b" => :no_content,
-    "workflow_get_status" => :workflow_status
+    "workflow_get_status" => :workflow_status,
+    # Added for Phase 5 (ADR 0023, decision 6).
+    "health" => :health,
+    "health_api" => :health,
+    "metadata_register_taskdefs_single" => :empty,
+    "metadata_update_taskdef" => :empty,
+    "metadata_update_taskdef_not_found" => :error,
+    "metadata_register_taskdefs_empty" => :validation,
+    "metadata_register_taskdefs_no_name" => :validation,
+    "metadata_register_taskdefs_blank_name" => :validation,
+    "metadata_register_taskdefs_coerced" => :validation,
+    "metadata_register_workflow_no_tasks" => :validation,
+    "metadata_register_workflow_overwrite" => :empty,
+    "metadata_get_workflow_version_not_found" => :error,
+    "metadata_update_workflows" => :bulk_response,
+    "metadata_update_workflows_invalid" => :validation,
+    "metadata_get_workflow_bulk_rejected" => :error,
+    "metadata_update_workflows_empty" => :validation,
+    "workflow_start_not_found" => :error,
+    "workflow_start_request_not_found" => :error,
+    "workflow_start_inline" => :text_id,
+    "workflow_start_inline_second" => :text_id,
+    "workflow_get_status_default" => :workflow_status,
+    "workflow_get_status_all" => :workflow_status,
+    "workflow_get_status_not_found" => :error,
+    "workflow_terminate_completed" => :error,
+    "workflow_terminate_not_found" => :error,
+    "task_get_not_found" => :error,
+    "task_update_not_found" => :error,
+    "task_update_workflow_not_found" => :error,
+    "task_update_v2_not_found" => :error,
+    "task_update_invalid" => :validation,
+    "task_update_v2_invalid" => :server_error,
+    "route_not_found" => :error,
+    "route_later_workflow_search" => :json,
+    "route_later_workflow_running" => :json,
+    "route_later_workflow_test" => :validation,
+    "route_later_metadata_names" => :json,
+    "route_later_tasks_search" => :json,
+    "route_method_patch_workflow" => :error,
+    "route_method_put_task" => :error,
+    "request_body_not_json" => :server_error,
+    "request_query_not_number" => :server_error,
+    "request_query_not_boolean" => :server_error
   }
 
   test "every fixture is classified" do
@@ -63,13 +86,7 @@ defmodule Archon.ContractTest do
       exchange = Contract.fixture(unquote(name))
       body = get_in(exchange, [Atom.to_string(unquote(side)), "body"])
 
-      result =
-        case unquote(schema) do
-          {:list, schema} -> Contract.validate_each(schema, body)
-          schema -> Contract.validate(schema, body)
-        end
-
-      assert result == :ok
+      assert Contract.validate_schema(unquote(Macro.escape(schema)), body) == :ok
     end
   end
 
@@ -116,6 +133,44 @@ defmodule Archon.ContractTest do
     assert status in 400..499
     assert %{"status" => ^status, "message" => message, "retryable" => false} = body
     assert is_binary(message)
+    assert Map.has_key?(body, "instance")
+  end
+
+  # ValidationExceptionMapper: no instance, one entry per violation.
+  defp assert_shape(:validation, response) do
+    assert %{"status" => 400, "content_type" => "application/json", "body" => body} = response
+
+    assert %{
+             "status" => 400,
+             "message" => "Validation failed, check below errors for detail.",
+             "retryable" => false,
+             "validationErrors" => [_ | _] = errors
+           } = body
+
+    refute Map.has_key?(body, "instance")
+    assert Enum.all?(errors, &(is_binary(&1["path"]) and is_binary(&1["message"])))
+  end
+
+  # An exception class upstream's mapper has no status for.
+  defp assert_shape(:server_error, response) do
+    assert %{"status" => 500, "body" => body} = response
+    assert %{"status" => 500, "message" => message, "retryable" => false} = body
+    assert is_binary(message)
+  end
+
+  defp assert_shape(:health, response) do
+    assert %{"status" => 200, "content_type" => "application/json", "body" => body} = response
+    assert body == %{"healthResults" => [], "suppressedHealthResults" => [], "healthy" => true}
+  end
+
+  defp assert_shape(:bulk_response, response) do
+    assert %{"status" => 200, "content_type" => "application/json", "body" => body} = response
+    assert %{"bulkErrorResults" => %{}, "bulkSuccessfulResults" => [_ | _]} = body
+  end
+
+  # A Later route's upstream answer, kept to show it is not an MVP parameter route.
+  defp assert_shape(:json, response) do
+    assert %{"status" => 200, "content_type" => "application/json"} = response
   end
 
   defp assert_shape(:text_id, response) do
@@ -133,6 +188,8 @@ defmodule Archon.ContractTest do
 
   defp assert_shape(:workflow_status, response) do
     assert %{"status" => 200, "body" => body} = response
-    assert Map.keys(body) |> Enum.sort() == ~w(correlationId output status workflowId)
+    keys = Map.keys(body)
+    assert "workflowId" in keys and "status" in keys
+    assert keys -- ~w(correlationId output status variables workflowId) == []
   end
 end

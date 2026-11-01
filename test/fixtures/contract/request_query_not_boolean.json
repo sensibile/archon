@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/be712840-c88e-49b6-af7f-799955389c0e?includeTasks=maybe",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Method parameter 'includeTasks': Failed to convert value of type 'java.lang.String' to required type 'boolean'; Invalid boolean value [maybe]",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

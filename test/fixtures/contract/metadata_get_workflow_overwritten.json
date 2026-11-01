@@ -1,0 +1,76 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/metadata/workflow/archon_simple?version=1",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "createTime": 0,
+      "updateTime": 1793502390050,
+      "name": "archon_simple",
+      "description": "Overwritten",
+      "version": 1,
+      "tasks": [
+        {
+          "name": "archon_task_a",
+          "taskReferenceName": "task_a_ref",
+          "inputParameters": {
+            "x": "${workflow.input.x}"
+          },
+          "type": "SIMPLE",
+          "decisionCases": {},
+          "defaultCase": [],
+          "forkTasks": [],
+          "startDelay": 0,
+          "joinOn": [],
+          "optional": false,
+          "defaultExclusiveJoinTask": [],
+          "asyncComplete": false,
+          "loopOver": [],
+          "onStateChange": {},
+          "permissive": false,
+          "metadata": {}
+        },
+        {
+          "name": "archon_task_b",
+          "taskReferenceName": "task_b_ref",
+          "inputParameters": {
+            "a": "${task_a_ref.output.y}"
+          },
+          "type": "SIMPLE",
+          "decisionCases": {},
+          "defaultCase": [],
+          "forkTasks": [],
+          "startDelay": 0,
+          "joinOn": [],
+          "optional": false,
+          "defaultExclusiveJoinTask": [],
+          "asyncComplete": false,
+          "loopOver": [],
+          "onStateChange": {},
+          "permissive": false,
+          "metadata": {}
+        }
+      ],
+      "inputParameters": [
+        "x"
+      ],
+      "outputParameters": {
+        "y": "${task_b_ref.output.y}"
+      },
+      "schemaVersion": 2,
+      "restartable": true,
+      "workflowStatusListenerEnabled": false,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "variables": {},
+      "inputTemplate": {},
+      "enforceSchema": true,
+      "metadata": {},
+      "maskedFields": []
+    }
+  }
+}

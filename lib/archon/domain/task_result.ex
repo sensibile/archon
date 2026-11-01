@@ -39,6 +39,10 @@ defmodule Archon.Domain.TaskResult do
 
   defstruct Codec.defaults(@fields)
 
+  @doc false
+  @spec __fields__() :: [Codec.field()]
+  def __fields__, do: @fields
+
   @type t :: %__MODULE__{
           workflow_instance_id: String.t() | nil,
           task_id: String.t() | nil,

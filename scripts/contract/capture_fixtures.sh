@@ -5,7 +5,8 @@
 #
 # The server must start empty (fresh SQLite file). Each exchange is written as one JSON file:
 #   {"request": {"method", "path", "body"}, "response": {"status", "content_type", "body"}}
-# JSON response bodies are stored parsed, text/plain bodies as strings, empty bodies as null.
+# JSON bodies are stored parsed, other bodies (text/plain responses, a request body that is not
+# JSON) as strings, empty bodies as null.
 # Fixtures are written verbatim except that the server hostname in error bodies is redacted;
 # volatile fields are documented in test/fixtures/contract/README.md.
 set -euo pipefail
@@ -28,6 +29,11 @@ call() {
   fi
   curl "${args[@]}" "$BASE_URL$path" >"$tmp/status"
 
+  local req_body='null'
+  if [[ -n "$body" ]]; then
+    if jq . >/dev/null 2>&1 <<<"$body"; then req_body="$body"; else req_body="$(jq -n --arg b "$body" '$b')"; fi
+  fi
+
   local status ctype
   status="$(cat "$tmp/status")"
   ctype="$(grep -i '^content-type:' "$tmp/headers" | tail -1 | cut -d' ' -f2- | tr -d '\r' || true)"
@@ -43,7 +49,7 @@ call() {
 
   jq -n \
     --arg method "$method" --arg path "$path" \
-    --argjson req_body "${body:-null}" \
+    --argjson req_body "$req_body" \
     --argjson status "$status" --arg ctype "$ctype" \
     --argjson resp_body "$resp_body" \
     '{request: {method: $method, path: $path, body: $req_body},
@@ -208,3 +214,104 @@ term_id="$(body)"
 call workflow_terminate DELETE "/api/workflow/$term_id?reason=archon-contract-terminate"
 call workflow_get_terminated GET "/api/workflow/$term_id"
 call workflow_get_not_found GET /api/workflow/00000000-0000-0000-0000-000000000000
+
+# --- health (ADR 0023, decision 6: the fixtures below were added for Phase 5) ----------------
+
+call health GET /health
+call health_api GET /api/health
+
+# --- metadata: list, single update, overwrite, bulk update, validation ----------------------
+
+call metadata_list_taskdefs GET /api/metadata/taskdefs
+# A single object where the array is expected: Jackson reads it as a one-element list.
+call metadata_register_taskdefs_single POST /api/metadata/taskdefs \
+  '{"name": "archon_task_c", "retryCount": 0, "timeoutSeconds": 300, "responseTimeoutSeconds": 60}'
+call metadata_update_taskdef PUT /api/metadata/taskdefs \
+  '{"name": "archon_task_c", "description": "updated", "retryCount": 0, "timeoutSeconds": 600,
+    "responseTimeoutSeconds": 60}'
+call metadata_get_taskdef_updated GET /api/metadata/taskdefs/archon_task_c
+call metadata_update_taskdef_not_found PUT /api/metadata/taskdefs \
+  '{"name": "archon_missing", "timeoutSeconds": 300, "responseTimeoutSeconds": 60}'
+call metadata_register_taskdefs_empty POST /api/metadata/taskdefs '[]'
+call metadata_register_taskdefs_no_name POST /api/metadata/taskdefs '[{"retryCount": 1}]'
+# invalidValue of a string, of a primitive given null (0) and of an integer given a fraction (-1).
+call metadata_register_taskdefs_blank_name POST /api/metadata/taskdefs '[{"name": ""}]'
+call metadata_register_taskdefs_coerced POST /api/metadata/taskdefs \
+  '[{"name": "archon_coerced", "responseTimeoutSeconds": null}, {"name": "archon_coerced", "retryCount": -1.7}]'
+call metadata_register_workflow_no_tasks POST /api/metadata/workflow \
+  '{"name": "archon_no_tasks", "version": 1, "tasks": []}'
+
+call metadata_register_workflow_overwrite POST '/api/metadata/workflow?overwrite=true' \
+  "$(jq -c '.request.body | .description = "Overwritten"' "$OUT/metadata_register_workflow_simple.json")"
+call metadata_get_workflow_overwritten GET '/api/metadata/workflow/archon_simple?version=1'
+call metadata_get_workflow_version_not_found GET '/api/metadata/workflow/archon_simple?version=9'
+
+bulk_task='{"name": "archon_task_c", "taskReferenceName": "task_c_ref", "type": "SIMPLE"}'
+call metadata_update_workflows PUT /api/metadata/workflow \
+  "[{\"name\": \"archon_bulk\", \"version\": 1, \"tasks\": [$bulk_task]},
+    {\"name\": \"archon_bulk\", \"version\": 2, \"description\": \"v2\", \"tasks\": [$bulk_task]}]"
+call metadata_get_workflow_bulk_latest GET /api/metadata/workflow/archon_bulk
+# One invalid element fails the whole request: the valid one is not stored either.
+call metadata_update_workflows_invalid PUT /api/metadata/workflow \
+  "[{\"name\": \"archon_bulk_valid\", \"version\": 1, \"tasks\": [$bulk_task]},
+    {\"name\": \"archon_bulk_invalid\", \"version\": 1, \"tasks\": []}]"
+call metadata_get_workflow_bulk_rejected GET /api/metadata/workflow/archon_bulk_valid
+call metadata_update_workflows_empty PUT /api/metadata/workflow '[]'
+
+# --- workflow: start errors, inline definition, fetch options, terminate errors -------------
+
+call workflow_start_not_found POST /api/workflow/archon_missing '{}'
+call workflow_start_request_not_found POST /api/workflow '{"name": "archon_missing", "version": 3}'
+
+inline_request() { # input n
+  jq -nc --argjson n "$1" '{name: "archon_inline", correlationId: "archon-corr-3", input: {n: $n},
+    workflowDef: {name: "archon_inline", version: 1, schemaVersion: 2, timeoutSeconds: 0,
+      tasks: [{name: "archon_task_c", taskReferenceName: "task_c_ref", type: "SIMPLE",
+               inputParameters: {n: "${workflow.input.n}"}}]}}'
+}
+call workflow_start_inline POST /api/workflow "$(inline_request 1)"
+inline_id="$(body)"
+call workflow_get_running_without_tasks GET "/api/workflow/$inline_id?includeTasks=false"
+call workflow_get_status_default GET "/api/workflow/$inline_id/status"
+call workflow_get_status_all GET "/api/workflow/$simple_id/status?includeOutput=true&includeVariables=true"
+call workflow_get_status_not_found GET /api/workflow/00000000-0000-0000-0000-000000000000/status
+call workflow_start_inline_second POST /api/workflow "$(inline_request 2)"
+
+poll_until task_poll_inline_c archon_task_c
+task_c="$(body | jq -r .taskId)"
+call workflow_get_inline GET "/api/workflow/$inline_id"
+# The other workflow's archon_task_c is the next task of the same type.
+call task_update_v2_next POST /api/tasks/update-v2 \
+  "$(task_result "$inline_id" "$task_c" COMPLETED '{"done": 1}')"
+wait_status "$inline_id" COMPLETED
+call workflow_terminate_completed DELETE "/api/workflow/$inline_id?reason=archon-contract-late"
+call workflow_terminate_not_found DELETE /api/workflow/00000000-0000-0000-0000-000000000000
+
+# --- task: empty batch, unknown task, validation --------------------------------------------
+
+call task_batch_poll_empty GET "/api/tasks/poll/batch/archon_task_a?workerid=$WORKER&count=2&timeout=100"
+call task_get_not_found GET /api/tasks/00000000-0000-0000-0000-000000000000
+call task_update_not_found POST /api/tasks \
+  "$(task_result "$inline_id" 00000000-0000-0000-0000-000000000000 COMPLETED '{}')"
+call task_update_workflow_not_found POST /api/tasks \
+  "$(task_result 00000000-0000-0000-0000-000000000000 00000000-0000-0000-0000-000000000000 COMPLETED '{}')"
+call task_update_v2_not_found POST /api/tasks/update-v2 \
+  "$(task_result "$inline_id" 00000000-0000-0000-0000-000000000000 COMPLETED '{}')"
+call task_update_invalid POST /api/tasks \
+  '{"workflowInstanceId": "00000000-0000-0000-0000-000000000000", "taskId": ""}'
+call task_update_v2_invalid POST /api/tasks/update-v2 \
+  '{"workflowInstanceId": "00000000-0000-0000-0000-000000000000", "taskId": ""}'
+
+# --- routing: unknown path, Later paths shaped like MVP parameter paths, other methods, bad input
+
+call route_not_found GET /api/archon/missing
+call route_later_workflow_search GET /api/workflow/search
+call route_later_workflow_running GET /api/workflow/running/archon_simple
+call route_later_workflow_test POST /api/workflow/test '{}'
+call route_later_metadata_names GET /api/metadata/workflow/names
+call route_later_tasks_search GET /api/tasks/search
+call route_method_patch_workflow PATCH /api/workflow '{}'
+call route_method_put_task PUT /api/tasks/00000000-0000-0000-0000-000000000000 '{}'
+call request_body_not_json POST /api/metadata/taskdefs 'not json'
+call request_query_not_number GET "/api/tasks/poll/batch/archon_task_a?workerid=$WORKER&count=abc"
+call request_query_not_boolean GET "/api/workflow/$inline_id?includeTasks=maybe"

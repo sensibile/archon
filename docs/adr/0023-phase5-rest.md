@@ -5,6 +5,9 @@
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(웹 계층, worker 입력 신뢰와 인증, 스키마 검증, MVP 범위)는 2026-11-01 BOSS가 이 문서와
   [ADR 0024](0024-worker-input-trust-and-auth.md)의 추천안으로 정했다.
+- 갱신: 2026-11-01 조각 5a가 upstream 서버에서 확인한 사실로 결정 1(HEAD), 결정 2(404 문구, 끝 슬래시), 결정 3(요청 body·쿼리 변환,
+  `ArchonWeb.Request`), 결정 4(검증 오류의 `instance`, `update-v2`의 검증 실패 500, 오류 종류 두 개), 결정 6(캡처 결과와
+  재생 도우미 세부), 결정 7(5a 파일 목록, 5e의 선행 조건)과 "upstream과 의도적으로 다른 점"을 보강했다.
 
 ## 맥락
 
@@ -46,9 +49,12 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
 - 모듈은 `ArchonWeb.Endpoint`, `ArchonWeb.Router`, 컨트롤러 `ArchonWeb.{Health,Metadata,Workflow,Task}Controller`,
   오류 변환 `ArchonWeb.Errors`다. 디렉터리는 `lib/archon_web/`다.
 - JSON은 내장 `JSON`이다(`config :phoenix, :json_library, JSON`). Jason은 들이지 않는다. 요청 body는 `Plug.Parsers`의
-  JSON 파서로 맵을 만들지 않고, 컨트롤러가 원문을 읽어 `JSON.decode/1`과 도메인 코덱 `from_json/2`로 바꾼다. 누락 키와
+  JSON 파서로 맵을 만들지 않고, 컨트롤러가 원문을 읽어 디코딩하고(`ArchonWeb.Request`, OTP `:json`. Jackson과 맞추는 세부는
+  결정 3) 도메인 코덱 `from_json/2`로 바꾼다. 누락 키와
   `null`을 구분하는 코덱 규칙(ADR 0002)을 지키고, 배열 body(`POST /api/metadata/taskdefs`)를 `_json` 같은 감싼 키 없이 받기
   위해서다.
+- Endpoint에는 `Plug.Head`를 둔다. Spring은 GET 매핑마다 HEAD를 body 없이 같은 응답으로 준다(upstream `curl -I /health`는 200).
+  OPTIONS는 따르지 않는다(upstream은 `Allow` 헤더로 200, Archon은 결정 2의 404).
 - `Archon.Application`은 런타임 다음에 `ArchonWeb.Endpoint`를 띄운다. 기본 주소는 `127.0.0.1:8080`(upstream 기본 포트)이고,
   다른 주소는 설정으로만 연다(ADR 0024 결정 4). 시험 설정은 `server: false`이고 `Phoenix.ConnTest`로 부른다.
 - 대안은 아래 "대안" 절.
@@ -83,6 +89,9 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   → 404 `ErrorResponse`)과 같은 모양으로 답한다. 모양은 픽스처로 캡처해 고정한다. ADR 0001의 "Later는 404"가 이 응답이다.
   upstream은 경로가 있고 메서드만 다르면 405(`HttpRequestMethodNotSupportedException`)를 주지만, Archon은 405를 따로 만들지
   않는다(아래 "upstream과 의도적으로 다른 점").
+  404 문구는 `"No static resource <경로>."`이고 경로는 percent 인코딩을 그대로 두고 앞 `/`와 빈 세그먼트를 뺀다(`/api//x/`는
+  `api/x`). 끝에 `/`가 붙은 경로는 MVP 경로라도 404다(Spring 6는 끝 슬래시를 매칭하지 않는다, upstream `POST /api/workflow/`는 404).
+  Phoenix 라우터는 끝 슬래시를 매칭하므로 Endpoint가 라우터 앞에서 막는다(조각 5a에서 upstream으로 확인).
 - **매개변수 경로가 Later 경로를 삼키지 않게 한다.** 다음 Later 경로는 MVP의 `{name}`·`{workflowId}`·`{taskId}` 경로와 모양이
   같아서 그대로 두면 MVP 액션으로 들어간다(예: `POST /api/workflow/test`가 "test"라는 워크플로우를 시작). 라우터는 이 리터럴
   경로를 매개변수 경로보다 먼저 두고 404로 보낸다. 목록은 upstream 컨트롤러에서 옮긴다.
@@ -119,12 +128,38 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   헤더 없음.
 - 요청 body 디코딩 오류(JSON이 아님, 타입이 맞지 않음)의 상태 코드와 문구는 upstream 응답을 캡처해 정한다. upstream은
   Jackson 예외를 `ApplicationExceptionMapper`가 받으므로 대개 500이다. 짐작해 400으로 바꾸지 않는다.
+- **요청 읽기(조각 5a, `ArchonWeb.Request`).** upstream 서버(기준 SHA 빌드, 빈 SQLite)에 직접 보내 확인한 규칙이다.
+  - body: Jackson처럼 첫 JSON 값만 읽고 뒤는 무시한다(`{} x`는 `{}`). 객체의 같은 키는 마지막 값이다(내장 `JSON.decode/1`은 첫
+    값이라 `:json.decode/3`에 디코더를 준다). 빈 body와 `null`은 `"Required request body is missing: <handler 시그니처>"`(500),
+    공백뿐인 body는 `"JSON parse error: No content to map due to end-of-input"`(500)이다. JSON이 아닌 body는 500이고 문구는
+    `"JSON parse error: "`로 시작하지만 그 뒤의 Jackson 문구는 옮기지 않는다(재생에서 `message`를 뺀다).
+    body는 8 MB(`Plug.Parsers` 기본값)까지 읽고 넘으면 413이다.
+  - 쿼리: Spring `@RequestParam` 변환(`CustomNumberEditor`, `CustomBooleanEditor`)을 따른다. 값이 없거나 정확히 `""`이면 기본값이다.
+    숫자는 공백을 모두 지우고 `0x`·`#` 16진수를 받는다. primitive `int`는 공백뿐인 값이 `For input string: ""` 실패이고, boxed
+    `Integer`(`version`)는 `null`이다. 불리언은 `true/on/yes/1`, `false/off/no/0`(대소문자, 앞뒤 공백 무시)이고 공백뿐인 값은 실패다.
+    실패는 500 `"Method parameter '<이름>': Failed to convert value of type 'java.lang.String' to required type '<타입>'; <원인>"`이다
+    (`MethodArgumentTypeMismatchException`은 매퍼에 없다). 같은 이름이 반복되면 숫자·불리언은 첫 값, 문자열은 `,`로 합친다. `%`
+    escape가 깨진 쌍은 Tomcat처럼 버린다(`Plug.Conn.fetch_query_params/1`은 요청 전체를 400으로 만든다).
+  - body 한도: 첫 JSON 값에서 배열·객체가 1000단을 넘거나 숫자가 1000자리(정수부·소수부·지수부 자릿수, 부호 제외)를 넘으면
+    디코딩 전에 거절한다. upstream Jackson의 `StreamReadConstraints`(`getMaxNestingDepth`, `getMaxNumberLength`)와 같은 한도와
+    문구(`"JSON parse error: Document nesting depth (1001) exceeds ..."`, `"JSON parse error: Number value length (<n>) exceeds ..."`)다.
+    거대한 중첩·숫자를 만드는 데 드는 메모리·CPU를 막는다.
+  - `Content-Type`: 비어 있지 않은 body는 Spring의 JSON 변환기처럼 `application/json`이나 `application/*+json`(대소문자·매개변수
+    무관)이어야 한다. 그 밖의 타입은 500 `"Content-Type '<타입>;<매개변수>' is not supported"`(charset이 없으면 `charset=UTF-8`을
+    붙임), 헤더가 없으면 `application/octet-stream`으로 본 같은 500, `/`가 없으면 500 `Invalid mime type`, 와일드카드는 400이다(모두
+    upstream 관측). 인증이 없는 MVP(ADR 0024 결정 4)에서 이 검사는 브라우저가 CORS preflight 없이 보내는 교차 출처 "단순 요청"
+    (`text/plain`, 폼)이 액션에 닿지 않게 한다. `application/json` 교차 출처 요청은 preflight가 필요한데 Archon은 OPTIONS에 CORS
+    헤더 없이 404로 답하므로 브라우저가 보내지 않는다. 부작용이 있는 GET(poll, batch poll은 태스크를 꺼내 `IN_PROGRESS`로 만든다)에
+    대한 교차 출처 단순 요청(`<img src>` 등)과 DNS rebinding처럼 같은 출처로 위장하는 경로는 upstream과 같이 남고, 인증 ADR(Later)이
+    다룬다. body 앞의 UTF-8 BOM은 Jackson처럼 건너뛴다. upstream은 `1e<999자리>`
+    같은 큰 지수를 받지만 Archon은 실수로 만들 수 없어 500 parse error다. 루트가 스칼라면 뒤에 공백이나
+    끝이 와야 한다(upstream은 `"123abc"`, `"01"`을 거절).
 
 ### 4. 오류 코드와 body
 
 - 오류 body는 upstream `ErrorResponse`다: `status`, `message`, `instance`, `retryable`. 검증 실패는 `validationErrors`가 붙는다.
   `instance`는 서버 호스트 이름이다(`:inet.gethostname/0`, upstream `Utils.getServerId()`). 픽스처는 이 값을 가리므로 시험은 키만
-  본다.
+  본다. 검증 실패(`ValidationExceptionMapper`)에는 `instance`가 없다(5a 픽스처).
 - 런타임 오류 → 상태 코드는 `ArchonWeb.Errors` 한 곳에서 바꾼다.
 
   | 런타임 결과 | upstream 예외 | 상태 | `retryable` |
@@ -135,6 +170,8 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   | `{:error, {:invalid, [{경로, 문구} ...]}}`, `validate/2`의 오류 목록 | `ConstraintViolationException` | 400, `validationErrors` | false(설정하지 않은 primitive 기본값) |
   | `{:error, {:invalid_state, 문구}}` | `IllegalStateException`(매핑 없음) | 500 | false |
   | `{:error, {:terminate, 문구}}`(시작 때 정의 없는 SUB_WORKFLOW) | `TerminateWorkflowException`(매핑 없음) | 500 | false |
+  | `{:error, {:server_error, 문구}}`(요청 변환 실패, 결정 3) | Spring 예외(매핑 없음) | 500 | false |
+  | `{:error, {:payload_too_large, 문구}}`(8 MB 넘는 body, 결정 3) | 없음(Archon만) | 413 | false |
   | 예외 격리(`{:commit \| :pre_effect \| :post_effect \| :env, _}`), 호출 timeout·exit, 저장소 오류 | `TransientException` | 500 | true |
   | 그 밖 | `Throwable` | 500 | false |
 
@@ -143,8 +180,15 @@ upstream REST의 구성은 다음과 같다(경로는 `rest/src/main/java/com/ne
   JSON 원문이 아니라 struct에서 찾는 것은 upstream이 Jackson 변환 뒤의 Java 필드 값을 쓰기 때문이다(예: `int` 필드의 JSON `null`은
   0, 정수 필드의 `1.5`는 1). 표기는 upstream `ValidationExceptionMapper.getViolationInvalidValue`를 따른다: `java.lang` 값(문자열, 정수,
   실수, 불리언)은 Java `toString` 표기의 문자열(`""`도 그대로, 정수 필드는 정수로), enum·struct·리스트·맵·`nil`은 `null`. 예:
-  `update-v2`에 `taskId: ""`면 `invalidValue: ""`. upstream `path`의 메서드·인자 접두사(예: `updateTask.taskResult.`)는 픽스처로 확인해
-  붙이고, 값은 접두사 전의 경로로 찾는다. 경계 사례(primitive 필드의 `null`, 정수 필드의 실수)는 5a 보강 픽스처에 하나 이상 넣는다.
+  `POST /api/tasks`에 `taskId: ""`면 `invalidValue: ""`(`task_update_invalid`). upstream `path`의 메서드·인자 접두사는 픽스처로
+  확인했다: `registerTaskDef.arg0`(배열이면 `[i]`가 붙음), `registerWorkflowDef.arg0`, `updateWorkflowDef.arg0`, `updateTask.arg0`.
+  값은 접두사 전의 경로로 찾는다. 경계 사례는 5a 픽스처 `metadata_register_taskdefs_coerced`(primitive 필드의 `null`은 `"0"`, 정수
+  필드의 `-1.7`은 `"-1"`)와 `metadata_register_taskdefs_blank_name`(`""`)이다. 도메인 코덱에는 실수 필드가 없으므로 실수 표기는
+  생기지 않는다.
+- **`update-v2`의 검증 실패는 400이 아니라 500이다(5a 픽스처 `task_update_v2_invalid`).** `TaskResource.updateTaskV2`는
+  컨트롤러 인자에 `@Valid`가 붙어 있어 서비스 메서드 검증보다 먼저 Spring `MethodArgumentNotValidException`이 나고, 매퍼에 없는
+  클래스라 500이다. 문구는 Spring이 쓰는 긴 문자열(`"Validation failed for argument [0] in public ... updateTaskV2(...): [Field error
+  ...]] "`)이다. `POST /api/tasks`의 같은 실패는 서비스 검증이라 400 `validationErrors`다.
 - 문구가 없는 오류(`:not_found`, `:conflict`)는 컨트롤러가 upstream 서비스·실행기의 문구를 붙인다. 예: 조회
   `"No such workflow found by id: <id>"`(픽스처), 정의 `"No such workflow found by name: %s, version: %d"`, 태스크 정의
   `"No such taskType found by name: %s"`, 등록 충돌 `"Workflow with %s already exists!"`(`key()`는 `name.version`). 문구는
@@ -217,17 +261,31 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
     JSON이 아닌 body, 숫자 쿼리에 문자
   - `invalidValue` 경계: 검증 실패 원소의 문자열 값, primitive 필드의 `null`, 정수 필드의 실수
 - 다시 캡처한 기존 픽스처가 `normalize/1` 기준으로 바뀌면 그 차이를 PR에서 검토한다(`priv/contract/README.md` 절차).
+- **5a 캡처 결과.** 위 목록을 51개 픽스처로 더했다(모두 87개). 기존 36개는 다시 캡처해도 `normalize/1` 기준 같았고, 새 캡처를
+  빈 서버에서 한 번 더 받아 87개 모두 같음을 확인했다. 목록에서 다음은 그대로 캡처할 수 없었다.
+  - "서비스 단계 실패가 섞인 일괄": upstream SQLite DAO의 `updateWorkflowDef`는 이름이 `null`일 때만 실패하는데, 그 정의는
+    `@Valid`가 먼저 막는다. 그래서 정의별 실패가 섞인 `BulkResponse`는 Archon의 스키마 거절(결정 5)에서만 생기고, 5c의 단위 시험이
+    맡는다.
+  - "MVP 경로의 다른 메서드" 중 Later 경로와 겹치는 것(`DELETE /api/metadata/taskdefs/{tasktype}`)은 upstream에서 정의를 지우는
+    부작용이 있어 캡처하지 않았다. `PATCH /api/workflow`, `PUT /api/tasks/{taskId}`(405)를 캡처했다.
+- **재생 도우미 세부(5a).** `ArchonWeb.ContractCase.scenario/0`이 캡처 순서 전체이고, `steps/2`로 잘라 `replay/2`로 돌린다. 의도적인
+  차이는 단계 옵션으로 적는다: `expect: :no_route`(Later 경로와 405 픽스처는 upstream 응답 대신 Archon의 404를 기대),
+  `ignore: [["message"]]`(Jackson 문구). 대기(`wait_status`)는 REST가 아니라 `Archon.Runtime.get_workflow/2`로 본다. 앞 단계 없이
+  준비한 상태(런타임으로 직접 시작한 워크플로우)는 `bind/3`으로 캡처 ID에 묶는다. `instance`는 있음·없음만, `validationErrors`는
+  순서 없이 비교한다(Hibernate가 위반을 정해진 순서 없이 낸다). 픽스처별 스키마 분류는 `Archon.Contract.fixture_schemas/0`로
+  옮겨 계약 시험과 재생이 함께 쓴다. 런타임은 다른 시험과 공유되므로 목록 응답(`metadata_list_taskdefs`)을 재생하는 조각은 다른
+  시험의 정의를 걸러야 한다.
 - 시나리오 시험 밖의 단위 시험은 컨트롤러마다 오류 변환과 쿼리 기본값을 본다.
 
 ### 7. 구현 조각
 
 | 조각 | 범위 | 시험·정답 기준 | 선행 | 건드리는 파일·모듈 |
 |---|---|---|---|---|
-| 5a | 결정 1·4·6의 기반: 의존성, Endpoint·Router(MVP 19개 경로 전부), `Health` 컨트롤러, `ArchonWeb.Errors`, `ErrorResponse` 모델, MVP가 아닌 요청의 404와 Later 리터럴 경로, 설정(주소·포트, ADR 0024 결정 4), 재생 도우미, 픽스처 보강 캡처. 나머지 세 컨트롤러는 모든 액션이 없는 경로와 같은 404로 답하는 골격만 둔다 | `/health` 픽스처, 오류 변환 단위 시험, 없는 경로 픽스처, 기존 픽스처 재캡처 비교 | 없음 | `mix.exs`, `mix.lock`, `config/{config,test,runtime}.exs`, `lib/archon/application.ex`, `test/test_helper.exs`·`test/support/postgres_case.ex`(시험에서 런타임 뒤에 Endpoint 띄우기), `lib/archon_web.ex`, `lib/archon_web/{endpoint,router,errors}.ex`, `lib/archon_web/controllers/{health,metadata,workflow,task}_controller.ex`(골격), `lib/archon/domain/error_response.ex`, `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`(추가), `test/fixtures/contract/README.md`, `test/archon/contract_test.exs`(새 픽스처 등록), `test/support/archon_web/contract_case.ex`, `test/archon_web/{health,errors,router}_test.exs` |
+| 5a | 결정 1·4·6의 기반: 의존성, Endpoint·Router(MVP 19개 경로 전부), `Health` 컨트롤러, `ArchonWeb.Errors`, `ErrorResponse` 모델, MVP가 아닌 요청의 404와 Later 리터럴 경로, 설정(주소·포트, ADR 0024 결정 4), 재생 도우미, 픽스처 보강 캡처. 나머지 세 컨트롤러는 모든 액션이 없는 경로와 같은 404로 답하는 골격만 둔다 | `/health` 픽스처, 오류 변환 단위 시험, 없는 경로 픽스처, 기존 픽스처 재캡처 비교 | 없음 | `mix.exs`, `mix.lock`, `config/{config,test,runtime}.exs`, `lib/archon/application.ex`, `test/test_helper.exs`·`test/support/postgres_case.ex`(시험에서 런타임 뒤에 Endpoint 띄우기), `lib/archon_web.ex`, `lib/archon_web/{endpoint,router,errors,error_json,request,response}.ex`, `lib/archon_web/controllers/{health,metadata,workflow,task}_controller.ex`(골격), `lib/archon/domain/{error_response,validation_error}.ex`, `lib/archon/domain/task_result.ex`(`__fields__/0`, `invalidValue` 찾기), `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`(추가), `test/fixtures/contract/README.md`, `test/archon/contract_test.exs`·`test/archon/domain/contract_round_trip_test.exs`(새 픽스처 등록), `test/support/contract.ex`(`fixture_schemas/0`, `mask_times/1`), `test/support/archon_web/contract_case.ex`, `test/archon_web/{health,errors,router,request,contract_case,endpoint}_test.exs` |
 | 5b | [ADR 0024](0024-worker-input-trust-and-auth.md) 결정 1~3: SUB_WORKFLOW `subWorkflowId` 고정, 자식 소유권 확인, 조상 우회 코드 제거, ADR 0024 `승인`과 ADR 0018 목록 상태 | ADR 0024 결정 5의 시험, 기존 런타임 시험 전부(두 백엔드) | 없음 | ADR 0024 결정 5의 파일, `docs/adr/{0024,README}.md` |
 | 5c | 결정 2·5의 정의: `Archon.Metadata` 서비스, `get_all_task_defs/0` 콜백(메모리·Postgres·계약), `BulkResponse` 모델, 스키마 판정 함수와 시작 경로의 거절, `Metadata` 컨트롤러 일곱 액션 | `metadata_*` 픽스처 재생, 스키마 거절 시험(박힌 정의, 시작의 인라인 정의, 식으로 정한 하위 워크플로우 정의), 저장소 계약 시험 | 5a | `lib/archon/metadata.ex`, `lib/archon/domain/{workflow_def,task_def}.ex`(판정 함수), `lib/archon/runtime.ex`(`new_workflow`의 거절), `test/archon/runtime/runtime_test.exs`, `lib/archon/runtime/metadata.ex`, `lib/archon/runtime/metadata/{memory,postgres}.ex`, `test/support/runtime/metadata_contract.ex`, `test/archon/runtime/{metadata,metadata_postgres}_test.exs`, `lib/archon/domain/bulk_response.ex`, `lib/archon_web/controllers/metadata_controller.ex`, `test/archon/metadata_test.exs`, `test/archon_web/metadata_controller_test.exs` |
 | 5d | 결정 2·3의 워크플로우: `StartWorkflowRequest`·`WorkflowStatus` 모델, 시작 두 가지(시작 맵은 요청 필드로만 만들고 부모 필드를 넣지 않음, ADR 0024 결정 4), 조회, 상태 요약, 종료 | `workflow_*` 픽스처 재생, 시작 맵에 부모 필드가 없는 시험 | 5a, 5c | `lib/archon/domain/{start_workflow_request,workflow_status}.ex`, `lib/archon_web/controllers/workflow_controller.ex`, `test/archon/domain/{start_workflow_request,workflow_status}_test.exs`, `test/archon_web/workflow_controller_test.exs` |
-| 5e | 결정 2의 태스크: poll, batch poll, 갱신, `update-v2`, 조회 | `task_*` 픽스처 재생, 검증 실패 400 | 5a, **5b** | `lib/archon_web/controllers/task_controller.ex`, `test/archon_web/task_controller_test.exs` |
+| 5e | 결정 2의 태스크: poll, batch poll, 갱신, `update-v2`, 조회 | `task_*` 픽스처 재생, 검증 실패(`POST /api/tasks`는 400, `update-v2`는 500, 결정 4) | 5a, **5b** | `lib/archon_web/controllers/task_controller.ex`, `test/archon_web/task_controller_test.exs` |
 | 5f | 통합: 전체 시나리오 재생(픽스처 전부, 두 백엔드), Later·Unsupported 경로 404 표본, 실제 HTTP로 띄운 엔드포인트의 연기 시험, README 호환성 절(ADR 0001 결과 절의 Unsupported 목록 링크, 인증 없음과 주소 기본값), ADR 0023 `승인`과 ADR 0018 목록 상태 | `mix test` 전부(두 백엔드), CI | 5c, 5d, 5e | `test/archon_web/contract_replay_test.exs`, `test/archon_web/server_test.exs`, 빠진 픽스처가 있으면 `scripts/contract/capture_fixtures.sh`·`test/fixtures/contract/*`·`test/archon/contract_test.exs`, `README.md`, `docs/adr/{0023,README}.md`, `docs/adr/0003-porting-strategy.md`(비고) |
 
 - **병렬로 진행할 수 있는 묶음.**
@@ -238,7 +296,10 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 - **태스크 갱신 REST는 5b 뒤에만 연다.** ADR 0021 결과 절의 출시 조건이다. ADR 0024는 이 ADR과 함께 머지되어 조각보다
   먼저 있고, 5e는 5b의 구현이 머지된 뒤 시작한다.
 - 라우터와 컨트롤러 골격은 5a가 모두 만든다. 그래서 5c·5d·5e는 `router.ex`를 고치지 않고 자기 컨트롤러 파일 하나를 채운다.
-  픽스처는 5a와 5f만 더한다(결정 6).
+  픽스처는 5a와 5f만 더한다(결정 6). 픽스처 등록(`contract_test.exs`, `contract_round_trip_test.exs`, `Archon.Contract.fixture_schemas/0`)도
+  5a와 5f만 고친다. 재생 도우미(`contract_case.ex`)의 단계 옵션은 각 조각이 자기 픽스처에 맞게 고칠 수 있다.
+- **5e의 재생 선행 조건.** 태스크 픽스처는 정의 등록(5c)과 워크플로우 시작(5d) 뒤의 상태다. 5d보다 먼저 끝나는 5e는 정의와
+  워크플로우를 `Archon.Metadata`·`Archon.Runtime`으로 직접 만들고 `bind/3`으로 캡처 ID에 묶은 뒤 태스크 단계만 재생한다.
 - 각 조각은 이 ADR의 결정 번호와 조각 이름을 PR에 적는다. 조각 중에 결정이 바뀌면 이 ADR의 해당 결정과 날짜 줄에 갱신
   사실을 적는다(ADR 0018·0021과 같은 방식).
 
@@ -251,6 +312,14 @@ ADR 0018 결과 절이 정의 등록 REST 전에 정하라고 한 스키마 검�
 - **Later 경로는 없는 경로처럼 404다**(ADR 0001). upstream은 그 경로를 처리한다.
 - **기본 주소가 `127.0.0.1`이다**(ADR 0024 결정 4). upstream Spring Boot는 모든 주소에서 듣는다.
 - **SUB_WORKFLOW 태스크 갱신의 `subWorkflowId`를 반영하지 않는다**(ADR 0024 결정 1).
+- **`/api` 밖의 없는 경로도 404다.** upstream은 UI 정적 파일을 내주므로 `GET /nope`에 index HTML(200)을 준다.
+- **OPTIONS는 404다**(결정 1). upstream은 `Allow` 헤더로 200이다.
+- **500의 문구.** `TransientException`·매핑 없는 예외로 가는 런타임 오류(결정 4 표의 마지막 두 줄)는 upstream이 `th.getMessage()`를
+  주는 자리에 고정 문구(`"Temporary server error, retry the request"`, `"Internal server error"`)를 준다. Elixir 용어를 내보내지
+  않기 위해서다. 400대 Plug 예외도 예외 문구 대신 HTTP 상태 문구를 준다.
+- **요청 읽기의 차이**(결정 3): JSON이 아닌 body의 Jackson 문구를 옮기지 않고, 8 MB 넘는 body는 413이다(upstream은 제한이
+  없다). 실수로 나타낼 수 없는 지수(`1e999`)는 500 parse error다
+  (upstream은 `BigDecimal`로 받는다).
 - JSON 객체 키 순서 등 코덱 차이는 ADR 0002의 목록 그대로다.
 
 ## 대안

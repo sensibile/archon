@@ -1,0 +1,42 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/metadata/workflow",
+    "body": [
+      {
+        "name": "archon_bulk",
+        "version": 1,
+        "tasks": [
+          {
+            "name": "archon_task_c",
+            "taskReferenceName": "task_c_ref",
+            "type": "SIMPLE"
+          }
+        ]
+      },
+      {
+        "name": "archon_bulk",
+        "version": 2,
+        "description": "v2",
+        "tasks": [
+          {
+            "name": "archon_task_c",
+            "taskReferenceName": "task_c_ref",
+            "type": "SIMPLE"
+          }
+        ]
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "bulkErrorResults": {},
+      "bulkSuccessfulResults": [
+        "archon_bulk",
+        "archon_bulk"
+      ]
+    }
+  }
+}

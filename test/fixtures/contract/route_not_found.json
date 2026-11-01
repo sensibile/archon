@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/archon/missing",
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "content_type": "application/json",
+    "body": {
+      "status": 404,
+      "message": "No static resource api/archon/missing.",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

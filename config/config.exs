@@ -31,4 +31,15 @@ end
 # The Postgres backend's repository (ADR 0021, decision 1); the connection is in runtime.exs.
 config :archon, ecto_repos: [Archon.Repo]
 
+# The REST endpoint (ADR 0023, decision 1). It listens on 127.0.0.1:8080 unless runtime.exs reads
+# ARCHON_HTTP_IP and PORT (ADR 0024, decision 4).
+config :archon, ArchonWeb.Endpoint,
+  adapter: Bandit.PhoenixAdapter,
+  http: [ip: {127, 0, 0, 1}, port: 8080],
+  server: true,
+  render_errors: [formats: [json: ArchonWeb.ErrorJSON], layout: false]
+
+# The domain codecs already use the built-in JSON module (ADR 0002); Phoenix uses it too.
+config :phoenix, :json_library, JSON
+
 if config_env() == :test, do: import_config("test.exs")

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/workflow/be712840-c88e-49b6-af7f-799955389c0e?reason=archon-contract-late",
+    "body": null
+  },
+  "response": {
+    "status": 409,
+    "content_type": "application/json",
+    "body": {
+      "status": 409,
+      "message": "Cannot terminate a COMPLETED workflow.",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

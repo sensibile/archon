@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_missing",
+    "body": {}
+  },
+  "response": {
+    "status": 404,
+    "content_type": "application/json",
+    "body": {
+      "status": 404,
+      "message": "No such workflow found by name: archon_missing, version: null",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

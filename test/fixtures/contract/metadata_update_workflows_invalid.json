@@ -1,0 +1,39 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/metadata/workflow",
+    "body": [
+      {
+        "name": "archon_bulk_valid",
+        "version": 1,
+        "tasks": [
+          {
+            "name": "archon_task_c",
+            "taskReferenceName": "task_c_ref",
+            "type": "SIMPLE"
+          }
+        ]
+      },
+      {
+        "name": "archon_bulk_invalid",
+        "version": 1,
+        "tasks": []
+      }
+    ]
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Validation failed, check below errors for detail.",
+      "retryable": false,
+      "validationErrors": [
+        {
+          "path": "updateWorkflowDef.arg0[1].tasks",
+          "message": "WorkflowTask list cannot be empty"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/metadata/taskdefs",
+    "body": {
+      "name": "archon_missing",
+      "timeoutSeconds": 300,
+      "responseTimeoutSeconds": 60
+    }
+  },
+  "response": {
+    "status": 404,
+    "content_type": "application/json",
+    "body": {
+      "status": 404,
+      "message": "No such task by name archon_missing",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks",
+    "body": {
+      "workflowInstanceId": "00000000-0000-0000-0000-000000000000",
+      "taskId": ""
+    }
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Validation failed, check below errors for detail.",
+      "retryable": false,
+      "validationErrors": [
+        {
+          "path": "updateTask.arg0.taskId",
+          "message": "Task ID cannot be null or empty",
+          "invalidValue": ""
+        }
+      ]
+    }
+  }
+}

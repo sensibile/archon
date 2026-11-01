@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/00000000-0000-0000-0000-000000000000",
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "content_type": "application/json",
+    "body": {
+      "status": 404,
+      "message": "Task not found for taskId: 00000000-0000-0000-0000-000000000000",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

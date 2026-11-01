@@ -87,10 +87,10 @@ defmodule Archon.PostgresCase do
     do: if(Archon.Runtime.store() == Archon.Runtime.Store.Postgres, do: :postgres, else: :memory)
 
   @doc """
-  Starts `Archon.Runtime.Supervisor` under the application (`test/test_helper.exs`). On the
-  Postgres backend the runtime's tree owns `Archon.Repo` (ADR 0021, decision 8), so the repo
-  `setup_database/0` started is stopped first, after emptying the runtime schema: the runtime
-  tests start from no workflow, queue message or definition.
+  Starts `Archon.Runtime.Supervisor` and then `ArchonWeb.Endpoint` under the application
+  (`test/test_helper.exs`). On the Postgres backend the runtime's tree owns `Archon.Repo`
+  (ADR 0021, decision 8), so the repo `setup_database/0` started is stopped first, after emptying
+  the runtime schema: the runtime tests start from no workflow, queue message or definition.
   """
   @spec start_runtime(:memory | :postgres) :: :ok
   def start_runtime(:memory), do: start_runtime_child()
@@ -102,8 +102,10 @@ defmodule Archon.PostgresCase do
     start_runtime_child()
   end
 
+  # The REST endpoint after the runtime it calls, as in Archon.Application.
   defp start_runtime_child do
     {:ok, _pid} = Supervisor.start_child(Archon.Supervisor, Archon.Runtime.Supervisor)
+    {:ok, _pid} = Supervisor.start_child(Archon.Supervisor, ArchonWeb.Endpoint)
     :ok
   end
 

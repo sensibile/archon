@@ -1,0 +1,50 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/metadata/workflow/archon_bulk",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "createTime": 0,
+      "updateTime": 1793502390143,
+      "name": "archon_bulk",
+      "description": "v2",
+      "version": 2,
+      "tasks": [
+        {
+          "name": "archon_task_c",
+          "taskReferenceName": "task_c_ref",
+          "inputParameters": {},
+          "type": "SIMPLE",
+          "decisionCases": {},
+          "defaultCase": [],
+          "forkTasks": [],
+          "startDelay": 0,
+          "joinOn": [],
+          "optional": false,
+          "defaultExclusiveJoinTask": [],
+          "asyncComplete": false,
+          "loopOver": [],
+          "onStateChange": {},
+          "permissive": false,
+          "metadata": {}
+        }
+      ],
+      "inputParameters": [],
+      "outputParameters": {},
+      "schemaVersion": 2,
+      "restartable": true,
+      "workflowStatusListenerEnabled": false,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "variables": {},
+      "inputTemplate": {},
+      "enforceSchema": true,
+      "metadata": {},
+      "maskedFields": []
+    }
+  }
+}
