@@ -143,6 +143,19 @@ defmodule Archon.Runtime.Postgres.NodeLockTest do
     :ok = GenServer.stop(lock)
   end
 
+  # The last attempt may start with a deadline a few milliseconds away; it still gets the
+  # minimum attempt time to connect and see the lock held, not a connection that timed out.
+  test "an attempt with almost no time left still sees the lock held", %{instance: instance} do
+    {:ok, lock} = start(instance)
+
+    for _attempt <- 1..20 do
+      assert start(instance, retry_timeout: 0, publish: false) ==
+               {:error, :another_node_holds_the_database}
+    end
+
+    :ok = GenServer.stop(lock)
+  end
+
   test "a database it cannot reach is tried again, then fails the start", %{instance: instance} do
     started = System.monotonic_time(:millisecond)
 
