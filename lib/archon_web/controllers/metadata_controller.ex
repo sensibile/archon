@@ -16,7 +16,7 @@ defmodule ArchonWeb.MetadataController do
   (`POST /api/metadata/taskdefs`, `PUT /api/metadata/workflow`) also takes a single object as a
   list of one (upstream's `spring.jackson.deserialization.accept-single-value-as-array`). A body
   the domain codec cannot convert (`"retryCount": "abc"`) is a 500 whose message starts with
-  upstream's `"JSON parse error: "` but names the codec's path and reason instead of Jackson's
+  upstream's `"JSON parse error: "` followed by the codec's path and reason instead of Jackson's
   wording (ADR 0023, decision 4).
 
   Validation errors carry upstream's method and argument prefix (`registerTaskDef.arg0`,
@@ -163,9 +163,8 @@ defmodule ArchonWeb.MetadataController do
 
   defp parse_error({:ok, value}), do: {:ok, value}
 
-  # Jackson stops at the first value it cannot convert.
-  defp parse_error({:error, [{path, message} | _rest]}) do
-    where = if path == "", do: "the request body", else: path
-    {:error, {:server_error, "JSON parse error: Cannot deserialize #{where}: #{message}"}}
-  end
+  # Jackson stops at the first value it cannot convert; the message has the same shape as
+  # ArchonWeb.TaskController's (ADR 0023, decision 4).
+  defp parse_error({:error, [{path, message} | _rest]}),
+    do: {:error, {:server_error, "JSON parse error: " <> String.trim("#{path} #{message}")}}
 end

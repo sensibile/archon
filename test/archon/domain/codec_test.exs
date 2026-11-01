@@ -1,7 +1,7 @@
 defmodule Archon.Domain.CodecTest do
   use ExUnit.Case, async: true
 
-  alias Archon.Domain.{Codec, Task, TaskDef, Workflow, WorkflowDef, WorkflowTask}
+  alias Archon.Domain.{Codec, Task, TaskDef, TaskResult, Workflow, WorkflowDef, WorkflowTask}
 
   describe "missing keys and explicit null (Jackson defaults)" do
     test "a missing key keeps the field initializer" do
@@ -75,15 +75,14 @@ defmodule Archon.Domain.CodecTest do
   end
 
   describe "errors" do
-    # A body within the 8 MB limit holds this many bad elements; appending each error to the
-    # ones before it would take minutes (ADR 0023, slice 5c review).
-    test "many errors are gathered in order without quadratic copying" do
-      items = List.duplicate(false, 200_000)
+    test "a list of failing items stops at 100 errors, in order" do
+      json = %{"logs" => List.duplicate(1, 1_000_000)}
+      {micros, result} = :timer.tc(fn -> TaskResult.from_json(json) end)
 
-      assert {:error, errors} = Codec.cast({:list, {:struct, TaskDef}}, items, [], [])
-      assert length(errors) == 200_000
-      assert Enum.take(errors, 2) == [{"[0]", "must be object"}, {"[1]", "must be object"}]
-      assert List.last(errors) == {"[199999]", "must be object"}
+      assert {:error, errors} = result
+      assert errors == for(i <- 0..99, do: {"logs[#{i}]", "must be object"})
+      # Appending every item's errors to the whole took minutes here (quadratic).
+      assert micros < 2_000_000
     end
 
     test "a non-object body is rejected" do
