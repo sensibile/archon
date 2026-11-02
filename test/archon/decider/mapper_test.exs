@@ -520,6 +520,34 @@ defmodule Archon.Decider.MapperTest do
                "The Task Foo defined as a sub-workflow has no workflow definition available "
     end
 
+    # ADR 0026, decision 4: a name the runtime could not read beforehand is looked up.
+    test "a name the context's versions lack takes the latest version the lookup reads" do
+      wt = sub_workflow(%SubWorkflowParams{name: "Foo"})
+      workflow = workflow([wt], %{})
+      test = self()
+
+      lookup = fn name, version ->
+        send(test, {:lookup, name, version})
+
+        if name == "Foo",
+          do: {:ok, %WorkflowDef{name: "Foo", version: 4}},
+          else: {:error, :not_found}
+      end
+
+      assert {:ok, [task]} = schedule(workflow, wt, workflow_def_lookup: lookup)
+      assert task.input_data["subWorkflowVersion"] == 4
+      assert_received {:lookup, "Foo", nil}
+
+      assert {:ok, [task]} =
+               schedule(workflow, wt,
+                 workflow_def_lookup: lookup,
+                 latest_workflow_versions: %{"Foo" => 7}
+               )
+
+      assert task.input_data["subWorkflowVersion"] == 7
+      refute_received {:lookup, _name, _version}
+    end
+
     test "a numeric priority overrides the workflow priority; an expression only the input" do
       wt = sub_workflow(%SubWorkflowParams{name: "Foo", version: 1, priority: 5})
       assert {:ok, [task]} = schedule(workflow([wt], %{}, priority: 1), wt)

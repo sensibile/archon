@@ -66,6 +66,11 @@ defmodule Archon.Decider do
   @doc false
   # Upstream's DYNAMIC and HTTP mappers change the definition's workflow task object, which the
   # scheduled task shares; the change shows in the workflow's definition (ADR 0026, decision 4).
+  # Only the tasks a mapper just made count: a task already in the workflow and a retry copy
+  # (`retried_task_id`) carry a workflow task upstream read back from the store, not the
+  # definition's object. They may differ from the definition: a DYNAMIC task of a DO_WHILE
+  # iteration is made from the loop task's own workflow tasks (Step.Decide), which leaves the
+  # definition as it is.
   # `changes?` is Mapper.changes_definition?/1 but for the tests.
   @spec change_definition(Outcome.t(), (String.t() | nil -> boolean())) :: Outcome.t()
   def change_definition(outcome, changes? \\ &Mapper.changes_definition?/1)
@@ -76,9 +81,12 @@ defmodule Archon.Decider do
       ) do
     definition = outcome.workflow.workflow_definition
 
+    in_workflow = MapSet.new(outcome.workflow.tasks, & &1.task_id)
+
     changed =
-      for %Task{workflow_task: %WorkflowTask{type: type, task_reference_name: ref} = wt} <-
+      for %Task{workflow_task: %WorkflowTask{type: type, task_reference_name: ref} = wt} = task <-
             outcome.tasks_to_be_scheduled,
+          task.retried_task_id == nil and not MapSet.member?(in_workflow, task.task_id),
           changes?.(type),
           WorkflowDef.task_by_ref_name(definition, ref) not in [nil, wt],
           do: wt

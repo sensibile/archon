@@ -6,7 +6,8 @@
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/mapper/SubWorkflowTaskMapper.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: returns a value through the Archon.Decider.Mapper behaviour; the
-# MetadataDAO lookup of the latest version reads the Decider context.
+# MetadataDAO lookup of the latest version reads the Decider context (its versions read
+# beforehand, then its workflow definition lookup).
 
 defmodule Archon.Decider.Mapper.SubWorkflow do
   @moduledoc """
@@ -16,8 +17,10 @@ defmodule Archon.Decider.Mapper.SubWorkflow do
   The `subWorkflowParam` fields are resolved like task inputs. A `workflowDefinition` expression
   is resolved with them; an inline definition is added afterwards, so its own `${...}` strings
   stay as they are. Without an inline definition and a version, the version is the latest one
-  in the context's `latest_workflow_versions` (upstream `MetadataDAO.getLatestWorkflowDef`),
-  and the workflow terminates when there is none. A name that resolves to `null` also
+  in the context's `latest_workflow_versions`, else the one its `workflow_def_lookup` reads
+  (upstream `MetadataDAO.getLatestWorkflowDef`), and the workflow terminates when there is none.
+  The lookup serves names the runtime could not read beforehand, such as the `forkTaskWorkflow`
+  branches of a `FORK_JOIN_DYNAMIC` (ADR 0026, decision 4). A name that resolves to `null` also
   terminates it, where upstream throws a `NullPointerException` (ADR 0014).
   """
 
@@ -114,15 +117,22 @@ defmodule Archon.Decider.Mapper.SubWorkflow do
     do: {:ok, trunc(version)}
 
   defp version(_resolved, nil, name, context) do
-    case Map.fetch(context.decider.latest_workflow_versions, name) do
+    with :error <- Map.fetch(context.decider.latest_workflow_versions, name),
+         {:ok, %WorkflowDef{version: version}} <-
+           lookup(context.decider.workflow_def_lookup, name) do
+      {:ok, version}
+    else
       {:ok, version} ->
         {:ok, version}
 
-      :error ->
+      _none ->
         {:terminate,
          "The Task #{name} defined as a sub-workflow has no workflow definition available "}
     end
   end
+
+  defp lookup(nil, _name), do: {:error, :not_found}
+  defp lookup(fun, name), do: fun.(name, nil)
 
   defp task_to_domain(map) when is_map(map), do: map
   defp task_to_domain(_other), do: nil

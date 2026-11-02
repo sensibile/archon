@@ -169,6 +169,14 @@ defmodule ArchonWeb.ContractCase do
   @start_workflow [types: ["START_WORKFLOW", "NOOP"]]
   @http [types: ["HTTP"]]
   @settled [until: :settled]
+  # Upstream's system task worker evaluates the JOIN of a dynamic fork on its own clock, so
+  # whether and how often it did varies between captures of the same steps.
+  @fjd_join_poll [ignore: [["tasks", 3, "pollCount"], ["tasks", 3, "updateTime"]]]
+  # The canceled JOIN a retry runs again keeps its endTime in upstream's retry code as here, but
+  # the capture shows 0 (the retry raced the JOIN's own evaluation there).
+  @fjd_retried_join [
+    ignore: [["tasks", 3, "pollCount"], ["tasks", 3, "updateTime"], ["tasks", 3, "endTime"]]
+  ]
   # The server's host name as the HTTP task's workerId, and the stub's Date header.
   @http_volatile [
     ignore: [
@@ -652,39 +660,39 @@ defmodule ArchonWeb.ContractCase do
     # FORK_JOIN_DYNAMIC
     {:exchange, "p7_fjd_register_simple", @fork_join_dynamic},
     {:exchange, "p7_fjd_simple_start", @fork_join_dynamic},
-    {:exchange, "p7_fjd_simple_get", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_simple_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
     {:exchange, "p7_fjd_simple_update_0", @fork_join_dynamic},
     {:exchange, "p7_fjd_simple_update_1", @fork_join_dynamic},
-    {:exchange, "p7_fjd_simple_get_completed", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_simple_get_completed", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
     {:exchange, "p7_fjd_register_param", @fork_join_dynamic},
     {:exchange, "p7_fjd_param_start", @fork_join_dynamic},
-    {:exchange, "p7_fjd_param_get", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_param_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
     {:exchange, "p7_fjd_param_update_0", @fork_join_dynamic},
     {:exchange, "p7_fjd_param_update_1", @fork_join_dynamic},
-    {:exchange, "p7_fjd_param_get_completed", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_param_get_completed", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
     {:exchange, "p7_fjd_register_legacy", @fork_join_dynamic},
     {:exchange, "p7_fjd_legacy_start", @fork_join_dynamic},
-    {:exchange, "p7_fjd_legacy_get", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_legacy_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
     {:exchange, "p7_fjd_legacy_update_0", @fork_join_dynamic},
     {:exchange, "p7_fjd_legacy_update_1", @fork_join_dynamic},
-    {:exchange, "p7_fjd_legacy_get_completed", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_legacy_get_completed", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
     {:exchange, "p7_fjd_register_no_join", @fork_join_dynamic},
     {:exchange, "p7_fjd_no_join_start", @fork_join_dynamic},
     {:exchange, "p7_fjd_no_join_get", @fork_join_dynamic ++ @settled},
     {:exchange, "p7_fjd_retry_start", @fork_join_dynamic},
-    {:exchange, "p7_fjd_retry_get", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_retry_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
     {:exchange, "p7_fjd_retry_fail", @fork_join_dynamic},
-    {:exchange, "p7_fjd_retry_get_failed", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_retry_get_failed", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
     {:exchange, "p7_fjd_retry", @fork_join_dynamic},
-    {:exchange, "p7_fjd_retried_get", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_retried_get", @fork_join_dynamic ++ @settled ++ @fjd_retried_join},
     {:exchange, "p7_fjd_retried_update_0", @fork_join_dynamic},
     {:exchange, "p7_fjd_retried_update_1", @fork_join_dynamic},
-    {:exchange, "p7_fjd_retried_get_completed", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_retried_get_completed", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
     {:exchange, "p7_fjd_rerun_branch", @fork_join_dynamic},
-    {:exchange, "p7_fjd_rerun_branch_get", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_rerun_branch_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
     {:exchange, "p7_fjd_rerun_terminate", @fork_join_dynamic},
     {:exchange, "p7_fjd_rerun_fork", @fork_join_dynamic},
-    {:exchange, "p7_fjd_rerun_fork_get", @fork_join_dynamic ++ @settled},
+    {:exchange, "p7_fjd_rerun_fork_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
     # INLINE
     {:exchange, "p7_inline_register", @inline},
     {:exchange, "p7_inline_javascript_start", @inline},

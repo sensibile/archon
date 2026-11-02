@@ -24,7 +24,9 @@ defmodule Archon.Decider.Mapper do
     Context,
     Decision,
     DoWhile,
+    Dynamic,
     ForkJoin,
+    ForkJoinDynamic,
     Join,
     Simple,
     SubWorkflow,
@@ -56,7 +58,9 @@ defmodule Archon.Decider.Mapper do
     "JOIN" => Join,
     "DO_WHILE" => DoWhile,
     "SUB_WORKFLOW" => SubWorkflow,
-    "WAIT" => Wait
+    "WAIT" => Wait,
+    "DYNAMIC" => Dynamic,
+    "FORK_JOIN_DYNAMIC" => ForkJoinDynamic
   }
 
   @doc "The mapper for a task type, `UserDefined` when none is registered."
