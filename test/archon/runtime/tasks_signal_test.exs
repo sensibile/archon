@@ -151,6 +151,75 @@ defmodule Archon.Runtime.TasksSignalTest do
       assert Tasks.signal(parent, :completed, %{"s" => 9}) == {:ok, wait.task_id}
       assert %Task{status: :completed, output_data: %{"s" => 9}} = task(child, "wait1_ref")
     end
+
+    # TaskServiceImpl#findPendingBlockingTask: a child without a blocked task leaves the search
+    # to the next running SUB_WORKFLOW task.
+    test "passes over a child without a WAIT task to the next running SUB_WORKFLOW task" do
+      {:ok, definition} =
+        WorkflowDef.from_json(%{
+          "name" => "archon_test_gap_signal_fork",
+          "version" => 1,
+          "schemaVersion" => 2,
+          "timeoutPolicy" => "ALERT_ONLY",
+          "timeoutSeconds" => 0,
+          "tasks" => [
+            %{
+              "name" => "fork",
+              "taskReferenceName" => "fork_ref",
+              "type" => "FORK_JOIN",
+              "forkTasks" => [
+                [
+                  %{
+                    "name" => "archon_ops_sub_once",
+                    "taskReferenceName" => "idle_sub_ref",
+                    "type" => "SUB_WORKFLOW",
+                    "subWorkflowParam" => %{"name" => "archon_ops_idle", "version" => 1}
+                  }
+                ],
+                [
+                  %{
+                    "name" => "archon_ops_sub_once",
+                    "taskReferenceName" => "waits_sub_ref",
+                    "type" => "SUB_WORKFLOW",
+                    "subWorkflowParam" => %{"name" => "archon_ops_waits", "version" => 1}
+                  }
+                ]
+              ]
+            },
+            %{
+              "name" => "join",
+              "taskReferenceName" => "join_ref",
+              "type" => "JOIN",
+              "joinOn" => ["idle_sub_ref", "waits_sub_ref"]
+            }
+          ]
+        })
+
+      :ok = Runtime.metadata().update_workflow_def(definition)
+      parent = start("archon_test_gap_signal_fork")
+
+      [idle, waits] =
+        for ref <- ["idle_sub_ref", "waits_sub_ref"] do
+          eventually(fn ->
+            with %Task{} = sub <- task(parent, ref),
+                 id when is_binary(id) <- Task.sub_workflow_id(sub),
+                 do: id
+          end)
+        end
+
+      eventually(fn -> task(idle, "idle_ref") end)
+      wait = eventually(fn -> task(waits, "wait1_ref") end)
+
+      assert [
+               %Task{reference_task_name: "idle_sub_ref"},
+               %Task{reference_task_name: "waits_sub_ref"}
+             ] =
+               Enum.filter(workflow(parent).tasks, &(&1.task_type == "SUB_WORKFLOW"))
+
+      assert Tasks.signal(parent, :completed, %{"s" => 3}) == {:ok, wait.task_id}
+      assert %Task{status: :completed, output_data: %{"s" => 3}} = task(waits, "wait1_ref")
+      assert %Task{status: :scheduled} = task(idle, "idle_ref")
+    end
   end
 
   describe "signal/3 and children it cannot use" do
