@@ -1145,9 +1145,10 @@ defmodule ArchonWeb.ContractCase do
 
   defp assert_started(name, actual) do
     assert match?(
-             %{status: 200, content_type: "text/plain" <> _, body: <<_, _::binary>>},
+             %{status: 200, content_type: "text/plain" <> _, body: id} when is_binary(id),
              actual
-           ),
+           ) and
+             Regex.match?(~r/\A#{Contract.uuid_regex().source}\z/, actual.body),
            "#{name}: not a start: #{inspect(actual)}"
   end
 

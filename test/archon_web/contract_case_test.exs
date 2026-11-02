@@ -327,6 +327,10 @@ defmodule ArchonWeb.ContractCaseTest do
       assert_raise ExUnit.AssertionError, ~r/not a start/, fn ->
         check("t", upstream, %{started | status: 500}, new_state(), expect: :started)
       end
+
+      assert_raise ExUnit.AssertionError, ~r/not a start/, fn ->
+        check("t", upstream, %{started | body: "error"}, new_state(), expect: :started)
+      end
     end
   end
 end
