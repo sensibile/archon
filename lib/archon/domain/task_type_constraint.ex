@@ -155,8 +155,6 @@ defmodule Archon.Domain.TaskTypeConstraint do
     optional ++ status_errors
   end
 
-  # Either the task's inputParameters or its task definition's inputTemplate names a
-  # queryExpression (the key only: a null value passes).
   # isHttpTaskValid: http_request in the inputs or the definition's inputTemplate, or a top-level
   # uri or method.
   defp messages(%WorkflowTask{type: "HTTP"} = task, opts) do
@@ -177,6 +175,8 @@ defmodule Archon.Domain.TaskTypeConstraint do
     )
   end
 
+  # Either the task's inputParameters or its task definition's inputTemplate names a
+  # queryExpression (the key only: a null value passes).
   defp messages(%WorkflowTask{type: "JSON_JQ_TRANSFORM"} = task, opts) do
     template =
       case task_definition(task, opts) do

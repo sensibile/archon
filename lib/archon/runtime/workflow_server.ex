@@ -414,6 +414,7 @@ defmodule Archon.Runtime.WorkflowServer do
   @impl GenServer
   def handle_continue(:recover, state) do
     terminal? = terminal?(state.workflow)
+    state = adopt_http(state)
     {_reply, state} = handle_event(:recover, %{state | recovered_at: Runtime.now()})
     state = check_outbox(state)
     if terminal?, do: idle(state), else: settle(state)
@@ -485,15 +486,18 @@ defmodule Archon.Runtime.WorkflowServer do
   def handle_call(_event, _from, %__MODULE__{workflow: nil} = state),
     do: {:reply, {:error, :not_found}, state, idle_timeout()}
 
-  # The request of this attempt is no longer in flight, whatever the step makes of its result.
+  # The request of this attempt is no longer in flight once its result is taken; a result the
+  # step failed on is delivered again (Archon.Runtime.HttpTask), so the request stays in flight.
   def handle_call({:http_completed, task_id, poll_count, _result} = event, _from, state) do
-    http =
-      case state.http do
-        %{^task_id => ^poll_count} -> Map.delete(state.http, task_id)
-        http -> http
+    {reply, state} = handle_event(event, state)
+
+    state =
+      case {reply, state.http} do
+        {{:error, _reason}, _http} -> state
+        {_ok, %{^task_id => ^poll_count}} -> %{state | http: Map.delete(state.http, task_id)}
+        _other -> state
       end
 
-    {reply, state} = handle_event(event, %{state | http: http})
     reply_and_settle(reply, state)
   end
 
@@ -588,6 +592,20 @@ defmodule Archon.Runtime.WorkflowServer do
   def terminate(_reason, _state), do: :ok
 
   ## HTTP
+
+  # An activated process takes the started HTTP tasks as in flight: a request an earlier process
+  # sent may still run, and is cancelled like its own once its task ends (ADR 0026, decision 7).
+  defp adopt_http(%__MODULE__{workflow: %Workflow{tasks: tasks}} = state) do
+    adopted =
+      for %Task{task_type: "HTTP", status: :scheduled, poll_count: count} = task <- tasks,
+          count > 0,
+          into: %{},
+          do: {task.task_id, count}
+
+    %{state | http: Map.merge(adopted, state.http)}
+  end
+
+  defp adopt_http(state), do: state
 
   # ADR 0026, decision 7: a request whose task is no longer that attempt (it ended, was removed
   # or started again) is ended, which gives its place in the executor to the next.

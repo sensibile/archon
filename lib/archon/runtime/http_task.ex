@@ -43,6 +43,13 @@ defmodule Archon.Runtime.HttpTask do
 
   @tasks Archon.Runtime.HttpTask.Tasks
 
+  # How long after its total time limit the executor ends a request the client did not.
+  @grace_ms 1_000
+
+  # The first wait before a delivery is tried again, doubled up to @max_retry_ms.
+  @retry_ms 100
+  @max_retry_ms 5_000
+
   defstruct max: 1, queue: :queue.new(), waiting: %{}, running: %{}, refs: %{}
 
   @type key :: {String.t(), String.t()}
@@ -56,7 +63,7 @@ defmodule Archon.Runtime.HttpTask do
   """
   @spec request(String.t(), String.t(), non_neg_integer(), Http.request()) :: :ok
   def request(workflow_id, task_id, poll_count, request),
-    do: GenServer.cast(__MODULE__, {:request, {workflow_id, task_id}, poll_count, request})
+    do: GenServer.call(__MODULE__, {:request, {workflow_id, task_id}, poll_count, request})
 
   @doc "Drops the request of the task: unsent if it waits, ended if it runs."
   @spec cancel(String.t(), String.t()) :: :ok
@@ -69,12 +76,17 @@ defmodule Archon.Runtime.HttpTask do
   def info, do: GenServer.call(__MODULE__, :info)
 
   @impl GenServer
+  def handle_cast({:cancel, key}, state), do: {:noreply, state |> drop(key) |> next()}
+
+  @impl GenServer
   def init(_opts) do
     {:ok, %__MODULE__{max: setting(:max_concurrency, System.schedulers_online() * 2)}}
   end
 
+  # A call, so a workflow process sees an executor that is not there (restarting) as a failed
+  # effect instead of a request it believes in flight.
   @impl GenServer
-  def handle_cast({:request, key, poll_count, request}, state) do
+  def handle_call({:request, key, poll_count, request}, _from, state) do
     state = drop(state, key)
     job = %{key: key, poll_count: poll_count, request: request, id: make_ref()}
 
@@ -84,12 +96,9 @@ defmodule Archon.Runtime.HttpTask do
         waiting: Map.put(state.waiting, key, job)
     }
 
-    {:noreply, next(state)}
+    {:reply, :ok, next(state)}
   end
 
-  def handle_cast({:cancel, key}, state), do: {:noreply, state |> drop(key) |> next()}
-
-  @impl GenServer
   def handle_call(:info, _from, state),
     do: {:reply, %{running: Map.keys(state.running), waiting: Map.keys(state.waiting)}, state}
 
@@ -110,7 +119,23 @@ defmodule Archon.Runtime.HttpTask do
       "the HTTP request of task #{task_id} of workflow #{workflow_id} failed: #{inspect(reason)}"
     )
 
+    # Upstream's start catches the exception and fails the task.
+    deliver(job, {:error, {:io, Exception.format_exit(reason)}})
     {:noreply, next(state)}
+  end
+
+  # The backstop of the total time limit: a request the client did not end by then (a send that
+  # blocks on a target that does not read) is ended here.
+  def handle_info({:expire, key, id}, state) do
+    case state.running do
+      %{^key => %{job: %{id: ^id} = job}} ->
+        state = drop(state, key)
+        deliver(job, {:error, {:io, Client.total_error()}})
+        {:noreply, next(state)}
+
+      _done ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -164,6 +189,7 @@ defmodule Archon.Runtime.HttpTask do
       }
 
       task = Task.Supervisor.async_nolink(@tasks, Client, :run, [request, limits])
+      Process.send_after(self(), {:expire, job.key, job.id}, limits.total_ms + @grace_ms)
 
       %{
         state
@@ -174,14 +200,39 @@ defmodule Archon.Runtime.HttpTask do
   end
 
   # Delivered from its own process, so a workflow process that is busy or being activated does
-  # not hold the executor.
-  defp deliver(%{key: {workflow_id, task_id}, poll_count: poll_count}, result) do
+  # not hold the executor. A delivery that fails (a store that is down, a call that timed out) is
+  # tried again until the task's deadline, after which the task is timed out anyway; a workflow
+  # that is gone takes nothing.
+  defp deliver(%{key: {workflow_id, task_id}, poll_count: poll_count, request: request}, result) do
     {module, function, args} =
       setting(:deliver, {Archon.Runtime.WorkflowServer, :http_completed, []})
 
+    args = args ++ [workflow_id, task_id, poll_count, result]
+
     Task.Supervisor.start_child(@tasks, fn ->
-      apply(module, function, args ++ [workflow_id, task_id, poll_count, result])
+      deliver_until(module, function, args, request.deadline, @retry_ms)
     end)
+  end
+
+  defp deliver_until(module, function, [workflow_id, task_id | _rest] = args, deadline, wait) do
+    case apply(module, function, args) do
+      {:error, :not_found} ->
+        :ok
+
+      {:error, reason} ->
+        if Runtime.now() + wait < deadline do
+          Process.sleep(wait)
+          deliver_until(module, function, args, deadline, min(wait * 2, @max_retry_ms))
+        else
+          Logger.error(
+            "the HTTP result of task #{task_id} of workflow #{workflow_id} was not delivered: " <>
+              inspect(reason)
+          )
+        end
+
+      _delivered ->
+        :ok
+    end
   end
 
   defp setting(key, default),

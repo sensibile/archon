@@ -188,6 +188,16 @@ defmodule Archon.Runtime.HttpRuntimeTest do
     idle_executor()
   end
 
+  test "a process activated after a crash cancels the request the old one sent", %{url: url} do
+    id = start_http(url, "/hang")
+    assert_receive {:target, "/hang"}, 2000
+    Process.exit(WorkflowServer.whereis(id), :kill)
+    await_down(id)
+
+    assert :ok = Runtime.terminate_workflow(id, "stop")
+    idle_executor()
+  end
+
   test "a process with a request in flight is not evicted", %{url: url} do
     put_settings(evict_after: 1_000, hibernate_after: 20)
     id = start_http(url, "/sleep/400", true)

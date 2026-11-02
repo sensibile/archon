@@ -211,6 +211,40 @@ defmodule Archon.Runtime.HttpTaskTest do
       assert elapsed >= 400 and elapsed < 2000
     end
 
+    test "a send to a target that does not read ends at the total limit" do
+      {:ok, listen} =
+        :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}, recbuf: 1024])
+
+      {:ok, port} = :inet.port(listen)
+      test = self()
+
+      acceptor =
+        spawn_link(fn ->
+          # The socket stays open, unread, while the process lives.
+          {:ok, _socket} = :gen_tcp.accept(listen)
+          send(test, :accepted)
+          Process.sleep(:infinity)
+        end)
+
+      on_exit(fn -> Process.exit(acceptor, :kill) end)
+      body = String.duplicate("x", 32 * 1024 * 1024)
+      request = request("http://127.0.0.1:#{port}/", method: "POST", body: body)
+
+      started = System.monotonic_time(:millisecond)
+
+      assert {:error, {:io, "Request did not complete within its total time limit"}} =
+               Client.run(request, %{@limits | total_ms: 300})
+
+      assert System.monotonic_time(:millisecond) - started < 2000
+      assert_received :accepted
+    end
+
+    test "user Accept-Encoding is not doubled", %{url: url} do
+      request = request(url <> "/echo", headers: [{"accept-encoding", "identity"}])
+      assert {:ok, %{body: body}} = Client.run(request, @limits)
+      assert Jason.decode!(body)["headers"]["accept-encoding"] == "identity"
+    end
+
     test "a refused connection has upstream's message" do
       assert {:error,
               {:io, "Connect to http://127.0.0.1:9 failed: Connection refused (connect failed)"}} =
@@ -315,6 +349,28 @@ defmodule Archon.Runtime.HttpTaskTest do
       refute_received {:target, _method, "/echo"}
     end
 
+    test "a request task that crashes is delivered as an I/O error", %{url: url} do
+      broken = Map.delete(request(url <> "/json"), :headers)
+      :ok = HttpTask.request("wf-1", "a", 1, broken)
+      assert_receive {:delivered, "wf-1", "a", 1, {:error, {:io, _cause}}}, 2000
+      assert HttpTask.info() == %{running: [], waiting: []}
+    end
+
+    test "a delivery that fails is tried again; a workflow that is gone stops it", %{url: url} do
+      {:ok, attempts} = Agent.start_link(fn -> 0 end)
+      config = Application.get_env(:archon, HttpTask, [])
+      deliver = {__MODULE__, :flaky, [self(), attempts]}
+      Application.put_env(:archon, HttpTask, Keyword.put(config, :deliver, deliver))
+
+      :ok = HttpTask.request("wf-1", "a", 1, request(url <> "/json"))
+      assert_receive {:delivered, "wf-1", "a", 1, {:ok, %{status: 200}}}, 2000
+      assert Agent.get(attempts, & &1) == 3
+
+      :ok = HttpTask.request("gone", "a", 1, request(url <> "/json"))
+      assert_receive {:not_found, "gone"}, 2000
+      refute_receive {:not_found, "gone"}, 300
+    end
+
     test "a request ends at the total limit, never past the task's deadline", %{url: url} do
       :ok =
         HttpTask.request("wf-1", "a", 1, request(url <> "/drip", deadline: Runtime.now() + 300))
@@ -328,6 +384,20 @@ defmodule Archon.Runtime.HttpTaskTest do
   @doc false
   def forward(test, workflow_id, task_id, poll_count, result),
     do: send(test, {:delivered, workflow_id, task_id, poll_count, result})
+
+  @doc false
+  # Fails twice with what a busy process answers, then takes the result; "gone" is not found.
+  def flaky(test, _attempts, "gone", _task_id, _poll_count, _result) do
+    send(test, {:not_found, "gone"})
+    {:error, :not_found}
+  end
+
+  def flaky(test, attempts, workflow_id, task_id, poll_count, result) do
+    case Agent.get_and_update(attempts, &{&1 + 1, &1 + 1}) do
+      n when n < 3 -> {:error, {:exit, :timeout}}
+      _n -> forward(test, workflow_id, task_id, poll_count, result)
+    end
+  end
 
   defp with_max_concurrency(max) do
     config = Application.get_env(:archon, HttpTask, [])

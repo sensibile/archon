@@ -126,7 +126,14 @@ defmodule Archon.Runtime.HttpTask.Client do
     opts = [
       mode: :passive,
       protocols: [:http1],
-      transport_opts: [timeout: wait(request.connect_timeout, ends)]
+      # A send to a target that does not read ends at the total limit too, and closing drops what
+      # it did not take (no linger: a close would otherwise wait for the send queue).
+      transport_opts: [
+        timeout: wait(request.connect_timeout, ends),
+        send_timeout: max(wait(0, ends), 1),
+        send_timeout_close: true,
+        linger: {true, 0}
+      ]
     ]
 
     case Mint.HTTP.connect(target.scheme, target.host, target.port, opts) do
@@ -159,7 +166,11 @@ defmodule Archon.Runtime.HttpTask.Client do
       "Connect to #{target.scheme}://#{target.host}:#{target.port} failed: #{Exception.message(error)}"
 
   defp send_request(conn, target, request, limits, ends) do
-    headers = request.headers ++ [{"Accept-Encoding", @accept_encoding}]
+    # ContentCompressionExec adds the header unless the request has one.
+    headers =
+      if Enum.any?(request.headers, &accept_encoding?/1),
+        do: request.headers,
+        else: request.headers ++ [{"Accept-Encoding", @accept_encoding}]
 
     case Mint.HTTP.request(conn, request.method, target.path, headers, request.body) do
       {:ok, conn, ref} ->
@@ -171,11 +182,19 @@ defmodule Archon.Runtime.HttpTask.Client do
         })
 
       {:error, _conn, error} ->
-        {:error, {:io, Exception.message(error)}}
+        {:error, {:io, if(over?(ends), do: total_error(), else: Exception.message(error))}}
     end
   end
 
+  defp accept_encoding?({name, _value}), do: String.downcase(name) == "accept-encoding"
+
   defp receive_response(conn, ref, request, limits, ends, acc) do
+    if over?(ends),
+      do: {:error, {:io, total_error()}},
+      else: receive_more(conn, ref, request, limits, ends, acc)
+  end
+
+  defp receive_more(conn, ref, request, limits, ends, acc) do
     case Mint.HTTP.recv(conn, 0, wait(request.read_timeout, ends)) do
       {:ok, conn, responses} ->
         case collect(responses, ref, limits, acc) do
@@ -298,7 +317,10 @@ defmodule Archon.Runtime.HttpTask.Client do
   defp body_error(limits),
     do: {:error, {:io, "Response body is larger than #{limits.max_body} bytes"}}
 
-  defp total_error, do: "Request did not complete within its total time limit"
+  @doc false
+  # The cause of a request ended at its total time limit.
+  @spec total_error() :: String.t()
+  def total_error, do: "Request did not complete within its total time limit"
 
   # A read or connect waits its own timeout (0: none) but never past the total time limit.
   defp wait(ms, ends) do

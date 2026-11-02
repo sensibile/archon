@@ -554,18 +554,25 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   - **실행기**(`Archon.Runtime.HttpTask`, 앱 감독 트리의 `Archon.Runtime.HttpTask.Supervisor`가 Task 감독자와 함께 `:one_for_all`로
     띄운다): 요청은 `Task.Supervisor.async_nolink`로 보내고, 결과는 별도 감독 Task가 워크플로우 ID로
     `WorkflowServer.http_completed/4`에 전한다(바쁜 워크플로우 프로세스가 실행기를 막지 않게). 요청은 워크플로우·태스크로 식별하고
-    같은 태스크의 새 요청은 옛 요청을 먼저 끝낸다.
+    같은 태스크의 새 요청은 옛 요청을 먼저 끝낸다. 요청을 넘기는 것은 호출(`GenServer.call`)이라, 재시작 중인 실행기는 효과 실패로
+    보인다. 전달이 실패하면(저장소 오류, 바쁜 프로세스의 호출 시간 초과) 태스크 마감까지 간격을 두 배로 늘리며(100ms~5초) 다시
+    전하고, 워크플로우가 없으면 그친다. 프로세스는 결과를 받아들인 뒤에야 그 요청을 진행 중에서 뺀다. 요청 Task가 죽으면 그 이유를
+    I/O 오류로 전한다(upstream `start`의 `catch`처럼 `FAILED`).
   - **취소를 보내는 자리**(불변식 2): 워크플로우 프로세스는 진행 중 요청을 태스크 ID → `pollCount`로 상태에 둔다
     (`Step.Env.http_in_flight`는 그 키). 커밋이 끝날 때마다 그 태스크가 더는 `SCHEDULED`·같은 `pollCount`가 아니면(끝남·`TIMED_OUT`·
     종료로 `CANCELED`·지워짐·다시 시작됨) `HttpTask.cancel/2`를 보낸다. 실행기는 기다리는 요청은 보내지 않고 버리고, 보내는 중인
     요청은 그 Task를 끝내 연결을 닫고 자리를 다음에 넘긴다. 프로세스가 정상 종료할 때(`terminate/2`의 `:normal`: 워크플로우가 끝났거나
     지워짐, 시작 실패) 남은 요청을 모두 끊는다. 비정상 종료는 끊지 않으므로 활성화한 새 프로세스가 결과를 받는다. 같은 단계에서 태스크가
-    다른 시도가 되면 요청 효과 자체를 버린다(`Step.finish`의 `still_wanted?`).
+    다른 시도가 되면 요청 효과 자체를 버린다(`Step.finish`의 `still_wanted?`). 비정상 종료 뒤 활성화한 프로세스는 시작한
+    `SCHEDULED` HTTP 태스크(`pollCount` > 0)를 진행 중으로 넘겨받아, 옛 프로세스가 보낸 요청도 그 태스크가 끝나면 끊는다(그 동안
+    `evict_after`로 끝나지도 않는다).
   - **상한 값과 설정 키**(불변식 3, `config :archon, Archon.Runtime.HttpTask, ...`): `max_concurrency`(기본 스케줄러 수 × 2),
     `max_request_ms`(기본 60 000, 리다이렉트를 포함한 요청 하나의 전체 시간. 태스크 마감을 넘지 않는다), `max_response_bytes`(기본
     10 MiB, 읽은 body와 푼 body 모두). 60초는 기본 `readTimeOut`(3초)의 스무 배로 느린 대상도 받되, 조금씩 보내는 대상이 자리
     하나를 1분보다 오래 쥐지 못하는 값이다. 상한을 넘으면 I/O 오류로 `FAILED`다(`... request for "<uri>": Request did not complete within
-    its total time limit`, `Response body is larger than <n> bytes`). 기다리는 요청은 꺼낼 때 마감이 지났으면 보내지 않는다.
+    its total time limit`, `Response body is larger than <n> bytes`). 기다리는 요청은 꺼낼 때 마감이 지났으면 보내지 않는다. 클라이언트는 연결·보내기(`send_timeout`)·읽기를 모두 남은 전체
+    시간 안으로 묶고, 닫을 때 보내지 못한 것을 기다리지 않는다(`linger` 0). 실행기는 전체 시간 상한 1초 뒤에도 끝나지 않은 요청을
+    직접 끝내고 같은 I/O 오류로 전한다.
   - 고르는 자리의 거르기(`Step.Async.pass`): 시작 모듈이 있고 시작이 멱등이 아닌 타입(HTTP)의 `SCHEDULED` 태스크는 진행 중 집합에
     있거나 `pollCount` > 0이면 마감(`updateTime` + `responseTimeoutSeconds`, 0이면 1시간) 전에는 어떤 패스에도 넣지 않는다. `asyncComplete`로
     `IN_PROGRESS`가 된 HTTP도 넣지 않는다(upstream은 그 메시지를 큐에서 지운다. 워커 갱신이 끝낸다). `Postpone.wake_at`은 시작한 HTTP의
