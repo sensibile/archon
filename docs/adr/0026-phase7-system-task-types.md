@@ -121,6 +121,9 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
 - **문자열이 아닌 입력(결정 3·5·6 공통).** upstream은 몇몇 입력을 `try` 밖에서 `(String)`으로 캐스트한다(TERMINATE
   `terminationStatus`, INLINE `evaluatorType`·`expression`, JSON_JQ_TRANSFORM `queryExpression`). 표현식이 수 같은 값을 내면
   `ClassCastException`이 태스크 실패 경로가 아니라 결정·예약 밖으로 새어 나간다. 이 ADR의 실패 문구 서술은 문자열 입력에만 해당한다.
+  HTTP 입력의 `Input` 변환(`HttpTask.start`의 `convertValue`)도 `try` 밖이다. 비동기라 upstream `AsyncSystemTaskExecutor`가 예외를
+  로그만 남기고 삼켜, 태스크는 `SCHEDULED`로 남았다가 `responseTimeoutSeconds` 뒤 `TIMED_OUT`이 된다(캡처는 짧은
+  `responseTimeoutSeconds`를 가진 태스크 정의로 한다).
   문자열이 아닌 경우의 결과(워크플로우 상태, 오류 응답)는 7a가 캡처하고, 해당 조각이 그 결과에 맞추거나 맞출 수 없으면 의도적
   차이로 적는다.
 
@@ -313,7 +316,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   결정 7과 같음). 다른 조각은 스크립트·픽스처·픽스처 등록을 고치지 않는다. 빠진 것은 기록해 두고 7h가 더해 다시 캡처한다.
 - 시나리오는 정의 등록 → 시작 → 끝난 워크플로우 GET의 모양이다. 타입마다 성공 하나와 upstream이 실패·종료로 가는 경우 하나
   이상을 넣는다. 특히:
-  - 문자열이 아닌 입력(결정 3 머리): TERMINATE `terminationStatus`, INLINE `evaluatorType`·`expression`, JSON_JQ_TRANSFORM `queryExpression`
+  - 문자열이 아닌 입력(결정 3 머리): TERMINATE `terminationStatus`, INLINE `evaluatorType`·`expression`, JSON_JQ_TRANSFORM `queryExpression`, 모양이 틀린 HTTP 입력(`headers`가 맵 아님 등)
   - TERMINATE의 세 상태와 `workflowOutput`의 맵·맵 아닌 값, 진행 중 형제 태스크의 `CANCELED`, 실패 워크플로우
   - SET_VARIABLE의 덮어쓰기와 크기 초과(`FAILED_WITH_TERMINAL_ERROR`)
   - HUMAN을 `POST /api/tasks`로 끝내기, EXCLUSIVE_JOIN의 `defaultExclusiveJoinTask`와 실패
