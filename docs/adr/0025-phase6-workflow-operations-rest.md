@@ -1,6 +1,6 @@
 # ADR 0025: Phase 6 워크플로우 운영 REST 설계
 
-- 상태: 제안
+- 상태: 승인 (조각 6h, 2026-11-02. 6a~6g는 sensibile/archon#68·#71·#70·#72·#73·#76·#75)
 - 날짜: 2026-11-01
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 다섯 가지(범위, 동기 대기, remove의 의미, L3와 `:invalid_state`, 픽스처)는 2026-11-01 BOSS가 이 문서의
@@ -584,10 +584,13 @@ ADR 0023의 목록에 더해 다음이 생긴다.
 
 ## 결과
 
-- 이 ADR은 결정만 담는다. 구현은 결정 8의 조각 6a~6h로 하고, 마지막 조각 6h의 PR에서 `승인`으로 바꾼다.
-- [ADR 0003](0003-porting-strategy.md) 단계 표에 Phase 6을 더한다. [ADR 0001](0001-api-contract-scope.md)의 분류 표에는 이 Phase가 여는
-  33개 경로의 비고에 "Phase 6(ADR 0025)"를 적는다. 구현이 끝나면 6h가 분류를 고친다.
+- 이 ADR은 결정만 담는다. 구현은 결정 8의 조각 6a~6h로 했고, 마지막 조각 6h의 PR에서 `승인`으로 바꿨다(2026-11-02).
+- 조각 6h는 재생 건너뛰기 장치(컨트롤러의 미구현 목록, 단계 옵션 `requires:`, 그 시험)를 없앴다. 이제 Phase 6 단계를 포함한 골든
+  픽스처 전체가 건너뛰는 단계 없이 두 백엔드에서 재생된다. 새 모델 body(`SearchResult`, `WorkflowDefSummary`, `SignalResponse`,
+  `RerunWorkflowRequest`, correlated의 이름별 목록)는 `contract_round_trip_test.exs`에서 그 모델로 분류했다.
+- [ADR 0003](0003-porting-strategy.md) 단계 표에 Phase 6을 더했다. [ADR 0001](0001-api-contract-scope.md)의 분류 표에는 이 Phase가 연
+  33개 경로의 비고에 "Phase 6(ADR 0025)"를 적었고, 구현이 끝난 뒤 6h가 분류를 "Phase 6"으로 고쳤다.
 - ADR 0018 결정 9의 생명주기 API에 rerun, skip, 콜백 초기화, 지우기가 더해진다. ADR 0018의 "범위 밖" 목록 중 이 셋은 이 ADR이 다룬다.
-- ADR 0021의 L3(수용)는 결정 2로 의도적 차이로 닫고, 6h가 ADR 0021 L3 행에 비고를 단다.
+- ADR 0021의 L3(수용)는 결정 2로 의도적 차이로 닫았고, 6h가 ADR 0021 L3 행에 비고를 달았다.
 - 아직 범위 밖: task 실행 로그, 검색·색인과 `bulk/search`, 이벤트, 외부 payload 저장소, 큐 관리·admin, 스케줄러, 인증(ADR 0024 결정 4),
   스키마 검증기와 `/api/schema`, 여러 노드, 배포 절차, MVP 밖 태스크 타입.

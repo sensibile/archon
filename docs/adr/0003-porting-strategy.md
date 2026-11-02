@@ -52,4 +52,5 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
   조각 3a~3f로, Phase 4는 [ADR 0021](0021-phase4-postgres-persistence.md)의 조각 4a~4h로 구현했다.
   Phase 5는 [ADR 0023](0023-phase5-rest.md)의 조각 5a~5f와 [ADR 0024](0024-worker-input-trust-and-auth.md)로 구현했다(2026-11-01,
   MVP REST 19개 경로, 두 백엔드에서 골든 픽스처 전체 재생). Later 경로와 인증은 그 뒤다.
-  Phase 6은 2026-11-01 [ADR 0025](0025-phase6-workflow-operations-rest.md)로 설계했고 조각 6a~6h로 구현한다.)
+  Phase 6은 2026-11-01 [ADR 0025](0025-phase6-workflow-operations-rest.md)로 설계했고 조각 6a~6h로 구현했다(2026-11-02,
+  워크플로우 운영 REST 33개 경로, 두 백엔드에서 골든 픽스처 전체 재생).)

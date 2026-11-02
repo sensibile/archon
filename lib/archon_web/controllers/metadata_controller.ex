@@ -34,12 +34,6 @@ defmodule ArchonWeb.MetadataController do
   alias Archon.Domain.{BulkResponse, Codec, TaskDef, Validation, WorkflowDef, WorkflowDefSummary}
   alias Archon.Metadata
 
-  # Phase 6 actions not implemented yet (ADR 0025, decision 7): none since slice 6c.
-  # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
-  Module.register_attribute(__MODULE__, :unimplemented, persist: true)
-
-  @unimplemented []
-
   @resource "com.netflix.conductor.rest.controllers.MetadataResource"
   @task_def "com.netflix.conductor.common.metadata.tasks.TaskDef"
   @workflow_def "com.netflix.conductor.common.metadata.workflow.WorkflowDef"
@@ -143,10 +137,6 @@ defmodule ArchonWeb.MetadataController do
       {:error, reason} -> Errors.send_error(conn, reason)
     end
   end
-
-  @doc "The Phase 6 actions not implemented yet (see `@unimplemented`)."
-  @spec unimplemented() :: [atom()]
-  def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
 
   @doc "`GET /api/metadata/workflow` (`getAll`, `classifier` query)."
   @spec list_workflows(Plug.Conn.t(), map()) :: Plug.Conn.t()

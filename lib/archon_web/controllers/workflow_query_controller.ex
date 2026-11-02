@@ -24,11 +24,6 @@ defmodule ArchonWeb.WorkflowQueryController do
   alias Archon.Domain.{Codec, SearchResult, Workflow}
   alias Archon.Runtime
 
-  # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
-  Module.register_attribute(__MODULE__, :unimplemented, persist: true)
-
-  @unimplemented []
-
   @int_range -2_147_483_648..2_147_483_647
 
   @correlated_many_handler "public java.util.Map<java.lang.String, " <>
@@ -36,10 +31,6 @@ defmodule ArchonWeb.WorkflowQueryController do
                              "com.netflix.conductor.rest.controllers.WorkflowResource." <>
                              "getWorkflows(java.lang.String,boolean,boolean," <>
                              "java.util.List<java.lang.String>)"
-
-  @doc "The actions not implemented yet."
-  @spec unimplemented() :: [atom()]
-  def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
 
   @doc """
   `GET /api/workflow/{workflowId}/tasks` (`getExecutionStatusTaskList`, `start` 0, `count` 15,

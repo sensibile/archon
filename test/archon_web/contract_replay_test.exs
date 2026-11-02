@@ -7,8 +7,9 @@ defmodule ArchonWeb.ContractReplayTest do
   The whole capture scenario (`ArchonWeb.ContractCase.scenario/0`) replayed in one run through
   REST, the `metadata_*` registrations included (ADR 0023, decision 6, slice 5f). The slices'
   own replays leave parts out; this one starts from the store the capture started from: the
-  fixtures' definitions other tests registered are removed first and put back afterwards. The
-  Phase 6 steps whose actions are not implemented yet are skipped (ADR 0025, decision 7).
+  fixtures' definitions other tests registered are removed first and put back afterwards. Every
+  Phase 6 step runs (ADR 0025, decision 7; slice 6h removed the skipping of steps not
+  implemented yet).
 
   Runs on either backend (`ARCHON_BACKEND`, ADR 0021 decision 9).
   """

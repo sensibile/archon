@@ -43,11 +43,6 @@ defmodule ArchonWeb.WorkflowBulkController do
   alias Archon.Runtime
   alias Archon.Runtime.Lifecycle
 
-  # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
-  Module.register_attribute(__MODULE__, :unimplemented, persist: true)
-
-  @unimplemented []
-
   # WorkflowBulkService.MAX_REQUEST_ITEMS
   @max_ids 1000
   @empty_message "WorkflowIds list cannot be null."
@@ -60,10 +55,6 @@ defmodule ArchonWeb.WorkflowBulkController do
   @handler "public com.netflix.conductor.common.model.BulkResponse<java.lang.String> " <>
              "com.netflix.conductor.rest.controllers.WorkflowBulkResource."
   @ids_type "java.util.List<java.lang.String>"
-
-  @doc "The actions not implemented yet."
-  @spec unimplemented() :: [atom()]
-  def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
 
   @doc "`PUT /api/workflow/bulk/pause` (`pauseWorkflow`): `Archon.Runtime.Lifecycle.pause/1` for each ID."
   @spec pause(Plug.Conn.t(), map()) :: Plug.Conn.t()
