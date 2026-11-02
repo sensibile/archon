@@ -44,7 +44,7 @@
           "taskId": "401529e2-dbe1-4e8c-a963-3bca9ba048eb",
           "reasonForIncompletion": "Failed to invoke HTTP task due to: java.lang.Exception: 404 Not Found on GET request for \"http://127.0.0.1:18299/status/404\": [no body]",
           "callbackAfterSeconds": 0,
-          "workerId": "jeong-wonjaeui-Mac-Studio.local",
+          "workerId": "<redacted-hostname>",
           "outputData": {
             "response": "java.lang.Exception: 404 Not Found on GET request for \"http://127.0.0.1:18299/status/404\": [no body]"
           },

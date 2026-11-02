@@ -44,7 +44,7 @@
           "taskId": "02971710-ff07-4f18-bf1c-f6161782f90c",
           "reasonForIncompletion": "Failed to invoke HTTP task due to: java.lang.IllegalArgumentException: No matching constant for [299]",
           "callbackAfterSeconds": 0,
-          "workerId": "jeong-wonjaeui-Mac-Studio.local",
+          "workerId": "<redacted-hostname>",
           "outputData": {
             "response": "java.lang.IllegalArgumentException: No matching constant for [299]"
           },

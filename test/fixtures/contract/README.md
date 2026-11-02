@@ -166,15 +166,15 @@ Archon이 일부러 다르게 답하는 픽스처(Later 경로와 405는 404, Ja
 | 생성 ID(UUID) | `workflowId`, `workflowInstanceId`, `taskId`, 요청 `path`의 ID, `text/plain` 응답 body(시작한 workflow ID, 갱신한 task ID) |
 | 시각(epoch ms) | `createTime`, `updateTime`, `startTime`, `endTime`, `scheduledTime`, `lastRetriedTime` |
 | 시각에서 나온 값 | `queueWaitTime` |
-| 캡처 환경 | HTTP 태스크의 `workerId`(서버 호스트 이름), stub 응답 헤더 `date` |
+| 캡처 환경 | HTTP 태스크의 `workerId`(서버 호스트 이름, 가려서 저장), stub 응답 헤더 `date` |
 
 픽스처에는 캡처한 값을 그대로 둔다. 숫자 타임스탬프를 문자열 placeholder로 바꾸면 스키마 검사가
 깨지기 때문이다. 비교가 필요하면 `Archon.Contract.normalize/1`을 양쪽에 적용한다. 시각 키는
 `"<volatile>"`로, 문자열 안의 UUID는 위치와 상관없이 `"<uuid>"`로 바꾼다. 두 번의 캡처는
 `normalize/1` 적용 후 모든 파일이 같았다.
 
-예외로 하나만 캡처 후 가공한다. 오류 body의 `instance`에는 서버 호스트 이름이 들어가므로
-스크립트가 `"<redacted-hostname>"`으로 바꾼다. 키는 남겨 응답 형태는 유지한다.
+예외로 서버 호스트 이름만 캡처 후 가공한다. 오류 body의 `instance`와, 서버가 실행한 HTTP 태스크의 `workerId`처럼 호스트
+이름과 같은 문자열을 스크립트가 `"<redacted-hostname>"`으로 바꾼다. 키는 남겨 응답 형태는 유지한다.
 
 ## 검사
 

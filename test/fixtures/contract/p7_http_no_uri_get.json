@@ -43,7 +43,7 @@
           "taskId": "7fff8228-bbdd-459d-9485-d4fd2988c604",
           "reasonForIncompletion": "Missing HTTP URI.  See documentation for HttpTask for required input parameters",
           "callbackAfterSeconds": 0,
-          "workerId": "jeong-wonjaeui-Mac-Studio.local",
+          "workerId": "<redacted-hostname>",
           "outputData": {},
           "workflowTask": {
             "name": "archon_p7_http",

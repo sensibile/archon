@@ -44,7 +44,7 @@
           "taskId": "25d838ce-0d1e-4f50-aa47-58b87ff3d732",
           "reasonForIncompletion": "Failed to invoke HTTP task due to: java.lang.Exception: 404 Not Found on GET request for \"http://127.0.0.1:18299/short/404\": \"archon short body\"",
           "callbackAfterSeconds": 0,
-          "workerId": "jeong-wonjaeui-Mac-Studio.local",
+          "workerId": "<redacted-hostname>",
           "outputData": {
             "response": "java.lang.Exception: 404 Not Found on GET request for \"http://127.0.0.1:18299/short/404\": \"archon short body\""
           },

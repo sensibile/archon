@@ -43,7 +43,7 @@
           "workflowType": "archon_p7_http",
           "taskId": "d0fb8fe6-dbeb-47bc-9d9e-5c7bab6cb2b9",
           "callbackAfterSeconds": 0,
-          "workerId": "jeong-wonjaeui-Mac-Studio.local",
+          "workerId": "<redacted-hostname>",
           "outputData": {
             "response": {
               "headers": {

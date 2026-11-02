@@ -86,7 +86,10 @@ call() {
                  body: $resp_body}}
      # Error bodies carry the server hostname in "instance"; keep the key, drop the value.
      | if (.response.body | type) == "object" and (.response.body | has("instance"))
-       then .response.body.instance = "<redacted-hostname>" else . end' >"$OUT/$name.json"
+       then .response.body.instance = "<redacted-hostname>" else . end
+     # A system task the server ran (HTTP) has the server hostname as its workerId.
+     | walk(if type == "string" and . == $host then "<redacted-hostname>" else . end)' \
+    --arg host "$(hostname)" >"$OUT/$name.json"
 
   echo "$status $method $path -> $OUT/$name.json" >&2
 }

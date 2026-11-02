@@ -43,7 +43,7 @@
           "taskId": "744746e5-a5a5-4b79-b634-338fc8521a22",
           "reasonForIncompletion": "No HTTP method specified",
           "callbackAfterSeconds": 0,
-          "workerId": "jeong-wonjaeui-Mac-Studio.local",
+          "workerId": "<redacted-hostname>",
           "outputData": {},
           "workflowTask": {
             "name": "archon_p7_http",
