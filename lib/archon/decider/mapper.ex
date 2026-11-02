@@ -24,11 +24,16 @@ defmodule Archon.Decider.Mapper do
     Context,
     Decision,
     DoWhile,
+    ExclusiveJoin,
     ForkJoin,
+    Human,
     Join,
+    Noop,
+    SetVariable,
     Simple,
     SubWorkflow,
     Switch,
+    Terminate,
     UserDefined,
     Wait
   }
@@ -56,7 +61,12 @@ defmodule Archon.Decider.Mapper do
     "JOIN" => Join,
     "DO_WHILE" => DoWhile,
     "SUB_WORKFLOW" => SubWorkflow,
-    "WAIT" => Wait
+    "WAIT" => Wait,
+    "TERMINATE" => Terminate,
+    "SET_VARIABLE" => SetVariable,
+    "NOOP" => Noop,
+    "HUMAN" => Human,
+    "EXCLUSIVE_JOIN" => ExclusiveJoin
   }
 
   @doc "The mapper for a task type, `UserDefined` when none is registered."

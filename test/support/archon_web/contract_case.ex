@@ -31,6 +31,9 @@ defmodule ArchonWeb.ContractCase do
     * `expect: :no_route` - Archon answers the 404 of a path without a handler instead of the
       fixture's response (Later routes, and an MVP path with another method, where upstream
       answers 405; ADR 0023, decision 2).
+    * `expect: {:archon, status, conditions}` - Archon answers `status` with a body that meets
+      `conditions` (as `until:` has them) instead of the fixture's response, for a deliberate
+      difference where upstream fails (ADR 0026, decision 3). No ID is bound from it.
     * `ignore: [path]` - leave out these paths (lists of keys and list indexes) of both bodies,
       for a message Archon cannot reproduce (Jackson's parse errors) or a value upstream's timing
       decides.
@@ -107,7 +110,9 @@ defmodule ArchonWeb.ContractCase do
 
   @type condition :: :present | {:length, non_neg_integer()} | term()
   @type exchange_opts :: [
-          expect: :no_route,
+          expect:
+            :no_route
+            | {:archon, pos_integer(), [{[String.t() | non_neg_integer()], condition()}]},
           ignore: [[String.t() | non_neg_integer()]],
           only: :expected_names | :bound_ids,
           unordered: boolean(),
@@ -169,6 +174,21 @@ defmodule ArchonWeb.ContractCase do
   @start_workflow [types: ["START_WORKFLOW", "NOOP"]]
   @http [types: ["HTTP"]]
   @settled [until: :settled]
+  # ADR 0026, decision 3: a permissive joined task that failed while another joined reference
+  # never ran. Upstream's ExclusiveJoin throws a NullPointerException (a 500 to the update, the
+  # workflow left RUNNING); here the join completes with the failed task's output and the
+  # workflow fails for its permissive task.
+  @permissive_join_update [expect: {:archon, 200, []}]
+  @permissive_join_failed [
+    {["status"], "FAILED"},
+    {["tasks", 1, "status"], "FAILED"},
+    {["tasks", 2, "status"], "COMPLETED"},
+    {["tasks", 2, "outputData"], %{"from" => "b_ref"}}
+  ]
+  @permissive_join_ended [
+    until: @permissive_join_failed,
+    expect: {:archon, 200, @permissive_join_failed}
+  ]
   # The server's host name as the HTTP task's workerId, and the stub's Date header.
   @http_volatile [
     ignore: [
@@ -635,8 +655,8 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "p7_exclusive_join_default_get_ended", @exclusive_join ++ @settled},
     {:exchange, "p7_exclusive_join_failed_start", @exclusive_join},
     {:exchange, "p7_exclusive_join_failed_get", @exclusive_join ++ @settled},
-    {:exchange, "p7_exclusive_join_failed_update", @exclusive_join},
-    {:exchange, "p7_exclusive_join_failed_get_ended", @exclusive_join ++ @settled},
+    {:exchange, "p7_exclusive_join_failed_update", @exclusive_join ++ @permissive_join_update},
+    {:exchange, "p7_exclusive_join_failed_get_ended", @exclusive_join ++ @permissive_join_ended},
     # DYNAMIC
     {:exchange, "p7_dynamic_register", @dynamic},
     {:exchange, "p7_dynamic_start", @dynamic},
@@ -1059,6 +1079,14 @@ defmodule ArchonWeb.ContractCase do
       # Upstream's answer has nothing to do with Archon's 404: no ID is bound from it.
       :no_route ->
         assert_no_route(name, actual)
+        state
+
+      # A deliberate difference where upstream fails: Archon's own answer, nothing bound.
+      {:archon, status, conditions} ->
+        assert actual.status == status and holds?(actual.body, conditions),
+               "#{name}: Archon's answer is not the expected #{status} with " <>
+                 "#{inspect(conditions)}\nArchon: #{inspect(actual)}"
+
         state
 
       nil ->
