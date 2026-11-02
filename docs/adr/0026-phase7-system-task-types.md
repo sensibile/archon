@@ -273,6 +273,13 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     단순해서 재현했다. 예외 메시지(가지 입력이 맵이 아닐 때의 `ClassCastException`)는 재현하지 않고 `"<값> is not a map"`이다. 가지가
     DYNAMIC인데 만들 태스크가 없을 때(같은 ref가 이미 진행 중) upstream 문구의 이름은 매퍼가 바꾼 이름이지만 archon은 정의의 이름이다.
     위 "앞부분만 맞춘다"는 이 범위로 좁힌다.
+  - **끝없는 동적 포크 매핑(의도적 차이).** 가지 목록이 자기 FORK_JOIN_DYNAMIC으로 되돌아오면(가지가 같은 목록을 다시 가리키는
+    FORK_JOIN_DYNAMIC) upstream은 매퍼가 끝없이 재귀하다 `StackOverflowError`로 결정이 실패한다. BEAM 프로세스에는 스택 상한이
+    없어 같은 입력이 노드 메모리를 다 쓸 수 있으므로(Codex 보안 리뷰 지적), archon은 위에서 매핑 중인 동적 포크의 ref를
+    `Mapper.Context.dynamic_forks`로 내려 보내 같은 ref를 다시 만나면 `"No dynamic tasks could be created ... attempted to create a
+    duplicate task reference name: <ref>"`로 종료한다. 한 FORK가 이미 만든 ref를 다른 가지가 다시 만들어도 같은 문구로 종료한다
+    (upstream은 둘 다 만들고 `dedupAndAddTasks`가 하나를 버린다). 같은 하위 목록을 나눠 쓰는 가지가 곱절로 불어나는 것도 이것이
+    막는다.
   - SUB_WORKFLOW 매퍼는 버전이 없을 때 `latest_workflow_versions`, 없으면 `workflow_def_lookup.(name, nil)`의 버전을 쓴다. 간단 형태의
     `forkTaskWorkflow` 가지가 이 경로를 탄다.
   - **rerun.** FORK_JOIN_DYNAMIC이 만든 FORK 태스크의 rerun은 upstream `finalizeRerun`의 첫 분기다. 뒤 태스크와 FORK 자신을 지우고

@@ -455,16 +455,25 @@ defmodule Archon.Decider do
   @doc """
   Upstream `getTasksToBeScheduled`: maps `workflow_task` with its type's mapper
   (`Archon.Decider.Mapper`) and drops tasks whose reference name is already in progress or
-  terminal in the workflow.
+  terminal in the workflow. `dynamic_forks` are the dynamic forks a mapper maps this task under
+  (`Archon.Decider.Mapper.Context`).
   """
   @spec tasks_to_be_scheduled(
           Workflow.t(),
           WorkflowTask.t(),
           integer(),
           String.t() | nil,
-          Context.t()
+          Context.t(),
+          [String.t()]
         ) :: {:ok, [Task.t()]} | {:terminate, Termination.t()}
-  def tasks_to_be_scheduled(workflow, %WorkflowTask{} = wt, retry_count, retried_task_id, context) do
+  def tasks_to_be_scheduled(
+        workflow,
+        %WorkflowTask{} = wt,
+        retry_count,
+        retried_task_id,
+        context,
+        dynamic_forks \\ []
+      ) do
     mapper_context = %Mapper.Context{
       workflow: workflow,
       task_definition: wt.task_definition,
@@ -473,7 +482,8 @@ defmodule Archon.Decider do
       retry_count: retry_count,
       retry_task_id: retried_task_id,
       task_id: context.new_id.(),
-      decider: context
+      decider: context,
+      dynamic_forks: dynamic_forks
     }
 
     case Mapper.module_for(wt.type).map(wt, mapper_context) do

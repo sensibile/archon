@@ -48,12 +48,21 @@ defmodule Archon.Decider.Mapper.ForkJoinDynamic do
     workflow = context.workflow
     input = context.task_input
 
-    with {:ok, branches, inputs} <- branches(wt, input, context),
+    with :ok <- not_nested_in_itself(wt, context),
+         {:ok, branches, inputs} <- branches(wt, input, context),
          {:ok, branches, branch_tasks, join_on} <-
            schedule_branches(wt, branches, inputs, context),
          {:ok, join} <- join_task(workflow, wt) do
       {:ok, [fork(context, branches) | branch_tasks] ++ [join(context, join, join_on)]}
     end
+  end
+
+  # A branch list that leads back to a fork being mapped would map forever (upstream ends in a
+  # StackOverflowError; here the process would grow without bound).
+  defp not_nested_in_itself(%WorkflowTask{task_reference_name: ref} = wt, context) do
+    if ref in context.dynamic_forks,
+      do: {:terminate, no_tasks_created(context.workflow, wt) <> duplicate(ref)},
+      else: :ok
   end
 
   defp branches(wt, input, context) do
@@ -292,10 +301,16 @@ defmodule Archon.Decider.Mapper.ForkJoinDynamic do
   end
 
   defp schedule_each(branches, inputs, context) do
+    context = %{
+      context
+      | dynamic_forks: [context.workflow_task.task_reference_name | context.dynamic_forks]
+    }
+
     branches
     |> Enum.reduce_while({:ok, [], [], []}, fn branch, {:ok, merged, tasks, join_on} ->
       with {:ok, branch} <- merge_input(branch, Map.get(inputs, branch.task_reference_name)),
-           {:ok, forked} <- schedule_branch(branch, context) do
+           {:ok, forked} <- schedule_branch(branch, context),
+           :ok <- distinct(context.workflow, branch, tasks, forked) do
         last = List.last(forked).reference_task_name
         {:cont, {:ok, [changed(branch, forked) | merged], tasks ++ forked, join_on ++ [last]}}
       else
@@ -334,6 +349,31 @@ defmodule Archon.Decider.Mapper.ForkJoinDynamic do
      "Tasks could not be dynamically forked due to invalid input: " <>
        "#{Parameters.java_string(other)} is not a map"}
   end
+
+  # A reference name the fork already made (two branches leading to the same tasks): upstream
+  # keeps both and drops one when it adds them; here the workflow ends, which also keeps branch
+  # lists that share their sub-lists from multiplying.
+  defp distinct(workflow, branch, tasks, forked) do
+    refs = Enum.map(tasks, & &1.reference_task_name)
+    forked_refs = Enum.map(forked, & &1.reference_task_name)
+
+    case Enum.find(forked_refs, &(&1 in refs)) || first_repeat(forked_refs) do
+      nil -> :ok
+      ref -> {:terminate, no_tasks_created(workflow, branch) <> duplicate(ref)}
+    end
+  end
+
+  defp first_repeat(refs) do
+    Enum.reduce_while(refs, MapSet.new(), fn ref, seen ->
+      if MapSet.member?(seen, ref), do: {:halt, ref}, else: {:cont, MapSet.put(seen, ref)}
+    end)
+    |> case do
+      %MapSet{} -> nil
+      ref -> ref
+    end
+  end
+
+  defp duplicate(ref), do: " attempted to create a duplicate task reference name: #{ref}"
 
   defp schedule_branch(branch, context) do
     case Context.tasks_to_be_scheduled(context, branch, nil) do

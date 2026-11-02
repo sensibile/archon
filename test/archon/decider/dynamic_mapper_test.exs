@@ -332,6 +332,38 @@ defmodule Archon.Decider.DynamicMapperTest do
                  "w_a/a attempted to create a duplicate task reference name: a"
     end
 
+    # Upstream recurses until a StackOverflowError; here the mapping ends (ADR 0026, decision 4).
+    test "a branch list that leads back to its own fork terminates instead of mapping forever" do
+      wt = param_form()
+
+      nested = %{
+        "name" => "inner",
+        "taskReferenceName" => "fjd",
+        "type" => "FORK_JOIN_DYNAMIC",
+        "dynamicForkTasksParam" => "dynamicTasks",
+        "dynamicForkTasksInputParamName" => "dynamicTasksInput",
+        "inputParameters" => %{
+          "dynamicTasks" => "${workflow.input.tasks}",
+          "dynamicTasksInput" => "${workflow.input.inputs}"
+        }
+      }
+
+      input = %{"tasks" => [Map.put(nested, "taskReferenceName", "loop")], "inputs" => %{}}
+
+      assert reason(schedule(workflow([wt, join()], input), wt)) ==
+               "No dynamic tasks could be created for the Workflow: wf.2/wf, Dynamic Fork Task: " <>
+                 "inner/loop attempted to create a duplicate task reference name: loop"
+    end
+
+    test "two branches that make the same reference name terminate it" do
+      wt = param_form()
+      input = %{"tasks" => [branch("a"), branch("a")], "inputs" => %{}}
+
+      assert reason(schedule(workflow([wt, join()], input), wt)) ==
+               "No dynamic tasks could be created for the Workflow: wf.2/wf, Dynamic Fork Task: " <>
+                 "w_a/a attempted to create a duplicate task reference name: a"
+    end
+
     test "a definition whose next task is not a JOIN terminates it" do
       wt = param_form()
 

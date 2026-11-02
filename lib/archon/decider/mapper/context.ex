@@ -14,7 +14,9 @@ defmodule Archon.Decider.Mapper.Context do
 
   `task_definition` is the one embedded in the `WorkflowTask`, `task_input` the task input
   resolved without a task ID or definition, and `decider` the `Archon.Decider.Context` of the
-  current decision (clock, ID generator, task definitions).
+  current decision (clock, ID generator, task definitions). `dynamic_forks` holds the reference
+  names of the `FORK_JOIN_DYNAMIC` tasks whose branches are being mapped above this one, so that
+  a branch list that leads back to its own fork ends (ADR 0026, decision 4).
   """
 
   alias Archon.Decider.Parameters
@@ -30,7 +32,8 @@ defmodule Archon.Decider.Mapper.Context do
     :parent_task_reference_name,
     :decider,
     task_input: %{},
-    retry_count: 0
+    retry_count: 0,
+    dynamic_forks: []
   ]
 
   @type t :: %__MODULE__{
@@ -42,7 +45,8 @@ defmodule Archon.Decider.Mapper.Context do
           retry_task_id: String.t() | nil,
           task_id: String.t(),
           parent_task_reference_name: String.t() | nil,
-          decider: Archon.Decider.Context.t()
+          decider: Archon.Decider.Context.t(),
+          dynamic_forks: [String.t()]
         }
 
   @doc """
@@ -79,7 +83,8 @@ defmodule Archon.Decider.Mapper.Context do
            wt,
            context.retry_count,
            retry_task_id,
-           context.decider
+           context.decider,
+           context.dynamic_forks
          ) do
       {:ok, tasks} -> {:ok, tasks}
       {:terminate, %Archon.Decider.Termination{reason: reason}} -> {:terminate, reason}
