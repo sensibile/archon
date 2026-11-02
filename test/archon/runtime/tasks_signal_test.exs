@@ -223,8 +223,9 @@ defmodule Archon.Runtime.TasksSignalTest do
   end
 
   describe "signal/3 and children it cannot use" do
-    # ADR 0024, decision 2: a SUB_WORKFLOW task whose stored child ID names a workflow of another
-    # parent and task does not reach that workflow's WAIT task.
+    # ADR 0025 decision 5 with the ownership check of ADR 0024 decision 2: a SUB_WORKFLOW task
+    # whose stored child ID names a workflow of another parent and task does not reach that
+    # workflow's WAIT task.
     test "a child of another parent and task is passed over, and its WAIT task is left alone" do
       owner = start("archon_ops_signal_parent")
       child = child(owner)
