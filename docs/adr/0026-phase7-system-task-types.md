@@ -212,7 +212,9 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     `[range(0; 100000000)]` 같은 쿼리는 시간 상한 전에 호스트 메모리를 다 쓸 수 있다. 그래서 호스트가 jq의 할당을 세어 상한
     (기본 64MiB, `archon_js`와 같음)을 넘으면 오류로 끝낸다. vendoring 파일은 고치지 않으므로 빌드 플래그로 jq 할당 함수를 호스트의
     세는 함수로 바꾸는 방식이고, Linux에서는 `setrlimit`을 2차 방어로 더한다. 방법은 7e가 정하되 두 플랫폼 모두에서 상한이 걸리는
-    것을 시험으로 보인다. 할 수 없으면 7e는 jq를 켜지 않고 BOSS에게 보고한다.
+    것을 시험으로 보인다. 매크로로 이름만 바꾸면 libc가 내부에서 할당한 메모리(`strdup` 등)를 바뀐 `free`로 풀어 깨질 수 있으므로,
+    헤더 없는 계수(`malloc_usable_size`·`malloc_size`)나 링크 단계 가로채기처럼 libc 할당과 섞여도 안전한 방법을 쓰고, oniguruma의
+    할당도 센다. 할 수 없으면 7e는 jq를 켜지 않고 BOSS에게 보고한다.
 - **풀.** `Archon.Script.Pool`·`Worker`를 실행 파일·인자·허용 op를 받게 일반화하고, 이름이 다른 두 번째 풀(`Archon.Jq.Pool`,
   설정 `config :archon, Archon.Jq.Pool`, 기본 시간 4초·워커 수 스케줄러 수)을 띄운다. 요청마다 쿼리를 새로 컴파일한다(upstream의
   Caffeine 캐시는 성능용이라 옮기지 않는다).
@@ -250,7 +252,10 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     워크플로우 프로세스는 진행 중인 요청의 태스크 ID 집합을 상태에 두고, `:wake`나 다른 이벤트에서 그 태스크를 `Step.Async.evaluate`에
     넘기지 않는다. `evaluate`는 시작 전에 `pollCount`를 올리므로, 거르기는 그보다 앞(평가할 태스크를 고르는 자리)이어야 한다. 그래야
     결과의 `pollCount`가 태스크와 같아 버려지지 않는다. 진행 중이거나 대기열에 있는 요청 동안 `:wake`가 오는 시험을 둔다. 프로세스가
-    결과 전에 죽어 집합을 잃었으면, 복구는 그 태스크를 다시 보내지 않고 아래 마감에 `TIMED_OUT`으로 둔다(upstream과 같음). 살아 있는 프로세스에서 진행 중인 요청(실행기 대기열에서
+    결과 전에 죽어 집합을 잃었으면, 복구는 그 태스크를 다시 보내지 않고 아래 마감에 `TIMED_OUT`으로 둔다(upstream과 같음). 이 고아
+    태스크는 집합에 없으므로 고르는 자리에서 `pollCount > 0`으로 거른다. 진행 중이든 고아든 마감 전에는 거르고, 마감이 지나면
+    `evaluate`에 넘겨 기존 응답 시간 초과 판정이 `TIMED_OUT`으로 둔다(그때 `pollCount`가 올라도 늦은 결과는 어차피 버려진다).
+    진행 중 집합은 순수 단계인 `Step`에 `Step.Env`의 필드로 넘긴다(7a가 자리를 만든다). 살아 있는 프로세스에서 진행 중인 요청(실행기 대기열에서
     기다리는 것 포함)도 같은 마감에 `TIMED_OUT`으로 두고, 그 뒤 온 결과는 다른 시도가 아니어도 태스크가 끝났으므로 버린다(upstream도
     예약이 끝나면 `TIMED_OUT`이다). 마감은 기존 `Step.Async`의 응답 시간 초과 판정처럼 `updateTime`(시작 커밋 시각, upstream
     `hasExceededResponseTimeout`과 같음)부터 잰다. 실행기 대기열에서 아직 보내지 않은 요청은 마감이 지나면 보내지 않고 버린다. 그 뒤 재시도는
@@ -353,7 +358,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
 
 | 조각 | 범위 | 시험·정답 기준 | 선행 | 건드리는 파일·모듈 |
 |---|---|---|---|---|
-| 7a | 결정 2의 두 표와 behaviour, 주입 함수 셋과 설정 자리, 타입 제약의 태스크 정의 조회 연결, 결정 8의 캡처 전부·HTTP stub·`types:` 건너뛰기, 캡처에서 정의 변경이 보이면 Decider 계약(결정 4) | 기존 시험·재생 전부 그대로 통과(동작 무변경), 기존 픽스처 재캡처 비교, 건너뛰기를 뺀 전체 재생 | Phase 6 조각 6h 머지(같은 재생 장치·픽스처 등록·재캡처를 고친다) | `lib/archon/decider.ex`, `lib/archon/decider/{system_tasks,system_task,mapper,retry,context,outcome}.ex`, `lib/archon/decider/system_task/*`, `lib/archon/runtime/step/{schedule,async,postpone,recover,lifecycle,decide,env}.ex`, `lib/archon/runtime/tasks.ex`, `lib/archon/domain/{workflow_task,workflow_def,start_workflow_request,task_type_constraint}.ex`(조회 옵션), `lib/archon/metadata.ex`, `lib/archon/runtime.ex`(시작 검증의 조회), `config/config.exs`, `test/support/step_replay.ex`, `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`, `test/fixtures/contract/README.md`, `test/support/contract.ex`, `test/support/archon_web/contract_case.ex`, `test/archon_web/contract_case_test.exs`, `test/support/http_stub.ex`, `test/archon/contract_test.exs`, `test/archon/domain/contract_round_trip_test.exs` |
+| 7a | 결정 2의 두 표와 behaviour, 주입 함수 셋과 설정 자리, `Step.Env`의 진행 중 집합 자리(결정 7), 타입 제약의 태스크 정의 조회 연결, 결정 8의 캡처 전부·HTTP stub·`types:` 건너뛰기, 캡처에서 정의 변경이 보이면 Decider 계약(결정 4) | 기존 시험·재생 전부 그대로 통과(동작 무변경), 기존 픽스처 재캡처 비교, 건너뛰기를 뺀 전체 재생 | Phase 6 조각 6h 머지(같은 재생 장치·픽스처 등록·재캡처를 고친다) | `lib/archon/decider.ex`, `lib/archon/decider/{system_tasks,system_task,mapper,retry,context,outcome}.ex`, `lib/archon/decider/system_task/*`, `lib/archon/runtime/step/{schedule,async,postpone,recover,lifecycle,decide,env}.ex`, `lib/archon/runtime/tasks.ex`, `lib/archon/domain/{workflow_task,workflow_def,start_workflow_request,task_type_constraint}.ex`(조회 옵션), `lib/archon/metadata.ex`, `lib/archon/runtime.ex`(시작 검증의 조회), `config/config.exs`, `test/support/step_replay.ex`, `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`, `test/fixtures/contract/README.md`, `test/support/contract.ex`, `test/support/archon_web/contract_case.ex`, `test/archon_web/contract_case_test.exs`, `test/support/http_stub.ex`, `test/archon/contract_test.exs`, `test/archon/domain/contract_round_trip_test.exs` |
 | 7b | 결정 3: TERMINATE, SET_VARIABLE, NOOP, HUMAN, EXCLUSIVE_JOIN | upstream `TestDeciderService`·`TerminateTest`·`SetVariableTest`·`ExclusiveJoinTest` 등에서 옮긴 사례, FORK 가지 끝 SET_VARIABLE의 저장 시험, StepReplay, 픽스처 재생 | 7a | `lib/archon/decider/mapper/{terminate,set_variable,noop,human,exclusive_join}.ex`, `lib/archon/decider/system_task/{terminate,set_variable,noop,human,exclusive_join}.ex`, 두 표의 자기 줄, 해당 시험 |
 | 7c | 결정 4: DYNAMIC, FORK_JOIN_DYNAMIC, rerun의 동적 포크 분기, SUB_WORKFLOW 매퍼의 `workflow_def_lookup` 사용 | `DynamicTaskMapperTest`·`ForkJoinDynamicTaskMapperTest`에서 옮긴 사례, 동적 가지 rerun·retry 시험과 갱신이 늘 결정하는 회귀 시험(두 백엔드), 픽스처 재생 | 7a | `lib/archon/decider/mapper/{dynamic,fork_join_dynamic}.ex`, `lib/archon/decider/mapper/fork_join.ex`(공용 함수 꺼내기), `lib/archon/decider/mapper/sub_workflow.ex`(`latest_workflow_versions`에 없는 이름의 조회), `lib/archon/runtime/step/lifecycle.ex`(rerun 분기), 매퍼 표의 자기 줄, 해당 시험 |
 | 7d | 결정 5: INLINE, LAMBDA | GraalJS 오라클 비교, `InlineTest`·`LambdaTest` 사례, 픽스처 재생 | 7a | `lib/archon/decider/mapper/{inline,lambda}.ex`, `lib/archon/decider/system_task/{inline,lambda}.ex`, 두 표의 자기 줄, 해당 시험 |
