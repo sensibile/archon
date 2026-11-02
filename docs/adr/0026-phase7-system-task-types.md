@@ -403,7 +403,9 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   - 제자리 재실행(rerun은 태스크 ID와 재시도 횟수를 그대로 둔다)에서는 고정 ID가 첫 실행의 워크플로우를 돌려준다. upstream rerun은
     새 워크플로우를 시작하므로, 돌려받은 워크플로우의 `createTime`이 태스크의 `scheduledTime`보다 이르면(rerun이 `scheduledTime`을
     새로 찍는다) `startworkflow:<워크플로우 ID>:<태스크 ID>:<재시도 횟수>:<scheduledTime>` 해시로 한 번 더 시작한다. 같은 실행 안의
-    효과 재실행은 여전히 같은 워크플로우를 받는다.
+    효과 재실행은 여전히 같은 워크플로우를 받는다. 시각 비교는 한 노드의 같은 시계를 전제한다(노드 재시작 사이에 시계가
+    뒤로 가면 첫 시작이 rerun으로 읽혀 워크플로우가 하나 더 생길 수 있다). rerun의 `finalizeRerun`이 다시 `SCHEDULED`로 두는 다른
+    참조의 `START_WORKFLOW`(`scheduledTime`을 새로 찍지 않음)는, 워크플로우를 만든 뒤 취소된 경우 그 워크플로우로 `COMPLETED`가 된다.
   - 픽스처: `START_WORKFLOW` 재생 단계는 NOOP에 기대므로 7b가 머지되기 전에는 건너뛴다. 시작하는 쪽은 `Archon.StepReplay` 방식의
     단계 시험이 `p7_start_workflow_get`·`_invalid_get`·`_missing_get`과 같다(`test/archon/runtime/step/start_workflow_test.exs`).
 

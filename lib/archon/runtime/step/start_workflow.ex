@@ -73,16 +73,17 @@ defmodule Archon.Runtime.Step.StartWorkflow do
 
   # getRequest, then what upstream's startWorkflow refuses before a workflow exists that the
   # runtime does not check (as ArchonWeb.WorkflowController's check_start).
-  defp request(%State{env: env}, %Task{input_data: input}) do
-    case Map.get(input, @parameter) do
-      nil ->
-        {:error, "Missing '#{@parameter}' in input data."}
+  defp request(%State{env: env}, %Task{} = task) do
+    with {:ok, request} <- read(task),
+         :ok <- validate(request, task_def_lookup: env.task_def_lookup) do
+      refuse(request)
+    end
+  end
 
-      json ->
-        with {:ok, request} <- decode(json),
-             :ok <- validate(request, task_def_lookup: env.task_def_lookup) do
-          refuse(request)
-        end
+  defp read(%Task{input_data: input}) do
+    case Map.get(input, @parameter) do
+      nil -> {:error, "Missing '#{@parameter}' in input data."}
+      json -> decode(json)
     end
   end
 
@@ -175,11 +176,15 @@ defmodule Archon.Runtime.Step.StartWorkflow do
 
     cond do
       started.workflow_id == first and started.create_time < task.scheduled_time ->
-        # The request was valid when the start was made, in this same message.
-        {:ok, request} = request(state, task)
-
-        {:retry,
-         State.post(state, {:start_workflow, task.task_id, start_input(wf, request, rerun)})}
+        # The request was valid when the start was made, in this same message; it is not
+        # validated again, since the task definitions it looks up may have changed since.
+        with {:ok, request} <- read(task),
+             {:ok, request} <- refuse(request) do
+          effect = {:start_workflow, task.task_id, start_input(wf, request, rerun)}
+          {:retry, State.post(state, effect)}
+        else
+          {:error, reason} -> {:done, failed(task, reason)}
+        end
 
       started.workflow_id in [first, rerun] ->
         output = Map.put(task.output_data, "workflowId", started.workflow_id)

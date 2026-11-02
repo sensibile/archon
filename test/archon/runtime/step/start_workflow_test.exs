@@ -199,6 +199,25 @@ defmodule Archon.Runtime.Step.StartWorkflowTest do
       assert started == @now + 5000
       assert [%{}] = starts(post)
     end
+
+    # ADR 0018, decision 8: the :wake starts the task, then its decide times the workflow out
+    # and cancels the task, so the start asked for in the same step is dropped.
+    test "a start whose task the same step ended is not made" do
+      {stored, _post} = start(%{"request" => @request}, [], [start_task(start_delay: 20)])
+
+      definition = %{
+        stored.workflow_definition
+        | timeout_seconds: 10,
+          timeout_policy: :time_out_wf
+      }
+
+      stored = %{stored | workflow_definition: definition}
+
+      {:ok, stored, _pre, post} = run(stored, :wake, @now + 20_000)
+      assert stored.status == :timed_out
+      assert %Task{status: :canceled, poll_count: 1} = only_task(stored)
+      assert starts(post) == []
+    end
   end
 
   describe "a request that cannot start" do
