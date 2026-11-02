@@ -24,14 +24,19 @@ defmodule Archon.Decider.Mapper do
     Context,
     Decision,
     DoWhile,
+    ExclusiveJoin,
     ForkJoin,
+    Human,
     Inline,
     Join,
     Lambda,
+    Noop,
+    SetVariable,
     Simple,
     StartWorkflow,
     SubWorkflow,
     Switch,
+    Terminate,
     UserDefined,
     Wait
   }
@@ -61,6 +66,11 @@ defmodule Archon.Decider.Mapper do
     "SUB_WORKFLOW" => SubWorkflow,
     "START_WORKFLOW" => StartWorkflow,
     "WAIT" => Wait,
+    "TERMINATE" => Terminate,
+    "SET_VARIABLE" => SetVariable,
+    "NOOP" => Noop,
+    "HUMAN" => Human,
+    "EXCLUSIVE_JOIN" => ExclusiveJoin,
     "INLINE" => Inline,
     "LAMBDA" => Lambda
   }

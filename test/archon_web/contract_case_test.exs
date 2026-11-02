@@ -312,6 +312,22 @@ defmodule ArchonWeb.ContractCaseTest do
       assert check("t", upstream, no_route, new_state(), expect: :no_route) == new_state()
     end
 
+    test "an Archon expectation checks Archon's own answer and binds nothing" do
+      upstream = %{"response" => %{"status" => 500, "content_type" => nil, "body" => nil}}
+      answer = actual(%{"workflowId" => @b, "status" => "FAILED"})
+      expect = {:archon, 200, [{["status"], "FAILED"}]}
+
+      assert check("t", upstream, answer, new_state(), expect: expect) == new_state()
+
+      assert_raise ExUnit.AssertionError, ~r/not the expected 200/, fn ->
+        check("t", upstream, actual(%{"status" => "RUNNING"}), new_state(), expect: expect)
+      end
+
+      assert_raise ExUnit.AssertionError, ~r/not the expected 200/, fn ->
+        check("t", upstream, %{answer | status: 500}, new_state(), expect: expect)
+      end
+    end
+
     test "a started step takes Archon's start for upstream's error and binds nothing" do
       upstream = %{
         "response" => %{

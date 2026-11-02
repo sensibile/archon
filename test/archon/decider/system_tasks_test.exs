@@ -19,8 +19,9 @@ defmodule Archon.Decider.SystemTasksTest do
     test "registers the system tasks Archon runs, keyed by the task's type" do
       registry = SystemTasks.default()
 
-      assert Enum.sort(Map.keys(registry)) ==
-               ~w(DECISION DO_WHILE FORK INLINE JOIN LAMBDA START_WORKFLOW SUB_WORKFLOW SWITCH WAIT)
+      # The MVP types; each Phase 7 slice's own tests check the lines it adds (ADR 0026).
+      for type <- ~w(DECISION DO_WHILE FORK JOIN SUB_WORKFLOW SWITCH WAIT),
+          do: assert(SystemTasks.system_task?(registry, type), type)
 
       # FORK_JOIN is the workflow task's type; its task's is FORK.
       refute SystemTasks.system_task?(registry, "FORK_JOIN")

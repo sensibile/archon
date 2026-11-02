@@ -38,8 +38,9 @@ defmodule Archon.Decider.SystemTasks do
   retried) and `in_place?/1` (retried in place, `taskToBeRescheduled`).
 
   `default/0` registers the system tasks Archon runs: `DECISION`, `SWITCH`, `FORK`, `JOIN`,
-  `DO_WHILE`, `SUB_WORKFLOW` and `WAIT` (ADR 0014, decision 5). Phase 7 slices add their own
-  lines.
+  `DO_WHILE`, `SUB_WORKFLOW` and `WAIT` (ADR 0014, decision 5), and `TERMINATE`,
+  `SET_VARIABLE`, `NOOP`, `HUMAN` and `EXCLUSIVE_JOIN` (ADR 0026, decision 3). Phase 7 slices
+  add their own lines.
   """
 
   alias Archon.Decider.SystemTask
@@ -83,6 +84,11 @@ defmodule Archon.Decider.SystemTasks do
       },
       "WAIT" => %Spec{module: SystemTask.Wait, async?: true},
       "START_WORKFLOW" => %Spec{async?: true, start_idempotent?: true},
+      "TERMINATE" => %Spec{module: SystemTask.Terminate},
+      "SET_VARIABLE" => %Spec{module: SystemTask.SetVariable},
+      "NOOP" => %Spec{module: SystemTask.Noop},
+      "HUMAN" => %Spec{module: SystemTask.Human},
+      "EXCLUSIVE_JOIN" => %Spec{module: SystemTask.ExclusiveJoin},
       "INLINE" => %Spec{module: SystemTask.Inline},
       "LAMBDA" => %Spec{module: SystemTask.Lambda}
     }
