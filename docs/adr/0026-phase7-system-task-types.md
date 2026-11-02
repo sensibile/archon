@@ -237,7 +237,8 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     시작하지 않는다. 프로세스가 결과 전에 죽어 집합을 잃었으면, 복구는 그 태스크를 다시 보내지 않고 `startTime` +
     `responseTimeoutSeconds`에 `TIMED_OUT`으로 둔다(upstream과 같음). 살아 있는 프로세스에서 진행 중인 요청(실행기 대기열에서
     기다리는 것 포함)도 같은 마감에 `TIMED_OUT`으로 두고, 그 뒤 온 결과는 다른 시도가 아니어도 태스크가 끝났으므로 버린다(upstream도
-    예약이 끝나면 `TIMED_OUT`이다). 마감은 `startTime`이 아니라 시작 커밋 시각부터 잰다(조각 7f가 저장할 값을 정한다). 그 뒤 재시도는
+    예약이 끝나면 `TIMED_OUT`이다). 마감은 기존 `Step.Async`의 응답 시간 초과 판정처럼 `updateTime`(시작 커밋 시각, upstream
+    `hasExceededResponseTimeout`과 같음)부터 잰다. 실행기 대기열에서 아직 보내지 않은 요청은 마감이 지나면 보내지 않고 버린다. 그 뒤 재시도는
     보통의 태스크 재시도 규칙이다.
   - 재평가 시각(`Step.Postpone`)은 진행 중인 HTTP 태스크의 위 마감이다.
 - **결과(7f·7g).** 결과는 이벤트로 돌아와 그 태스크가 아직 같은 시도(`SCHEDULED`, 같은 `pollCount`)일 때만 반영한다. 이미
@@ -251,9 +252,9 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   시도가 끼지 않으므로 이벤트에 `pollCount`를 싣지 않는다. 새 워크플로우 ID는 `child_id/2`와 같은 방식의 해시
   (`startworkflow:<워크플로우 ID>:<태스크 ID>:<재시도 횟수>`)라 효과가 다시 돌아도 하나만 생긴다. 이미 있는 워크플로우를 돌려받아도
   소유권은 확인하지 않는다. upstream·archon 모두 `triggeringWorkflowId`를 워크플로우에 저장하지 않아 비교할 값이 없고, 그 ID는
-  `startworkflow:` 접두의 해시이며 시작 REST는 호출자가 ID를 정하게 하지 않으므로(ADR 0024 결정 4) 다른 호출자가 같은 ID를 먼저
-  만들 수 없다. 요청의 `idempotencyKey`·`idempotencyStrategy`는 기존 시작 규칙대로 넘긴다. 같은 태스크의 재실행은 고정 ID가 먼저
-  막고, 키가 같은 다른 워크플로우와의 관계는 그 전략(`FAIL`, `RETURN_EXISTING`)이 정한다.
+  `startworkflow:` 접두의 해시이며 `StartWorkflowRequest`에는 워크플로우 ID 필드가 없어 시작 REST의 호출자가 ID를 정할 수 없으므로
+  다른 호출자가 같은 ID를 먼저 만들 수 없다. 요청의 `idempotencyKey`·`idempotencyStrategy`는 upstream처럼 읽기만 하고 시작에 쓰지
+  않는다(`Archon.Domain.StartWorkflowRequest`와 같음). 같은 태스크의 재실행은 고정 ID가 막는다.
   `taskToDomain`·`correlationId` 기본값은 시작한 워크플로우의 것이고, `triggeringWorkflowId`만 적고 부모 필드는 넣지 않는다(upstream처럼
   따로 도는 워크플로우). 성공은 출력 `workflowId`, `COMPLETED`. 일시적 오류(`{:error, {:exit, _}}` 등)는 태스크를 `SCHEDULED`로 두고 다시
   시도하며, 그 밖의 오류는 메시지로 `FAILED`다. 검증 위반이 여럿이면 upstream은 Java `Set` 순서로 잇는다. archon은 경로 순으로
