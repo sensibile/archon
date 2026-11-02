@@ -3,6 +3,10 @@
 #
 # Usage: BASE_URL=http://localhost:8080 scripts/contract/capture_fixtures.sh [out_dir]
 #
+# The HTTP task fixtures call a fixed-response stub (test/support/http_stub.ex). The script starts
+# it on 127.0.0.1:18299 (MIX_ENV=test mix run) unless HTTP_STUB names a running one; the replay
+# expects that address in the fixtures (ArchonWeb.ContractCase).
+#
 # The server must start empty (fresh SQLite file). Each exchange is written as one JSON file:
 #   {"request": {"method", "path", "body"}, "response": {"status", "content_type", "body"}}
 # JSON bodies are stored parsed, other bodies (text/plain responses, a request body that is not
@@ -19,6 +23,20 @@ mkdir -p "$OUT"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+
+if [[ -z "${HTTP_STUB:-}" ]]; then
+  MIX_ENV=test mix run --no-start -e '{:ok, _apps} = Application.ensure_all_started(:bandit)
+    {:ok, _pid, _url} = Archon.HttpStub.start(18299)
+    Process.sleep(:infinity)' &
+  stub_pid=$!
+  trap 'kill "$stub_pid" 2>/dev/null; rm -rf "$tmp"' EXIT
+  HTTP_STUB=http://127.0.0.1:18299
+  for _ in $(seq 1 120); do
+    curl -sf "$HTTP_STUB/json" >/dev/null && break
+    sleep 0.5
+  done
+  curl -sf "$HTTP_STUB/json" >/dev/null || { echo "the HTTP stub did not start" >&2; exit 1; }
+fi
 
 # call NAME METHOD PATH [BODY]
 # Writes $OUT/NAME.json and leaves the response body in $tmp/body, status in $tmp/status.
@@ -832,3 +850,319 @@ call metadata_get_workflow_deleted GET '/api/metadata/workflow/archon_ops?versio
 call metadata_get_workflow_after_delete GET /api/metadata/workflow/archon_ops
 call metadata_delete_taskdef DELETE /api/metadata/taskdefs/archon_ops_idle
 call metadata_get_taskdef_deleted GET /api/metadata/taskdefs/archon_ops_idle
+
+# --- Phase 7: system task types (ADR 0026, decision 8) --------------------------------------
+# Every fixture of this part is named p7_<type>_*. Each scenario registers a definition, starts
+# it and reads the workflow once it stopped moving; the workflow GETs carry workflowDefinition,
+# so a mapper that changes the definition (DYNAMIC, HTTP) shows in them.
+# The HTTP target is the fixed-response stub test/support/http_stub.ex, started at HTTP_STUB.
+
+p7_def() { # name tasks_json [extra_object]
+  local extra="${3:-}"
+  [[ -n "$extra" ]] || extra='{}'
+  jq -nc --arg n "$1" --argjson t "$2" --argjson e "$extra" '{name: $n, version: 1,
+    schemaVersion: 2, timeoutPolicy: "ALERT_ONLY", timeoutSeconds: 0, tasks: $t} + $e'
+}
+last_task_id() { body | jq -r "[.tasks[] | select(.referenceTaskName == \"$1\")] | last | .taskId"; }
+# p7_run PREFIX WORKFLOW INPUT: starts the workflow and reads it once it ended. A start that
+# fails (upstream decides within the start, and an exception there is the start's answer) has
+# nothing to read.
+p7_run() {
+  call "$1_start" POST "/api/workflow/$2" "$3"
+  [[ "$(cat "$tmp/status")" == 200 ]] || return 0
+  local id
+  id="$(body)"
+  call_until "$1_get" GET "/api/workflow/$id" '.status != "RUNNING"'
+}
+p7_worker='{"name": "archon_p7_worker", "taskReferenceName": "worker_ref", "type": "SIMPLE"}'
+
+call p7_register_taskdefs POST /api/metadata/taskdefs "$(jq -sc . <<<"
+  $(ops_task_def archon_p7_worker 0) $(ops_task_def NOOP 0)")"
+
+# TERMINATE: the three statuses, workflowOutput as a map, as another value and absent; a running
+# sibling is canceled. terminationStatus must be one of the three (the definition check refuses
+# anything else, a value that is not a string included).
+p7_terminate() { # name status output_json reason
+  p7_def "$1" "$(jq -nc --arg s "$2" --argjson o "$3" --arg r "$4" '[
+    {name: "archon_p7_fork", taskReferenceName: "fork_ref", type: "FORK_JOIN", forkTasks: [
+      [{name: "archon_p7_worker", taskReferenceName: "worker_ref", type: "SIMPLE"}],
+      [{name: "archon_p7_terminate", taskReferenceName: "terminate_ref", type: "TERMINATE",
+        inputParameters: ({terminationStatus: $s}
+          + (if $o == null then {} else {workflowOutput: $o} end)
+          + (if $r == "" then {} else {terminationReason: $r} end))}]]},
+    {name: "archon_p7_join", taskReferenceName: "join_ref", type: "JOIN",
+     joinOn: ["worker_ref", "terminate_ref"]}]')"
+}
+call p7_terminate_register_completed POST /api/metadata/workflow \
+  "$(p7_terminate archon_p7_terminate_completed COMPLETED '{"a": "${workflow.input.a}", "b": 1}' "")"
+call p7_terminate_register_failed POST /api/metadata/workflow \
+  "$(p7_terminate archon_p7_terminate_failed FAILED '"${workflow.input.a}"' "archon-p7-terminate")"
+call p7_terminate_register_terminated POST /api/metadata/workflow \
+  "$(p7_terminate archon_p7_terminate_terminated TERMINATED null "")"
+call p7_terminate_register_not_string POST /api/metadata/workflow \
+  "$(p7_def archon_p7_terminate_not_string '[{"name": "archon_p7_terminate",
+    "taskReferenceName": "terminate_ref", "type": "TERMINATE",
+    "inputParameters": {"terminationStatus": 5}}]')"
+call p7_terminate_register_expression POST /api/metadata/workflow \
+  "$(p7_def archon_p7_terminate_expression '[{"name": "archon_p7_terminate",
+    "taskReferenceName": "terminate_ref", "type": "TERMINATE",
+    "inputParameters": {"terminationStatus": "${workflow.input.status}"}}]')"
+p7_run p7_terminate_completed archon_p7_terminate_completed '{"a": 1}'
+p7_run p7_terminate_failed archon_p7_terminate_failed '{"a": 5}'
+p7_run p7_terminate_terminated archon_p7_terminate_terminated '{}'
+
+# SET_VARIABLE: overwriting, the size limit (256 KB), and one at the end of a FORK branch.
+call p7_set_variable_register POST /api/metadata/workflow \
+  "$(p7_def archon_p7_set_variable '[
+    {"name": "archon_p7_set", "taskReferenceName": "set1_ref", "type": "SET_VARIABLE",
+     "inputParameters": {"a": "${workflow.input.a}", "b": 1}},
+    {"name": "archon_p7_set", "taskReferenceName": "set2_ref", "type": "SET_VARIABLE",
+     "inputParameters": {"a": "over", "c": "${workflow.variables.b}"}}]' \
+    '{"variables": {"a": "init", "keep": true}, "outputParameters": {"v": "${workflow.variables}"}}')"
+p7_run p7_set_variable archon_p7_set_variable '{"a": 1}'
+call p7_set_variable_register_big POST /api/metadata/workflow \
+  "$(p7_def archon_p7_set_variable_big '[
+    {"name": "archon_p7_set", "taskReferenceName": "big_ref", "type": "SET_VARIABLE",
+     "inputParameters": {"big": "${workflow.input.big}"}}]' '{"variables": {"a": "init"}}')"
+p7_run p7_set_variable_big archon_p7_set_variable_big "$(jq -nc '{big: ("x" * 270000)}')"
+call p7_set_variable_register_fork POST /api/metadata/workflow \
+  "$(p7_def archon_p7_set_variable_fork "$(jq -nc --argjson w "$p7_worker" '[
+    {name: "archon_p7_fork", taskReferenceName: "fork_ref", type: "FORK_JOIN", forkTasks: [
+      [{name: "archon_p7_set", taskReferenceName: "set_ref", type: "SET_VARIABLE",
+        inputParameters: {v: "${workflow.input.v}"}}], [$w]]},
+    {name: "archon_p7_join", taskReferenceName: "join_ref", type: "JOIN",
+     joinOn: ["set_ref", "worker_ref"]}]')")"
+call p7_set_variable_fork_start POST /api/workflow/archon_p7_set_variable_fork '{"v": 7}'
+call_until p7_set_variable_fork_get GET "/api/workflow/$(body)" \
+  '[.tasks[] | select(.referenceTaskName == "set_ref" and .status == "COMPLETED")] | length == 1'
+
+# NOOP
+call p7_noop_register POST /api/metadata/workflow \
+  "$(p7_def archon_p7_noop '[{"name": "archon_p7_noop", "taskReferenceName": "noop_ref",
+    "type": "NOOP", "inputParameters": {"a": "${workflow.input.a}"}}]')"
+p7_run p7_noop archon_p7_noop '{"a": 1}'
+
+# HUMAN: stays IN_PROGRESS until a task update ends it.
+call p7_human_register POST /api/metadata/workflow \
+  "$(p7_def archon_p7_human '[{"name": "archon_p7_human", "taskReferenceName": "human_ref",
+    "type": "HUMAN", "inputParameters": {"a": "${workflow.input.a}"}}]')"
+call p7_human_start POST /api/workflow/archon_p7_human '{"a": 1}'
+human_id="$(body)"
+call_until p7_human_get GET "/api/workflow/$human_id" '.tasks[0].status == "IN_PROGRESS"'
+call p7_human_update POST /api/tasks \
+  "$(task_result "$human_id" "$(task_id human_ref)" COMPLETED '{"approved": true}')"
+call_until p7_human_get_completed GET "/api/workflow/$human_id" '.status == "COMPLETED"'
+
+# EXCLUSIVE_JOIN after a SWITCH: a case task, the default case (defaultExclusiveJoinTask) and a
+# permissive case task that fails.
+call p7_exclusive_join_register POST /api/metadata/workflow \
+  "$(p7_def archon_p7_exclusive_join '[
+    {"name": "archon_p7_switch", "taskReferenceName": "switch_ref", "type": "SWITCH",
+     "evaluatorType": "value-param", "expression": "route",
+     "inputParameters": {"route": "${workflow.input.route}"},
+     "decisionCases": {
+       "a": [{"name": "archon_p7_worker", "taskReferenceName": "a_ref", "type": "SIMPLE"}],
+       "b": [{"name": "archon_p7_worker", "taskReferenceName": "b_ref", "type": "SIMPLE",
+              "permissive": true}]},
+     "defaultCase": [{"name": "archon_p7_worker", "taskReferenceName": "c_ref", "type": "SIMPLE"}]},
+    {"name": "archon_p7_exclusive_join", "taskReferenceName": "xjoin_ref",
+     "type": "EXCLUSIVE_JOIN", "joinOn": ["a_ref", "b_ref"],
+     "defaultExclusiveJoinTask": ["c_ref"]}]')"
+p7_exclusive() { # name route ref status
+  call "p7_exclusive_join_${1}_start" POST /api/workflow/archon_p7_exclusive_join "{\"route\": \"$2\"}"
+  local id
+  id="$(body)"
+  call_until "p7_exclusive_join_${1}_get" GET "/api/workflow/$id" '(.tasks | length) == 2'
+  call "p7_exclusive_join_${1}_update" POST /api/tasks \
+    "$(task_result "$id" "$(task_id "$3")" "$4" "{\"from\": \"$3\"}")"
+  call_until "p7_exclusive_join_${1}_get_ended" GET "/api/workflow/$id" "$5"
+}
+p7_exclusive case a a_ref COMPLETED '.status == "COMPLETED"'
+p7_exclusive default c c_ref COMPLETED '.status == "COMPLETED"'
+# Upstream's answer to the failed permissive task: the update fails with a
+# NullPointerException (500) after the task is saved FAILED, and the workflow stays RUNNING.
+p7_exclusive failed b b_ref FAILED '.tasks[1].status == "FAILED"'
+
+# DYNAMIC: a worker task, a name without a task definition, no name, a system task type (its
+# task definition registered as NOOP).
+call p7_dynamic_register POST /api/metadata/workflow \
+  "$(p7_def archon_p7_dynamic '[{"name": "archon_p7_dynamic", "taskReferenceName": "dynamic_ref",
+    "type": "DYNAMIC", "dynamicTaskNameParam": "taskToExecute",
+    "inputParameters": {"taskToExecute": "${workflow.input.task}", "x": 1}}]')"
+call p7_dynamic_start POST /api/workflow/archon_p7_dynamic '{"task": "archon_p7_worker"}'
+dynamic_id="$(body)"
+call_until p7_dynamic_get GET "/api/workflow/$dynamic_id" '(.tasks | length) == 1'
+call p7_dynamic_update POST /api/tasks \
+  "$(task_result "$dynamic_id" "$(task_id dynamic_ref)" COMPLETED '{"done": 1}')"
+call_until p7_dynamic_get_completed GET "/api/workflow/$dynamic_id" '.status == "COMPLETED"'
+# Upstream fills a default task definition into every task without one when the workflow starts
+# (MetadataMapperService), so a name without a definition is scheduled and stays SCHEDULED.
+call p7_dynamic_missing_start POST /api/workflow/archon_p7_dynamic '{"task": "archon_p7_missing"}'
+call_until p7_dynamic_missing_get GET "/api/workflow/$(body)" '(.tasks | length) == 1'
+p7_run p7_dynamic_no_name archon_p7_dynamic '{}'
+p7_run p7_dynamic_system archon_p7_dynamic '{"task": "NOOP"}'
+
+# FORK_JOIN_DYNAMIC: the three input forms, a definition whose next task is not a JOIN, and the
+# retry and reruns of a workflow with dynamic branches.
+p7_fjd() { # name fork_task_json
+  p7_def "$1" "$(jq -nc --argjson f "$2" '[$f + {name: "archon_p7_fjd",
+      taskReferenceName: "fjd_ref", type: "FORK_JOIN_DYNAMIC"},
+    {name: "archon_p7_join", taskReferenceName: "join_ref", type: "JOIN"}]')"
+}
+# p7_fjd_complete PREFIX ID COUNT: waits for COUNT scheduled worker tasks, completes them in
+# task order and waits for the workflow to complete.
+p7_fjd_complete() {
+  local prefix="$1" id="$2" count="$3" i=0 task
+  local scheduled='[.tasks[] | select(.taskType == "archon_p7_worker" and .status == "SCHEDULED")]'
+  call_until "${prefix}_get" GET "/api/workflow/$id" "$scheduled | length == $count"
+  for task in $(fixture_body "${prefix}_get" | jq -r "$scheduled[] | .taskId"); do
+    call "${prefix}_update_$i" POST /api/tasks "$(task_result "$id" "$task" COMPLETED "{\"i\": $i}")"
+    i=$((i + 1))
+  done
+  call_until "${prefix}_get_completed" GET "/api/workflow/$id" '.status == "COMPLETED"'
+}
+call p7_fjd_register_simple POST /api/metadata/workflow \
+  "$(p7_fjd archon_p7_fjd_simple '{"inputParameters": {"forkTaskName": "archon_p7_worker",
+    "forkTaskInputs": "${workflow.input.inputs}"}}')"
+call p7_fjd_simple_start POST /api/workflow/archon_p7_fjd_simple '{"inputs": [{"a": 1}, {"a": 2}]}'
+p7_fjd_complete p7_fjd_simple "$(body)" 2
+call p7_fjd_register_param POST /api/metadata/workflow \
+  "$(p7_fjd archon_p7_fjd_param '{"dynamicForkTasksParam": "dynamicTasks",
+    "dynamicForkTasksInputParamName": "dynamicTasksInput",
+    "inputParameters": {"dynamicTasks": "${workflow.input.tasks}",
+                        "dynamicTasksInput": "${workflow.input.inputs}"}}')"
+p7_fjd_param_input='{"tasks": [
+  {"name": "archon_p7_worker", "taskReferenceName": "dyn_a_ref", "type": "SIMPLE"},
+  {"name": "archon_p7_worker", "taskReferenceName": "dyn_b_ref", "type": "SIMPLE"}],
+  "inputs": {"dyn_a_ref": {"x": 1}, "dyn_b_ref": {"x": 2}}}'
+call p7_fjd_param_start POST /api/workflow/archon_p7_fjd_param "$p7_fjd_param_input"
+p7_fjd_complete p7_fjd_param "$(body)" 2
+call p7_fjd_register_legacy POST /api/metadata/workflow \
+  "$(p7_fjd archon_p7_fjd_legacy '{"dynamicForkJoinTasksParam": "dynamicTasks",
+    "inputParameters": {"dynamicTasks": "${workflow.input.dynamic}"}}')"
+call p7_fjd_legacy_start POST /api/workflow/archon_p7_fjd_legacy '{"dynamic": {"dynamicTasks": [
+  {"taskName": "archon_p7_worker", "referenceName": "legacy_a_ref", "input": {"x": 1}},
+  {"taskName": "archon_p7_worker", "referenceName": "legacy_b_ref", "input": {"x": 2},
+   "type": "SIMPLE"}]}}'
+p7_fjd_complete p7_fjd_legacy "$(body)" 2
+call p7_fjd_register_no_join POST /api/metadata/workflow \
+  "$(p7_def archon_p7_fjd_no_join "$(jq -nc --argjson w "$p7_worker" '[
+    {name: "archon_p7_fjd", taskReferenceName: "fjd_ref", type: "FORK_JOIN_DYNAMIC",
+     inputParameters: {forkTaskName: "archon_p7_worker", forkTaskInputs: [{a: 1}]}}, $w]')")"
+p7_run p7_fjd_no_join archon_p7_fjd_no_join '{}'
+call p7_fjd_retry_start POST /api/workflow/archon_p7_fjd_param "$p7_fjd_param_input"
+fjd_id="$(body)"
+call_until p7_fjd_retry_get GET "/api/workflow/$fjd_id" '(.tasks | length) == 4'
+call p7_fjd_retry_fail POST /api/tasks \
+  "$(task_result "$fjd_id" "$(task_id dyn_a_ref)" FAILED '{}')"
+call_until p7_fjd_retry_get_failed GET "/api/workflow/$fjd_id" '.status == "FAILED"'
+# A retry schedules both branches again (upstream's JOIN, evaluated by its system task worker
+# meanwhile, can race the retry and fail the workflow again; the capture waits for the retry to
+# hold and fails otherwise). Once it completed, a rerun from the latest attempt of a branch, and
+# after a termination a rerun from the FORK task, which makes the branches again.
+call p7_fjd_retry POST "/api/workflow/$fjd_id/retry"
+p7_fjd_complete p7_fjd_retried "$fjd_id" 2
+call p7_fjd_rerun_branch POST "/api/workflow/$fjd_id/rerun" \
+  "{\"reRunFromTaskId\": \"$(last_task_id dyn_b_ref)\", \"taskInput\": {\"x\": 20}}"
+call_until p7_fjd_rerun_branch_get GET "/api/workflow/$fjd_id" \
+  '[.tasks[] | select(.status == "SCHEDULED")] | length == 2'
+call p7_fjd_rerun_terminate DELETE "/api/workflow/$fjd_id?reason=archon-p7"
+call p7_fjd_rerun_fork POST "/api/workflow/$fjd_id/rerun" \
+  "{\"reRunFromTaskId\": \"$(fixture_body p7_fjd_rerun_branch_get | jq -r '.tasks[0].taskId')\"}"
+call_until p7_fjd_rerun_fork_get GET "/api/workflow/$fjd_id" \
+  '(.tasks | length) == 4 and .status == "RUNNING"'
+
+# INLINE: javascript, value-param, an unknown evaluator, a script error, an evaluatorType and an
+# expression that are not strings.
+call p7_inline_register POST /api/metadata/workflow \
+  "$(p7_def archon_p7_inline '[{"name": "archon_p7_inline", "taskReferenceName": "inline_ref",
+    "type": "INLINE", "inputParameters": {"evaluatorType": "${workflow.input.evaluator}",
+    "expression": "${workflow.input.expression}", "a": "${workflow.input.a}"}}]')"
+p7_run p7_inline_javascript archon_p7_inline \
+  '{"evaluator": "javascript", "expression": "function f() { return {sum: $.a + 1, list: [$.a]}; } f();", "a": 1}'
+p7_run p7_inline_value_param archon_p7_inline '{"evaluator": "value-param", "expression": "a", "a": 3}'
+p7_run p7_inline_unknown archon_p7_inline '{"evaluator": "archon-unknown", "expression": "1", "a": 1}'
+p7_run p7_inline_script_error archon_p7_inline \
+  '{"evaluator": "javascript", "expression": "$.a.b.c", "a": 1}'
+p7_run p7_inline_evaluator_not_string archon_p7_inline '{"evaluator": 5, "expression": "1", "a": 1}'
+p7_run p7_inline_expression_not_string archon_p7_inline \
+  '{"evaluator": "javascript", "expression": 5, "a": 1}'
+
+# LAMBDA: a result, a script error, an empty script.
+call p7_lambda_register POST /api/metadata/workflow \
+  "$(p7_def archon_p7_lambda '[{"name": "archon_p7_lambda", "taskReferenceName": "lambda_ref",
+    "type": "LAMBDA", "inputParameters": {"scriptExpression": "${workflow.input.script}",
+    "a": "${workflow.input.a}"}}]')"
+p7_run p7_lambda archon_p7_lambda '{"script": "return {r: $.a + 1};", "a": 1}'
+p7_run p7_lambda_error archon_p7_lambda '{"script": "return $.a.b.c;", "a": 1}'
+p7_run p7_lambda_empty archon_p7_lambda '{"script": "", "a": 1}'
+
+# JSON_JQ_TRANSFORM: several results, a null result, a syntax error, no queryExpression, one
+# that is not a string; the definition check without queryExpression.
+call p7_jq_register POST /api/metadata/workflow \
+  "$(p7_def archon_p7_jq '[{"name": "archon_p7_jq", "taskReferenceName": "jq_ref",
+    "type": "JSON_JQ_TRANSFORM", "inputParameters": {"queryExpression": "${workflow.input.q}",
+    "items": "${workflow.input.items}"}}]')"
+p7_run p7_jq archon_p7_jq '{"q": ".items[] | {v: (. * 2)}", "items": [1, 2.5]}'
+p7_run p7_jq_null archon_p7_jq '{"q": ".missing", "items": [1]}'
+p7_run p7_jq_syntax archon_p7_jq '{"q": ".items[", "items": [1]}'
+p7_run p7_jq_missing archon_p7_jq '{"items": [1]}'
+p7_run p7_jq_not_string archon_p7_jq '{"q": 5, "items": [1]}'
+call p7_jq_register_invalid POST /api/metadata/workflow \
+  "$(p7_def archon_p7_jq_invalid '[{"name": "archon_p7_jq", "taskReferenceName": "jq_ref",
+    "type": "JSON_JQ_TRANSFORM", "inputParameters": {"items": [1]}}]')"
+
+# START_WORKFLOW: a started workflow (read too), a request that fails validation, no request.
+call p7_start_workflow_register POST /api/metadata/workflow \
+  "$(p7_def archon_p7_start_workflow '[{"name": "archon_p7_start_workflow",
+    "taskReferenceName": "start_ref", "type": "START_WORKFLOW",
+    "inputParameters": {"startWorkflow": "${workflow.input.request}"}}]')"
+p7_run p7_start_workflow archon_p7_start_workflow \
+  '{"request": {"name": "archon_p7_noop", "version": 1, "input": {"a": 2}, "correlationId": "archon-p7"}}'
+call_until p7_start_workflow_get_started GET \
+  "/api/workflow/$(body | jq -r '.tasks[0].outputData.workflowId')" '.status == "COMPLETED"'
+p7_run p7_start_workflow_invalid archon_p7_start_workflow '{"request": {"version": 1}}'
+p7_run p7_start_workflow_missing archon_p7_start_workflow '{}'
+
+# HTTP against the stub: JSON, text and number bodies, a 2xx code Spring does not know, 4xx with
+# a short, a long and no body, a 5xx, a refused connection, no uri, no method; asyncComplete, an
+# asyncComplete expression the mapper overwrites; the definition check.
+call p7_http_register POST /api/metadata/workflow \
+  "$(p7_def archon_p7_http '[{"name": "archon_p7_http", "taskReferenceName": "http_ref",
+    "type": "HTTP", "inputParameters": {"http_request": "${workflow.input.request}"}}]')"
+p7_http() { # suffix request_json
+  p7_run "p7_http_$1" archon_p7_http "$(jq -nc --argjson r "$2" '{request: $r}')"
+}
+p7_http json "{\"uri\": \"$HTTP_STUB/json\", \"method\": \"GET\"}"
+p7_http post "{\"uri\": \"$HTTP_STUB/json\", \"method\": \"POST\", \"body\": {\"k\": 1},
+  \"headers\": {\"X-Archon\": \"p7\", \"X-Number\": 1}}"
+p7_http text "{\"uri\": \"$HTTP_STUB/text\", \"method\": \"GET\", \"accept\": \"text/plain\"}"
+p7_http number "{\"uri\": \"$HTTP_STUB/number\", \"method\": \"GET\"}"
+p7_http status_299 "{\"uri\": \"$HTTP_STUB/status/299\", \"method\": \"GET\"}"
+p7_http short_404 "{\"uri\": \"$HTTP_STUB/short/404\", \"method\": \"GET\"}"
+p7_http long_400 "{\"uri\": \"$HTTP_STUB/long/400\", \"method\": \"GET\"}"
+p7_http empty_404 "{\"uri\": \"$HTTP_STUB/status/404\", \"method\": \"GET\"}"
+p7_http short_503 "{\"uri\": \"$HTTP_STUB/short/503\", \"method\": \"GET\"}"
+p7_http refused '{"uri": "http://127.0.0.1:9/json", "method": "GET"}'
+p7_http no_uri '{"method": "GET"}'
+p7_http no_method "{\"uri\": \"$HTTP_STUB/json\"}"
+call p7_http_register_async POST /api/metadata/workflow \
+  "$(p7_def archon_p7_http_async '[{"name": "archon_p7_http", "taskReferenceName": "http_ref",
+    "type": "HTTP", "asyncComplete": true,
+    "inputParameters": {"http_request": "${workflow.input.request}"}}]')"
+call p7_http_async_start POST /api/workflow/archon_p7_http_async \
+  "{\"request\": {\"uri\": \"$HTTP_STUB/json\", \"method\": \"GET\"}}"
+http_async_id="$(body)"
+call_until p7_http_async_get GET "/api/workflow/$http_async_id" '.tasks[0].status == "IN_PROGRESS"'
+call p7_http_async_update POST /api/tasks \
+  "$(task_result "$http_async_id" "$(task_id http_ref)" COMPLETED '{"done": true}')"
+call_until p7_http_async_get_completed GET "/api/workflow/$http_async_id" '.status == "COMPLETED"'
+call p7_http_register_async_input POST /api/metadata/workflow \
+  "$(p7_def archon_p7_http_async_input '[{"name": "archon_p7_http", "taskReferenceName": "http_ref",
+    "type": "HTTP", "inputParameters": {"http_request": "${workflow.input.request}",
+    "asyncComplete": "${workflow.input.async}"}}]')"
+p7_run p7_http_async_input archon_p7_http_async_input \
+  "{\"async\": true, \"request\": {\"uri\": \"$HTTP_STUB/json\", \"method\": \"GET\"}}"
+call p7_http_register_invalid POST /api/metadata/workflow \
+  "$(p7_def archon_p7_http_invalid '[{"name": "archon_p7_http", "taskReferenceName": "http_ref",
+    "type": "HTTP", "inputParameters": {"body": 1}}]')"

@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/workflow/89939051-b59e-45f1-ad71-4a1c99921412",
+    "path": "/api/workflow/7aa1f58d-7e21-4570-b3b4-43d464f3484d",
     "body": null
   },
   "response": {
@@ -9,11 +9,11 @@
     "content_type": "application/json",
     "body": {
       "ownerApp": "",
-      "createTime": 1793571061106,
-      "updateTime": 1793571062031,
+      "createTime": 1793629057025,
+      "updateTime": 1793629057937,
       "status": "FAILED",
-      "endTime": 1793571062031,
-      "workflowId": "89939051-b59e-45f1-ad71-4a1c99921412",
+      "endTime": 1793629057937,
+      "workflowId": "7aa1f58d-7e21-4570-b3b4-43d464f3484d",
       "tasks": [
         {
           "taskType": "SUB_WORKFLOW",
@@ -33,22 +33,22 @@
           "seq": 1,
           "pollCount": 1,
           "taskDefName": "archon_ops_sub_once",
-          "scheduledTime": 1793571061107,
-          "startTime": 1793571061118,
-          "endTime": 1793571062029,
-          "updateTime": 1793571061121,
+          "scheduledTime": 1793629057027,
+          "startTime": 1793629057051,
+          "endTime": 1793629057935,
+          "updateTime": 1793629057053,
           "startDelayInSeconds": 0,
           "retried": false,
           "executed": false,
           "callbackFromWorker": true,
           "responseTimeoutSeconds": 0,
-          "workflowInstanceId": "89939051-b59e-45f1-ad71-4a1c99921412",
+          "workflowInstanceId": "7aa1f58d-7e21-4570-b3b4-43d464f3484d",
           "workflowType": "archon_ops_top",
-          "taskId": "a4bdabf9-02ad-4174-9059-0ed0f7b4f245",
-          "reasonForIncompletion": "Sub workflow archon_ops_mid.1/76611be3-441e-39ca-b3b7-5e8c9b061f9f failure reason: Task 7714235d-1305-4703-89df-be7327e51cf8 failed with status: FAILED and reason: 'Sub workflow archon_ops_child.1/58e4ce16-b79d-3ce2-87cb-61183ec01c0d failure reason: Task 3ad50d2c-331d-4b4a-a262-56f67c0101a1 failed with status: FAILED and reason: 'null''",
+          "taskId": "11e877f6-ffa7-46c0-90eb-34a10fe9dad5",
+          "reasonForIncompletion": "Sub workflow archon_ops_mid.1/96ba9b24-b8d3-3fc5-a149-f38074cd2b0c failure reason: Task 665b9719-2ba0-44be-bdc6-78109556b5fc failed with status: FAILED and reason: 'Sub workflow archon_ops_child.1/00bcc6d0-7f3b-3e1f-82d8-5adf7d9d9d27 failure reason: Task f45dd45b-c36e-4525-a2e7-fe9185618c11 failed with status: FAILED and reason: 'null''",
           "callbackAfterSeconds": 0,
           "outputData": {
-            "subWorkflowId": "76611be3-441e-39ca-b3b7-5e8c9b061f9f"
+            "subWorkflowId": "96ba9b24-b8d3-3fc5-a149-f38074cd2b0c"
           },
           "workflowTask": {
             "name": "archon_ops_sub_once",
@@ -66,7 +66,7 @@
             "joinOn": [],
             "optional": false,
             "taskDefinition": {
-              "createTime": 1793571048483,
+              "createTime": 1793629045679,
               "updateTime": 0,
               "createdBy": "",
               "name": "archon_ops_sub_once",
@@ -100,7 +100,7 @@
           "rateLimitFrequencyInSeconds": 0,
           "workflowPriority": 0,
           "iteration": 0,
-          "subWorkflowId": "76611be3-441e-39ca-b3b7-5e8c9b061f9f",
+          "subWorkflowId": "96ba9b24-b8d3-3fc5-a149-f38074cd2b0c",
           "subworkflowChanged": false,
           "firstStartTime": 0,
           "executionMetadata": {
@@ -109,7 +109,7 @@
             "empty": true
           },
           "taskDefinition": {
-            "createTime": 1793571048483,
+            "createTime": 1793629045679,
             "updateTime": 0,
             "createdBy": "",
             "name": "archon_ops_sub_once",
@@ -132,21 +132,21 @@
             "taskStatusListenerEnabled": true,
             "enforceSchema": false
           },
-          "queueWaitTime": 11,
+          "queueWaitTime": 24,
           "loopOverTask": false
         }
       ],
       "input": {},
       "output": {
-        "subWorkflowId": "76611be3-441e-39ca-b3b7-5e8c9b061f9f"
+        "subWorkflowId": "96ba9b24-b8d3-3fc5-a149-f38074cd2b0c"
       },
-      "reasonForIncompletion": "Task a4bdabf9-02ad-4174-9059-0ed0f7b4f245 failed with status: FAILED and reason: 'Sub workflow archon_ops_mid.1/76611be3-441e-39ca-b3b7-5e8c9b061f9f failure reason: Task 7714235d-1305-4703-89df-be7327e51cf8 failed with status: FAILED and reason: 'Sub workflow archon_ops_child.1/58e4ce16-b79d-3ce2-87cb-61183ec01c0d failure reason: Task 3ad50d2c-331d-4b4a-a262-56f67c0101a1 failed with status: FAILED and reason: 'null'''",
+      "reasonForIncompletion": "Task 11e877f6-ffa7-46c0-90eb-34a10fe9dad5 failed with status: FAILED and reason: 'Sub workflow archon_ops_mid.1/96ba9b24-b8d3-3fc5-a149-f38074cd2b0c failure reason: Task 665b9719-2ba0-44be-bdc6-78109556b5fc failed with status: FAILED and reason: 'Sub workflow archon_ops_child.1/00bcc6d0-7f3b-3e1f-82d8-5adf7d9d9d27 failure reason: Task f45dd45b-c36e-4525-a2e7-fe9185618c11 failed with status: FAILED and reason: 'null'''",
       "taskToDomain": {},
       "failedReferenceTaskNames": [
         "top_sub_ref"
       ],
       "workflowDefinition": {
-        "createTime": 1793571048852,
+        "createTime": 1793629046016,
         "updateTime": 0,
         "name": "archon_ops_top",
         "version": 1,
@@ -167,7 +167,7 @@
             "joinOn": [],
             "optional": false,
             "taskDefinition": {
-              "createTime": 1793571048483,
+              "createTime": 1793629045679,
               "updateTime": 0,
               "createdBy": "",
               "name": "archon_ops_sub_once",
@@ -219,9 +219,9 @@
       ],
       "history": [],
       "rateLimited": false,
+      "startTime": 1793629057025,
       "workflowName": "archon_ops_top",
-      "workflowVersion": 1,
-      "startTime": 1793571061106
+      "workflowVersion": 1
     }
   }
 }

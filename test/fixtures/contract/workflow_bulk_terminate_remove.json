@@ -3,8 +3,8 @@
     "method": "DELETE",
     "path": "/api/workflow/bulk/terminate-remove?reason=archon-bulk",
     "body": [
-      "97fc2f6c-86d6-4785-855b-dc522f3d545c",
-      "4aadb4e4-212a-4ff1-9ff2-59ff70ff4fdc",
+      "6cad0f39-bd39-49a5-81fa-f1c969e2de54",
+      "ac8e0229-fafe-488d-8676-9d6877b1bce2",
       "00000000-0000-0000-0000-000000000000"
     ]
   },
@@ -13,13 +13,13 @@
     "content_type": "application/json",
     "body": {
       "bulkErrorResults": {
-        "4aadb4e4-212a-4ff1-9ff2-59ff70ff4fdc": "Cannot terminate a COMPLETED workflow.",
+        "ac8e0229-fafe-488d-8676-9d6877b1bce2": "Cannot terminate a COMPLETED workflow.",
         "00000000-0000-0000-0000-000000000000": "No such workflow found by id: 00000000-0000-0000-0000-000000000000"
       },
       "bulkSuccessfulResults": [
-        "97fc2f6c-86d6-4785-855b-dc522f3d545c",
-        "97fc2f6c-86d6-4785-855b-dc522f3d545c",
-        "4aadb4e4-212a-4ff1-9ff2-59ff70ff4fdc"
+        "6cad0f39-bd39-49a5-81fa-f1c969e2de54",
+        "6cad0f39-bd39-49a5-81fa-f1c969e2de54",
+        "ac8e0229-fafe-488d-8676-9d6877b1bce2"
       ]
     }
   }

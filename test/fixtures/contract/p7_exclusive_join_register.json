@@ -1,0 +1,66 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_p7_exclusive_join",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_p7_switch",
+          "taskReferenceName": "switch_ref",
+          "type": "SWITCH",
+          "evaluatorType": "value-param",
+          "expression": "route",
+          "inputParameters": {
+            "route": "${workflow.input.route}"
+          },
+          "decisionCases": {
+            "a": [
+              {
+                "name": "archon_p7_worker",
+                "taskReferenceName": "a_ref",
+                "type": "SIMPLE"
+              }
+            ],
+            "b": [
+              {
+                "name": "archon_p7_worker",
+                "taskReferenceName": "b_ref",
+                "type": "SIMPLE",
+                "permissive": true
+              }
+            ]
+          },
+          "defaultCase": [
+            {
+              "name": "archon_p7_worker",
+              "taskReferenceName": "c_ref",
+              "type": "SIMPLE"
+            }
+          ]
+        },
+        {
+          "name": "archon_p7_exclusive_join",
+          "taskReferenceName": "xjoin_ref",
+          "type": "EXCLUSIVE_JOIN",
+          "joinOn": [
+            "a_ref",
+            "b_ref"
+          ],
+          "defaultExclusiveJoinTask": [
+            "c_ref"
+          ]
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

@@ -3,8 +3,8 @@
     "method": "PUT",
     "path": "/api/workflow/bulk/pause",
     "body": [
-      "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01",
-      "97fc2f6c-86d6-4785-855b-dc522f3d545c",
+      "bf7e7a65-cf29-4533-88b2-bb4e17e1ebee",
+      "6cad0f39-bd39-49a5-81fa-f1c969e2de54",
       "00000000-0000-0000-0000-000000000000"
     ]
   },
@@ -16,8 +16,8 @@
         "00000000-0000-0000-0000-000000000000": "No such workflow found by id: 00000000-0000-0000-0000-000000000000"
       },
       "bulkSuccessfulResults": [
-        "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01",
-        "97fc2f6c-86d6-4785-855b-dc522f3d545c"
+        "bf7e7a65-cf29-4533-88b2-bb4e17e1ebee",
+        "6cad0f39-bd39-49a5-81fa-f1c969e2de54"
       ]
     }
   }

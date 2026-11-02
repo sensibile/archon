@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/tasks/30fdc33d-9699-4cbd-b2a8-e96053c01911/COMPLETED/signal/sync?returnStrategy=BLOCKING_TASK_INPUT",
+    "path": "/api/tasks/6a2a4d51-e5ee-462d-9bd4-ae8babe09226/COMPLETED/signal/sync?returnStrategy=BLOCKING_TASK_INPUT",
     "body": {
       "s": 4
     }
@@ -11,21 +11,21 @@
     "content_type": "application/json",
     "body": {
       "responseType": "BLOCKING_TASK_INPUT",
-      "targetWorkflowId": "30fdc33d-9699-4cbd-b2a8-e96053c01911",
+      "targetWorkflowId": "6a2a4d51-e5ee-462d-9bd4-ae8babe09226",
       "targetWorkflowStatus": "RUNNING",
-      "requestId": "4c933b55-f76e-4c5d-b949-6507caa8db9f",
-      "workflowId": "30fdc33d-9699-4cbd-b2a8-e96053c01911",
+      "requestId": "bb5bafb1-aacb-4994-b644-d3661d1617f0",
+      "workflowId": "6a2a4d51-e5ee-462d-9bd4-ae8babe09226",
       "input": {},
       "output": {},
       "signalTimeout": false,
       "taskType": "WAIT",
-      "taskId": "0ba558f6-60a2-44b2-b1f5-acb6849d4a84",
+      "taskId": "97a5dc84-aabe-4e51-9ecb-274c4abbeb53",
       "referenceTaskName": "wait5_ref",
       "retryCount": 0,
       "taskDefName": "archon_wait",
       "workflowType": "archon_ops_waits",
       "priority": 0,
-      "createTime": 1793571055214,
+      "createTime": 1793629052109,
       "updateTime": 0,
       "status": "IN_PROGRESS"
     }

@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_inline",
+    "body": {
+      "evaluator": 5,
+      "expression": "1",
+      "a": 1
+    }
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "class java.lang.Integer cannot be cast to class java.lang.String (java.lang.Integer and java.lang.String are in module java.base of loader 'bootstrap')",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

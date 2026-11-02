@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_p7_fjd_param",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "dynamicForkTasksParam": "dynamicTasks",
+          "dynamicForkTasksInputParamName": "dynamicTasksInput",
+          "inputParameters": {
+            "dynamicTasks": "${workflow.input.tasks}",
+            "dynamicTasksInput": "${workflow.input.inputs}"
+          },
+          "name": "archon_p7_fjd",
+          "taskReferenceName": "fjd_ref",
+          "type": "FORK_JOIN_DYNAMIC"
+        },
+        {
+          "name": "archon_p7_join",
+          "taskReferenceName": "join_ref",
+          "type": "JOIN"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

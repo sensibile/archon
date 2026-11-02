@@ -24,7 +24,6 @@ defmodule Archon.Runtime.Step.Async do
   """
 
   alias Archon.Decider.{SystemTask, SystemTasks}
-  alias Archon.Decider.SystemTask.Join
   alias Archon.Decider.SystemTask.SubWorkflow, as: SubWorkflowTask
   alias Archon.Domain.{Task, Workflow, WorkflowTask}
   alias Archon.Runtime.Step.{Env, Schedule, State, SubWorkflow, Tasks}
@@ -40,7 +39,7 @@ defmodule Archon.Runtime.Step.Async do
   def pass(%State{wf: wf} = state, mode) do
     ids =
       for task <- wf.tasks,
-          Schedule.async?(task),
+          Schedule.async?(state.env, task),
           not Task.terminal?(task.status),
           MapSet.member?(state.due, task.task_id) or triggered?(state, task) or
             (mode == :wake and due?(state, task)),
@@ -154,8 +153,10 @@ defmodule Archon.Runtime.Step.Async do
     end
   end
 
-  defp run(state, task, async_complete?),
-    do: dispose(state, execute(state, task), async_complete?)
+  defp run(state, task, async_complete?) do
+    {state, task} = execute(state, task)
+    dispose(state, task, async_complete?)
+  end
 
   # A started task left IN_PROGRESS holds a slot of its definition's limit (ADR 0021, decision 5).
   defp limit_started(state, task_id) do
@@ -165,8 +166,8 @@ defmodule Archon.Runtime.Step.Async do
     end
   end
 
-  # WorkflowSystemTask#start: only SUB_WORKFLOW has one among the asynchronous system tasks. Its
-  # result comes back as {:sub_workflow_started, ...}.
+  # WorkflowSystemTask#start. SUB_WORKFLOW's result comes back as {:sub_workflow_started, ...};
+  # another type's start, if it has one, is its Archon.Decider.SystemTask.start/3.
   defp start(state, %Task{task_type: "SUB_WORKFLOW"} = task, _async_complete?) do
     case SubWorkflow.start(state, task) do
       {:started, state} -> {state, false}
@@ -174,27 +175,27 @@ defmodule Archon.Runtime.Step.Async do
     end
   end
 
-  # Wait#start
-  defp start(state, %Task{task_type: "WAIT"} = task, async_complete?),
-    do: dispose(state, %{task | status: :in_progress}, async_complete?)
+  defp start(%State{env: env} = state, task, async_complete?) do
+    case SystemTask.start(state.wf, task, Env.context(env)) do
+      nil -> dispose(state, task, async_complete?)
+      result -> state |> Schedule.apply_result(result) |> dispose(result.task, async_complete?)
+    end
+  end
 
-  defp start(state, task, async_complete?), do: dispose(state, task, async_complete?)
-
-  defp execute(%State{wf: wf}, %Task{task_type: "JOIN"} = task),
-    do: wf |> Join.execute(task) |> elem(1)
-
-  defp execute(%State{env: env}, %Task{task_type: "SUB_WORKFLOW"} = task) do
+  defp execute(%State{env: env} = state, %Task{task_type: "SUB_WORKFLOW"} = task) do
     child =
       case Env.child(env, task, Task.sub_workflow_id(task)) do
         {:ok, child} -> child
         :error -> nil
       end
 
-    task |> SubWorkflowTask.execute(child) |> elem(1)
+    {state, task |> SubWorkflowTask.execute(child) |> elem(1)}
   end
 
-  defp execute(%State{wf: wf, now: now}, task),
-    do: wf |> SystemTask.execute(task, now) |> elem(1)
+  defp execute(%State{wf: wf, env: env} = state, task) do
+    result = SystemTask.execute(wf, task, Env.context(env))
+    {Schedule.apply_result(state, result), result.task}
+  end
 
   @doc """
   What follows an evaluation: an `isAsyncComplete` task no longer `SCHEDULED` and a terminal

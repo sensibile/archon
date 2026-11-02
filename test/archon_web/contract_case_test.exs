@@ -38,6 +38,29 @@ defmodule ArchonWeb.ContractCaseTest do
     ])
   end
 
+  describe "types:" do
+    test "a step runs once every type it names has a mapper of its own" do
+      assert runs?({:exchange, "x", types: ["SWITCH", "DO_WHILE"]})
+      refute runs?({:exchange, "x", types: ["SWITCH", "ARCHON_NOT_A_TYPE"]})
+      assert runs?({:exchange, "x", []})
+      assert runs?({:wait_status, "x", "COMPLETED"})
+    end
+
+    test "a skipped step is not replayed" do
+      assert replay([{:exchange, "no_such_fixture", types: ["ARCHON_NOT_A_TYPE"]}]) == new_state()
+    end
+
+    # ADR 0026, decision 8: every Phase 7 step but the task definition registration names the
+    # types it needs, so a slice turns its steps on through the mapper table.
+    test "every Phase 7 step names its types" do
+      for {:exchange, "p7_" <> _rest = name, opts} <- scenario() do
+        assert [_ | _] = Keyword.get(opts, :types), name
+      end
+
+      assert {:exchange, "p7_register_taskdefs"} in scenario()
+    end
+  end
+
   test "steps/2 cuts the scenario from one fixture through another" do
     assert steps("health", "health_api") == [{:exchange, "health"}, {:exchange, "health_api"}]
     assert_raise ArgumentError, fn -> steps("health", "missing") end
@@ -245,6 +268,30 @@ defmodule ArchonWeb.ContractCaseTest do
         actual(%{"bulkErrorResults" => %{@b => "x"}, "bulkSuccessfulResults" => [@b]}),
         state
       )
+    end
+
+    test "the captured HTTP stub address is the replay's own" do
+      captured = captured_http_stub()
+      state = new_state(http_stub: "http://127.0.0.1:4242")
+
+      check(
+        "t",
+        fixture(%{"uri" => "#{captured}/json", "message" => "for \"#{captured}/short/404\""}),
+        actual(%{
+          "uri" => "http://127.0.0.1:4242/json",
+          "message" => "for \"http://127.0.0.1:4242/short/404\""
+        }),
+        state
+      )
+
+      assert_raise ExUnit.AssertionError, ~r/differs/, fn ->
+        check(
+          "t",
+          fixture(%{"uri" => "#{captured}/json"}),
+          actual(%{"uri" => "#{captured}/json"}),
+          state
+        )
+      end
     end
 
     test "a no-route step binds nothing from upstream's body" do

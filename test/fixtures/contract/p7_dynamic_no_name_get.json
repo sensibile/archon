@@ -1,0 +1,99 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/f99cf089-cea1-464a-8ed7-a82e5419b167",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "ownerApp": "",
+      "createTime": 1793629061439,
+      "updateTime": 1793629061440,
+      "status": "FAILED",
+      "endTime": 1793629061440,
+      "workflowId": "f99cf089-cea1-464a-8ed7-a82e5419b167",
+      "tasks": [],
+      "input": {},
+      "output": {},
+      "reasonForIncompletion": "Cannot map a dynamic task based on the parameter and input. Parameter= taskToExecute, input= {taskToExecute=null, x=1}",
+      "taskToDomain": {},
+      "failedReferenceTaskNames": [],
+      "workflowDefinition": {
+        "createTime": 1793629061179,
+        "updateTime": 0,
+        "name": "archon_p7_dynamic",
+        "version": 1,
+        "tasks": [
+          {
+            "name": "archon_p7_dynamic",
+            "taskReferenceName": "dynamic_ref",
+            "inputParameters": {
+              "taskToExecute": "${workflow.input.task}",
+              "x": 1
+            },
+            "type": "DYNAMIC",
+            "dynamicTaskNameParam": "taskToExecute",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_dynamic",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          }
+        ],
+        "inputParameters": [],
+        "outputParameters": {},
+        "schemaVersion": 2,
+        "restartable": true,
+        "workflowStatusListenerEnabled": false,
+        "timeoutPolicy": "ALERT_ONLY",
+        "timeoutSeconds": 0,
+        "variables": {},
+        "inputTemplate": {},
+        "enforceSchema": true,
+        "metadata": {},
+        "maskedFields": []
+      },
+      "priority": 0,
+      "variables": {},
+      "lastRetriedTime": 0,
+      "failedTaskNames": [],
+      "history": [],
+      "rateLimited": false,
+      "startTime": 1793629061439,
+      "workflowName": "archon_p7_dynamic",
+      "workflowVersion": 1
+    }
+  }
+}

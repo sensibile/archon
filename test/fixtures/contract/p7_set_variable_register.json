@@ -1,0 +1,45 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_p7_set_variable",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_p7_set",
+          "taskReferenceName": "set1_ref",
+          "type": "SET_VARIABLE",
+          "inputParameters": {
+            "a": "${workflow.input.a}",
+            "b": 1
+          }
+        },
+        {
+          "name": "archon_p7_set",
+          "taskReferenceName": "set2_ref",
+          "type": "SET_VARIABLE",
+          "inputParameters": {
+            "a": "over",
+            "c": "${workflow.variables.b}"
+          }
+        }
+      ],
+      "variables": {
+        "a": "init",
+        "keep": true
+      },
+      "outputParameters": {
+        "v": "${workflow.variables}"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

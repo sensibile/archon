@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "DELETE",
-    "path": "/api/workflow/c78eaf38-fac3-4fdd-abf8-7a0b1af6a74d/terminate-remove?reason=archon-terminate-remove",
+    "path": "/api/workflow/2ead25f6-c134-45e5-bf1d-fcacd7232706/terminate-remove?reason=archon-terminate-remove",
     "body": null
   },
   "response": {

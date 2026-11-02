@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_fjd_param",
+    "body": {
+      "tasks": [
+        {
+          "name": "archon_p7_worker",
+          "taskReferenceName": "dyn_a_ref",
+          "type": "SIMPLE"
+        },
+        {
+          "name": "archon_p7_worker",
+          "taskReferenceName": "dyn_b_ref",
+          "type": "SIMPLE"
+        }
+      ],
+      "inputs": {
+        "dyn_a_ref": {
+          "x": 1
+        },
+        "dyn_b_ref": {
+          "x": 2
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "1236ef32-24f3-417d-ad78-eec5b713eba7"
+  }
+}

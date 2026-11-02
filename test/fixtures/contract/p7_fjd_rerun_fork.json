@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/1236ef32-24f3-417d-ad78-eec5b713eba7/rerun",
+    "body": {
+      "reRunFromTaskId": "02a253b3-455f-4b98-b05e-8feb595bfab9"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "1236ef32-24f3-417d-ad78-eec5b713eba7"
+  }
+}

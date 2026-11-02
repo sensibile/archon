@@ -4,6 +4,7 @@
 - 날짜: 2026-11-02
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(주제, 타입 범위, JQ 엔진, HTTP 대상 제한)는 2026-11-02 BOSS가 이 문서의 추천안으로 정했다.
+- 갱신: 2026-11-02 조각 7a가 결정 2·4·8 끝에 정한 것과 캡처에서 확인한 것을 적었다.
 
 ## 맥락
 
@@ -114,6 +115,30 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   `StartWorkflowRequest.validate`(시작 REST의 내장 정의)를 거친다. 7a가 이 사슬에 태스크 정의 조회 옵션을 넘기는 연결(정의 등록
   `Archon.Metadata`, 시작 경로)을 만든다. 7e·7g는 `TaskTypeConstraint`에 자기 규칙 절만 더한다.
 
+- **조각 7a에서 정한 것(2026-11-02).**
+  - 시스템 태스크 표의 항목은 `Archon.Decider.SystemTasks.Spec`(`module`, `async?`, `async_complete`(`:by_task` 또는 고정 값),
+    `start_idempotent?`)이다. 재시도하지 않는 내장 타입(`built_in?/1`)과 제자리 재시도(`in_place?/1`)는 upstream처럼 등록과 상관없는
+    타입 이름 집합이라 표 항목이 아니라 같은 모듈의 함수로 둔다(EXCLUSIVE_JOIN·FORK_JOIN이 등록 전에도 들어 있다). 2차 조각은
+    `default/0`에 자기 줄 하나를 더한다.
+  - 매퍼 표는 그대로 `Archon.Decider.Mapper`의 `@mappers`이고 `mapped?/1`이 재생 건너뛰기(결정 8)의 판정이다.
+  - behaviour 분배(`SystemTask.start/3`, `execute/3`)는 표의 `module`이 이 behaviour를 선언했을 때만 그 함수를 부른다. DO_WHILE
+    (`DoWhile.execute/3`)과 SUB_WORKFLOW(`SubWorkflow.execute/2`)는 계약이 다른 같은 이름 함수가 있어 런타임이 직접 부른다. WAIT의
+    `start`(`IN_PROGRESS`)는 behaviour로 옮겼고 `Step.Async`가 SUB_WORKFLOW 밖의 비동기 시작에서 부른다.
+  - `start`는 `Step.Schedule.start_sync/2`가 동기 타입 예약 직후에, 그리고 rerun 대상이 동기 시스템 태스크일 때
+    `Step.Lifecycle`이 부른다(upstream `rerunWF`도 `start`를 부른다). rerun 대상은 `start` 뒤에도 `SCHEDULED`일 때만 큐에 넣는다.
+  - `Result`의 태스크는 `changed?`와 상관없이 상태에 넣고, `workflow`가 오면 그 자리에서 `State.save_workflow`를 부른다
+    (`Step.Schedule.apply_result/2`). upstream `SetVariable`이 `execute` 안에서 `updateWorkflow`를 부르는 것과 같은 시점이다.
+  - 조회 둘의 기본값은 `Context`·`Step.Env` 모두 "없음"이고(순수 시험이 저장소를 읽지 않게), 메타데이터 저장소를 읽는 함수는
+    `WorkflowServer.env/2`가 넣는다. `Archon.StepReplay.env/2`는 픽스처가 등록한 정의(캡처 순서에서 마지막 등록)를 읽는다.
+    `evaluate_jq`의 기본값은 `%Archon.Script.Error{kind: :request, reason: "no jq evaluator is available"}`이다.
+  - 설정 `max_workflow_variables_payload_kb`(기본 256)는 `Step.Env`·`Context`의 필드이고 `config :archon, Archon.Runtime,
+    settings: [...]`로 바꾼다. 7e·7g의 설정은 실행기·풀의 설정이라 `Context`를 거치지 않는다.
+  - `Step.Env.http_in_flight`(진행 중 HTTP 태스크 ID 집합, 기본 빈 집합)는 자리만 있다. 7g가 채운다.
+  - 타입 제약의 조회는 검증 옵션 `task_def_lookup`이다(`t:Archon.Domain.Validation.opts/0`). `WorkflowDef.validate/2`가
+    `WorkflowTask.errors/2`를 거쳐(중첩 태스크 포함) `TaskTypeConstraint.errors/2`에 넘기고, 규칙은
+    `TaskTypeConstraint.task_definition/2`(내장 정의, 없으면 조회)로 읽는다. 정의 등록·갱신·검증(`Archon.Metadata`)과 시작 REST의
+    내장 정의 검증(`POST /api/workflow`, `execute`)이 `Archon.Metadata.validation_opts/0`로 저장소의 조회를 넘긴다.
+
 ### 3. 엔진이 필요 없는 동기 타입(조각 7b)
 
 모두 upstream 매퍼·태스크를 그대로 옮긴다. 문구는 upstream 문자열을 쓴다.
@@ -172,6 +197,18 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   `Step.Lifecycle`의 `contains_type?(..., "FORK_JOIN_DYNAMIC")` 판정(실패 JOIN 되돌리기, 바뀐 SUB_WORKFLOW 찾기)은 이미 있으므로
   시험만 더한다. `Step.Tasks.lazy_evaluate?/2`는 이미 upstream `isLazyEvaluateWorkflow`와 같다(정의에 없는 동적 가지 ref의 갱신은
   늘 결정한다, `WorkflowExecutorOps` 1237행). 고치지 않고 회귀 시험만 더한다.
+
+- **조각 7a의 캡처에서 확인한 것(2026-11-02).** 정의 변경은 보인다. `p7_dynamic_get`의 `workflowDefinition.tasks[0].name`이 풀린
+  이름(`archon_p7_worker`)이고, HTTP의 `inputParameters.asyncComplete`도 `false`로 덮인 채 저장된다(`p7_http_async_input_get`).
+  그래서 7a가 Decider 계약을 만들었다. 정의를 바꾸는 매퍼는 `Archon.Decider.Mapper`의 선택 콜백 `changes_definition?/0`에서
+  `true`를 답하고, 바꾼 `WorkflowTask`를 돌려주는 태스크의 `workflow_task`에 넣는다(upstream에서 태스크와 정의가 같은 객체를
+  가리키는 것과 같다). `Archon.Decider.decide/2`는 예약할 태스크 가운데 그런 타입의 `workflow_task`가 정의의 같은 ref 태스크와
+  다르면 정의에 써 넣고(`WorkflowDef.replace_task/2`, 중첩 포함) `Outcome.changed_workflow_tasks`에 담는다. `Step.Decide`는 그 결정에서
+  바로 워크플로우를 저장한다. 7c·7g는 매퍼에서 콜백과 `workflow_task`만 채운다.
+  캡처는 정의 없는 이름도 보여 준다. upstream은 시작 때 정의가 없는 모든 태스크에 기본 태스크 정의(이름은 정의의 태스크 이름
+  `archon_p7_dynamic`)를 채우므로(`MetadataMapperService`), DYNAMIC 매퍼는 늘 그 정의를 쓰고 `"Invalid task specified ..."`로
+  끝나지 않는다. 정의 없는 이름(`archon_p7_missing`)의 태스크가 그 타입으로 `SCHEDULED`에 남는다(`p7_dynamic_missing_get`).
+  `workflowDefinition`의 `taskDefinition`도 그 기본 정의로 남는다. 위 "없으면 ... 종료한다"는 이 동작으로 바뀐다(정답은 캡처).
 
 ### 5. 스크립트 타입: INLINE, LAMBDA(조각 7d)
 
@@ -367,6 +404,35 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   도우미는 매퍼 표(결정 2)에 없는 타입이 있는 단계를 건너뛴다. 뒤 단계가 앞 단계에 기대면 그 단계도 같은 타입을 적는다. 그래서 각 조각은 매퍼 표에 자기
   타입을 넣으면 자기 단계가 켜지고, 시나리오를 고치지 않는다. 7h가 이 옵션을 없앤다.
 - 결정 루프 단위의 재생(`Archon.StepReplay`)도 타입마다 더한다. 이것은 각 조각이 자기 시험 파일로 한다.
+
+- **조각 7a에서 정한 것과 캡처에서 확인한 것(2026-11-02).** 픽스처는 `p7_<타입>_*` 160개다(기존 361개와 한 번에 캡처, 모두
+  521개). 기존 픽스처는 `normalize/1` 기준으로 같았고, 다른 것은 순서뿐이다(bulk 오류 맵의 키, 순서 없는 목록
+  `workflow_correlated_paused_closed`·Later 경로 `route_later_tasks_search`). `task_update_v2_invalid_both`의 두 오류 순서는
+  6a처럼 기존 캡처를 남겼다. 재생 장치는 단계 옵션 `types:`, `until: :settled`(워크플로우 상태·태스크 수·각 태스크 상태가
+  픽스처와 같을 때까지 다시 읽음), stub 주소 치환(`new_state(http_stub: url)`, 캡처 주소 `http://127.0.0.1:18299`)이다.
+  stub는 Plug가 모르는 상태 코드 299의 사유 문구를 `config :plug, :statuses`(시험 설정)로 준다.
+  캡처에서 이 ADR의 서술과 다르거나 서술이 없던 upstream 응답(그 응답이 정답):
+  - TERMINATE의 문자열이 아닌 `terminationStatus`는 정의 검사가 막는다. 수 `5`도, 표현식 `${workflow.input.status}`도 등록이
+    400이다(`p7_terminate_register_not_string`, `_expression`). 그래서 REST로는 `"given termination status is not valid"`에 닿지 않는다.
+  - EXCLUSIVE_JOIN의 실패: `permissive` 태스크를 `FAILED`로 갱신하면 태스크는 `FAILED`로 저장되고 `POST /api/tasks`가
+    `NullPointerException` 500(`Cannot invoke "...TaskModel.getStatus()" because "t" is null`)이며 워크플로우는 `RUNNING`에 남는다
+    (`p7_exclusive_join_failed_*`). permissive가 아닌 실패는 EXCLUSIVE_JOIN 전에 워크플로우를 끝내므로 다른 실패 경로가 없다.
+  - DYNAMIC 정의 없는 이름은 결정 4 끝.
+  - FORK_JOIN_DYNAMIC: retry는 두 가지를 다시 예약한다. upstream의 JOIN 평가(시스템 태스크 워커)가 retry와 경합하면 워크플로우가
+    바로 다시 `FAILED`가 될 수 있어, 캡처는 retry가 버틴 경우를 기다린다(아니면 캡처 실패). 끝난 뒤 한 가지의 마지막 시도에서
+    rerun하면 그 가지와 함께 다른 가지의 첫 시도(`retryCount` 0)가 `SCHEDULED`가 되고 JOIN은 `COMPLETED`로 남는다
+    (`p7_fjd_rerun_branch_get`). 종료 뒤 FORK 태스크에서 rerun하면 가지가 새로 만들어진다(`p7_fjd_rerun_fork_get`).
+  - INLINE의 문자열이 아닌 `evaluatorType`·`expression`은 시작 요청이 500(`class java.lang.Integer cannot be cast to class
+    java.lang.String ...`)이다. 시작이 결정까지 같은 요청에서 하므로 워크플로우 ID를 받지 못한다(`p7_inline_*_not_string_start`).
+  - JSON_JQ_TRANSFORM의 문자열이 아닌 `queryExpression`은 워크플로우 `FAILED`, `"Error scheduling tasks: [<태스크 ID>], for
+    workflow: <워크플로우 ID>"`, 태스크 `CANCELED`다(`p7_jq_not_string_get`).
+  - HTTP: Spring 표에 없는 2xx(299)는 `"Failed to invoke HTTP task due to: java.lang.IllegalArgumentException: No matching constant
+    for [299]"`이고 출력 `response`도 그 예외 문자열이다(`java.lang.Exception:`으로 감싸지 않음). 연결 거부는
+    `"... java.lang.Exception: I/O error on GET request for \"<uri>\": Connect to http://127.0.0.1:9 failed: Connection refused (connect
+    failed)"`. 긴 body(1,010바이트)는 Spring이 줄여 끝 따옴표 없이 끝난다(`p7_http_long_400_get`). 수 body는 `42.0`. `workerId`는
+    서버 호스트 이름이라 재생에서 뺀다. stub(Bandit)가 헤더 이름을 소문자로 보내므로 캡처의 헤더 이름도 소문자다.
+  - START_WORKFLOW 검증 실패 문구는 `"startWorkflow validation failed. 'name' -> Workflow name cannot be null or empty. "`이다.
+  - SET_VARIABLE 크기 초과는 `variables`를 되돌리고 크기를 바이트로 적는다(`270021`).
 
 ### 9. 구현 조각
 

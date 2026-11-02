@@ -1,0 +1,224 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/494a0d29-05f6-4fe2-9a02-e6b8e8678671",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "ownerApp": "",
+      "createTime": 1793629067401,
+      "updateTime": 1793629067447,
+      "status": "FAILED",
+      "endTime": 1793629067447,
+      "workflowId": "494a0d29-05f6-4fe2-9a02-e6b8e8678671",
+      "tasks": [
+        {
+          "taskType": "HTTP",
+          "status": "FAILED",
+          "inputData": {
+            "asyncComplete": false,
+            "http_request": {
+              "uri": "http://127.0.0.1:18299/status/299",
+              "method": "GET"
+            }
+          },
+          "referenceTaskName": "http_ref",
+          "retryCount": 0,
+          "seq": 1,
+          "pollCount": 1,
+          "taskDefName": "archon_p7_http",
+          "scheduledTime": 1793629067402,
+          "startTime": 1793629067435,
+          "endTime": 1793629067445,
+          "updateTime": 1793629067435,
+          "startDelayInSeconds": 0,
+          "retried": false,
+          "executed": false,
+          "callbackFromWorker": true,
+          "responseTimeoutSeconds": 0,
+          "workflowInstanceId": "494a0d29-05f6-4fe2-9a02-e6b8e8678671",
+          "workflowType": "archon_p7_http",
+          "taskId": "02971710-ff07-4f18-bf1c-f6161782f90c",
+          "reasonForIncompletion": "Failed to invoke HTTP task due to: java.lang.IllegalArgumentException: No matching constant for [299]",
+          "callbackAfterSeconds": 0,
+          "workerId": "jeong-wonjaeui-Mac-Studio.local",
+          "outputData": {
+            "response": "java.lang.IllegalArgumentException: No matching constant for [299]"
+          },
+          "workflowTask": {
+            "name": "archon_p7_http",
+            "taskReferenceName": "http_ref",
+            "inputParameters": {
+              "http_request": "${workflow.input.request}",
+              "asyncComplete": false
+            },
+            "type": "HTTP",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_http",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          },
+          "rateLimitPerFrequency": 0,
+          "rateLimitFrequencyInSeconds": 1,
+          "workflowPriority": 0,
+          "iteration": 0,
+          "subworkflowChanged": false,
+          "firstStartTime": 0,
+          "executionMetadata": {
+            "additionalContext": {},
+            "additionalContextMap": {},
+            "empty": true
+          },
+          "taskDefinition": {
+            "createTime": 0,
+            "updateTime": 0,
+            "name": "archon_p7_http",
+            "retryCount": 0,
+            "timeoutSeconds": 0,
+            "inputKeys": [],
+            "outputKeys": [],
+            "runtimeMetadata": [],
+            "timeoutPolicy": "TIME_OUT_WF",
+            "retryLogic": "FIXED",
+            "retryDelaySeconds": 60,
+            "responseTimeoutSeconds": 0,
+            "inputTemplate": {},
+            "rateLimitPerFrequency": 0,
+            "rateLimitFrequencyInSeconds": 1,
+            "backoffScaleFactor": 1,
+            "maxRetryDelaySeconds": 0,
+            "backoffJitterMs": 0,
+            "totalTimeoutSeconds": 0,
+            "taskStatusListenerEnabled": true,
+            "enforceSchema": false
+          },
+          "queueWaitTime": 33,
+          "loopOverTask": false
+        }
+      ],
+      "input": {
+        "request": {
+          "uri": "http://127.0.0.1:18299/status/299",
+          "method": "GET"
+        }
+      },
+      "output": {
+        "response": "java.lang.IllegalArgumentException: No matching constant for [299]"
+      },
+      "reasonForIncompletion": "Task 02971710-ff07-4f18-bf1c-f6161782f90c failed with status: FAILED and reason: 'Failed to invoke HTTP task due to: java.lang.IllegalArgumentException: No matching constant for [299]'",
+      "taskToDomain": {},
+      "failedReferenceTaskNames": [
+        "http_ref"
+      ],
+      "workflowDefinition": {
+        "createTime": 1793629066157,
+        "updateTime": 0,
+        "name": "archon_p7_http",
+        "version": 1,
+        "tasks": [
+          {
+            "name": "archon_p7_http",
+            "taskReferenceName": "http_ref",
+            "inputParameters": {
+              "http_request": "${workflow.input.request}",
+              "asyncComplete": false
+            },
+            "type": "HTTP",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_http",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          }
+        ],
+        "inputParameters": [],
+        "outputParameters": {},
+        "schemaVersion": 2,
+        "restartable": true,
+        "workflowStatusListenerEnabled": false,
+        "timeoutPolicy": "ALERT_ONLY",
+        "timeoutSeconds": 0,
+        "variables": {},
+        "inputTemplate": {},
+        "enforceSchema": true,
+        "metadata": {},
+        "maskedFields": []
+      },
+      "priority": 0,
+      "variables": {},
+      "lastRetriedTime": 0,
+      "failedTaskNames": [
+        "archon_p7_http"
+      ],
+      "history": [],
+      "rateLimited": false,
+      "startTime": 1793629067401,
+      "workflowName": "archon_p7_http",
+      "workflowVersion": 1
+    }
+  }
+}

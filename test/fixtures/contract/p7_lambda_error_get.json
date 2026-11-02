@@ -1,0 +1,218 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/8327f49f-99c3-43b6-b3a0-ebc0e3be8637",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "ownerApp": "",
+      "createTime": 1793629064185,
+      "updateTime": 1793629064194,
+      "status": "FAILED",
+      "endTime": 1793629064194,
+      "workflowId": "8327f49f-99c3-43b6-b3a0-ebc0e3be8637",
+      "tasks": [
+        {
+          "taskType": "LAMBDA",
+          "status": "FAILED",
+          "inputData": {
+            "a": 1,
+            "scriptExpression": "return $.a.b.c;"
+          },
+          "referenceTaskName": "lambda_ref",
+          "retryCount": 0,
+          "seq": 1,
+          "pollCount": 0,
+          "taskDefName": "archon_p7_lambda",
+          "scheduledTime": 1793629064187,
+          "startTime": 1793629064187,
+          "endTime": 1793629064191,
+          "updateTime": 1793629064187,
+          "startDelayInSeconds": 0,
+          "retried": false,
+          "executed": false,
+          "callbackFromWorker": true,
+          "responseTimeoutSeconds": 0,
+          "workflowInstanceId": "8327f49f-99c3-43b6-b3a0-ebc0e3be8637",
+          "workflowType": "archon_p7_lambda",
+          "taskId": "3e225a6d-8954-4ff6-a71c-4bc1d089c0cb",
+          "reasonForIncompletion": "Error evaluating the script `TypeError: Cannot read property 'c' of undefined` at line 1",
+          "callbackAfterSeconds": 0,
+          "outputData": {
+            "error": "Error evaluating the script `TypeError: Cannot read property 'c' of undefined` at line 1"
+          },
+          "workflowTask": {
+            "name": "archon_p7_lambda",
+            "taskReferenceName": "lambda_ref",
+            "inputParameters": {
+              "scriptExpression": "${workflow.input.script}",
+              "a": "${workflow.input.a}"
+            },
+            "type": "LAMBDA",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_lambda",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          },
+          "rateLimitPerFrequency": 0,
+          "rateLimitFrequencyInSeconds": 0,
+          "workflowPriority": 0,
+          "iteration": 0,
+          "subworkflowChanged": false,
+          "firstStartTime": 0,
+          "executionMetadata": {
+            "additionalContext": {},
+            "additionalContextMap": {},
+            "empty": true
+          },
+          "taskDefinition": {
+            "createTime": 0,
+            "updateTime": 0,
+            "name": "archon_p7_lambda",
+            "retryCount": 0,
+            "timeoutSeconds": 0,
+            "inputKeys": [],
+            "outputKeys": [],
+            "runtimeMetadata": [],
+            "timeoutPolicy": "TIME_OUT_WF",
+            "retryLogic": "FIXED",
+            "retryDelaySeconds": 60,
+            "responseTimeoutSeconds": 0,
+            "inputTemplate": {},
+            "rateLimitPerFrequency": 0,
+            "rateLimitFrequencyInSeconds": 1,
+            "backoffScaleFactor": 1,
+            "maxRetryDelaySeconds": 0,
+            "backoffJitterMs": 0,
+            "totalTimeoutSeconds": 0,
+            "taskStatusListenerEnabled": true,
+            "enforceSchema": false
+          },
+          "queueWaitTime": 0,
+          "loopOverTask": false
+        }
+      ],
+      "input": {
+        "script": "return $.a.b.c;",
+        "a": 1
+      },
+      "output": {
+        "error": "Error evaluating the script `TypeError: Cannot read property 'c' of undefined` at line 1"
+      },
+      "reasonForIncompletion": "Task 3e225a6d-8954-4ff6-a71c-4bc1d089c0cb failed with status: FAILED and reason: 'Error evaluating the script `TypeError: Cannot read property 'c' of undefined` at line 1'",
+      "taskToDomain": {},
+      "failedReferenceTaskNames": [
+        "lambda_ref"
+      ],
+      "workflowDefinition": {
+        "createTime": 1793629064077,
+        "updateTime": 0,
+        "name": "archon_p7_lambda",
+        "version": 1,
+        "tasks": [
+          {
+            "name": "archon_p7_lambda",
+            "taskReferenceName": "lambda_ref",
+            "inputParameters": {
+              "scriptExpression": "${workflow.input.script}",
+              "a": "${workflow.input.a}"
+            },
+            "type": "LAMBDA",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_lambda",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          }
+        ],
+        "inputParameters": [],
+        "outputParameters": {},
+        "schemaVersion": 2,
+        "restartable": true,
+        "workflowStatusListenerEnabled": false,
+        "timeoutPolicy": "ALERT_ONLY",
+        "timeoutSeconds": 0,
+        "variables": {},
+        "inputTemplate": {},
+        "enforceSchema": true,
+        "metadata": {},
+        "maskedFields": []
+      },
+      "priority": 0,
+      "variables": {},
+      "lastRetriedTime": 0,
+      "failedTaskNames": [
+        "archon_p7_lambda"
+      ],
+      "history": [],
+      "rateLimited": false,
+      "startTime": 1793629064185,
+      "workflowName": "archon_p7_lambda",
+      "workflowVersion": 1
+    }
+  }
+}

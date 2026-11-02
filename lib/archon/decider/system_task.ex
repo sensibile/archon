@@ -3,48 +3,110 @@
 #
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
 #
-# Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/tasks/WorkflowSystemTask.java,
-# core/.../execution/tasks/Switch.java, core/.../execution/tasks/Decision.java,
-# core/.../execution/tasks/Fork.java and core/.../execution/tasks/Wait.java
+# Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/tasks/WorkflowSystemTask.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
-# Modified by sensibile: execute returns the updated task with its boolean instead of mutating
-# it, takes the clock instead of reading it, and does not take the WorkflowExecutor
-# (ADR 0014, decision 5).
+# Modified by sensibile: start and execute return the updated task (and workflow) with
+# upstream's boolean instead of mutating them, take the Decider context instead of reading the
+# clock, and do not take the WorkflowExecutor (ADR 0014, decision 5; ADR 0026, decision 2).
 
 defmodule Archon.Decider.SystemTask do
   @moduledoc """
-  The state-deciding part of upstream `WorkflowSystemTask#execute`, as a pure function
-  (ADR 0014, decision 5).
+  The state-deciding part of upstream `WorkflowSystemTask`, as pure functions (ADR 0014,
+  decision 5; ADR 0026, decision 2).
 
-  `execute/3` returns upstream's boolean (`true` when the task changed and should be persisted)
-  with the updated task. `now` is epoch milliseconds. `SWITCH` and `DECISION` complete; `FORK`
-  keeps the default `execute` (nothing changes); `JOIN` is `Archon.Decider.SystemTask.Join`;
-  `WAIT` completes once `now` is past its `wait_timeout`. `SUB_WORKFLOW` needs the child
-  workflow, which the runtime loads, so it is `Archon.Decider.SystemTask.SubWorkflow.execute/2`.
-  `DO_WHILE` evaluates scripts and schedules its next iteration, so it is
-  `Archon.Decider.SystemTask.DoWhile.execute/3`, which takes the Decider context.
-  When to call it (synchronously in the decide loop or from the system task queue) is the
-  runtime's choice (Phase 3).
+  A system task type implements this behaviour and is listed in the system task table
+  (`Archon.Decider.SystemTasks`):
+
+    * `start/3` (optional) - upstream `start`. The runtime calls it once, right after it
+      schedules a synchronous system task (`Archon.Runtime.Step.Schedule`).
+    * `execute/3` - upstream `execute`. The decide loop calls it for a synchronous system task
+      that is not terminal; the workflow process calls it for an asynchronous one it evaluates.
+
+  Both return a `t:Archon.Decider.SystemTask.Result.t/0`. `changed?` is upstream's boolean: the
+  task is saved only when it is `true`. The returned task is kept in the workflow either way,
+  as upstream changes its task in place even when it answers `false`. `workflow` is set only by
+  a type that changes the workflow outside its task (its `variables`); the runtime saves it.
+
+  `start/2` and `execute/3` here dispatch by `Task.taskType` through `context.system_tasks`.
+  `DO_WHILE` (`Archon.Decider.SystemTask.DoWhile`) schedules its next iteration and
+  `SUB_WORKFLOW` (`Archon.Decider.SystemTask.SubWorkflow`) needs its child workflow, so the
+  runtime calls those modules directly.
   """
 
-  alias Archon.Decider.SystemTask.Join
+  alias Archon.Decider.{Context, SystemTasks}
   alias Archon.Domain.{Task, Workflow}
 
-  @doc "Upstream `execute` of the task's system task type."
-  @spec execute(Workflow.t(), Task.t(), integer()) :: {boolean(), Task.t()}
-  def execute(%Workflow{}, %Task{task_type: type} = task, _now)
-      when type in ["SWITCH", "DECISION"],
-      do: {true, %{task | status: :completed}}
+  defmodule Result do
+    @moduledoc "What `start` or `execute` of a system task answers (see `Archon.Decider.SystemTask`)."
 
-  def execute(%Workflow{}, %Task{task_type: "FORK"} = task, _now), do: {false, task}
+    @enforce_keys [:changed?, :task]
+    defstruct [:changed?, :task, workflow: nil]
 
-  def execute(%Workflow{} = workflow, %Task{task_type: "JOIN"} = task, _now),
-    do: Join.execute(workflow, task)
-
-  # Wait#execute: a zero wait_timeout waits forever.
-  def execute(%Workflow{}, %Task{task_type: "WAIT", wait_timeout: timeout} = task, now) do
-    if timeout != 0 and now > timeout,
-      do: {true, %{task | status: :completed}},
-      else: {false, task}
+    @type t :: %__MODULE__{
+            changed?: boolean(),
+            task: Task.t(),
+            workflow: Workflow.t() | nil
+          }
   end
+
+  @callback start(Workflow.t(), Task.t(), Context.t()) :: Result.t()
+  @callback execute(Workflow.t(), Task.t(), Context.t()) :: Result.t()
+  @optional_callbacks start: 3
+
+  @doc "A result that changed the task."
+  @spec changed(Task.t()) :: Result.t()
+  def changed(%Task{} = task), do: %Result{changed?: true, task: task}
+
+  @doc "A result that leaves the task to be saved later, if at all."
+  @spec unchanged(Task.t()) :: Result.t()
+  def unchanged(%Task{} = task), do: %Result{changed?: false, task: task}
+
+  @doc """
+  Upstream `start` of the task's system task type, or `nil` when the type has none (upstream's
+  default `start` does nothing).
+  """
+  @spec start(Workflow.t(), Task.t(), Context.t()) :: Result.t() | nil
+  def start(%Workflow{} = workflow, %Task{} = task, %Context{} = context) do
+    case module(context, task) do
+      nil ->
+        nil
+
+      module ->
+        if function_exported?(module, :start, 3),
+          do: module.start(workflow, task, context),
+          else: nil
+    end
+  end
+
+  @doc """
+  Upstream `execute` of the task's system task type. A type without an implementation answers
+  `false` with the task unchanged (upstream's default `execute`).
+  """
+  @spec execute(Workflow.t(), Task.t(), Context.t()) :: Result.t()
+  def execute(%Workflow{} = workflow, %Task{} = task, %Context{} = context) do
+    case module(context, task) do
+      nil ->
+        unchanged(task)
+
+      module ->
+        if function_exported?(module, :execute, 3),
+          do: module.execute(workflow, task, context),
+          else: unchanged(task)
+    end
+  end
+
+  # Only a module that implements this behaviour: DO_WHILE's and SUB_WORKFLOW's modules have
+  # functions of the same names with other contracts.
+  defp module(%Context{system_tasks: registry}, %Task{task_type: type}) do
+    with %SystemTasks.Spec{module: module} when module != nil <- SystemTasks.spec(registry, type),
+         module = Code.ensure_loaded!(module),
+         true <- __MODULE__ in behaviours(module) do
+      module
+    else
+      _none -> nil
+    end
+  end
+
+  defp behaviours(module),
+    do: module.module_info(:attributes) |> Keyword.get_values(:behaviour) |> List.flatten()
 end

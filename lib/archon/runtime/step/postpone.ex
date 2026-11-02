@@ -99,7 +99,7 @@ defmodule Archon.Runtime.Step.Postpone do
     delays =
       for task <- tasks,
           task.status == :scheduled,
-          Schedule.async?(task),
+          Schedule.async?(env, task),
           Schedule.delay_ms(task) > 0,
           do: Async.due_time(task) - now
 

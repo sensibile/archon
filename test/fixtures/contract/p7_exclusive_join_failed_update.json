@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks",
+    "body": {
+      "workflowInstanceId": "9daf0d7a-aeca-4f21-8a9b-ae902d41dca0",
+      "taskId": "f4dd110b-8b9e-4d14-b5c4-7a5519a2d1e3",
+      "status": "FAILED",
+      "workerId": "archon-contract",
+      "outputData": {
+        "from": "b_ref"
+      }
+    }
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Cannot invoke \"com.netflix.conductor.model.TaskModel.getStatus()\" because \"t\" is null",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

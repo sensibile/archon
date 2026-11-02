@@ -16,6 +16,9 @@ config :archon, Archon.Runtime,
   activation_margin: 5_000,
   activation_page_size: 100
 
+# `settings:` overrides the step settings of Archon.Runtime.Step.Env, such as
+# max_workflow_variables_payload_kb (256 KB, the SET_VARIABLE limit of ADR 0026 decision 3).
+
 # Deployments run on Postgres (ADR 0021): the database must be migrated (Archon.Release.migrate/0)
 # and DATABASE_URL set (runtime.exs) before the application starts.
 if config_env() == :prod do

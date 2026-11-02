@@ -1,0 +1,55 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_p7_terminate_failed",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_p7_fork",
+          "taskReferenceName": "fork_ref",
+          "type": "FORK_JOIN",
+          "forkTasks": [
+            [
+              {
+                "name": "archon_p7_worker",
+                "taskReferenceName": "worker_ref",
+                "type": "SIMPLE"
+              }
+            ],
+            [
+              {
+                "name": "archon_p7_terminate",
+                "taskReferenceName": "terminate_ref",
+                "type": "TERMINATE",
+                "inputParameters": {
+                  "terminationStatus": "FAILED",
+                  "workflowOutput": "${workflow.input.a}",
+                  "terminationReason": "archon-p7-terminate"
+                }
+              }
+            ]
+          ]
+        },
+        {
+          "name": "archon_p7_join",
+          "taskReferenceName": "join_ref",
+          "type": "JOIN",
+          "joinOn": [
+            "worker_ref",
+            "terminate_ref"
+          ]
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

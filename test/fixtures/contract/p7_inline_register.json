@@ -1,0 +1,30 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_p7_inline",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_p7_inline",
+          "taskReferenceName": "inline_ref",
+          "type": "INLINE",
+          "inputParameters": {
+            "evaluatorType": "${workflow.input.evaluator}",
+            "expression": "${workflow.input.expression}",
+            "a": "${workflow.input.a}"
+          }
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

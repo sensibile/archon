@@ -1,0 +1,217 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/8a3eee59-cb6d-4fbb-98cb-3f3166ad0bf9",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "ownerApp": "",
+      "createTime": 1793629064679,
+      "updateTime": 1793629064734,
+      "status": "FAILED",
+      "endTime": 1793629064734,
+      "workflowId": "8a3eee59-cb6d-4fbb-98cb-3f3166ad0bf9",
+      "tasks": [
+        {
+          "taskType": "JSON_JQ_TRANSFORM",
+          "status": "FAILED",
+          "inputData": {
+            "queryExpression": null,
+            "items": [
+              1
+            ]
+          },
+          "referenceTaskName": "jq_ref",
+          "retryCount": 0,
+          "seq": 1,
+          "pollCount": 0,
+          "taskDefName": "archon_p7_jq",
+          "scheduledTime": 1793629064732,
+          "startTime": 1793629064680,
+          "endTime": 1793629064733,
+          "updateTime": 1793629064733,
+          "startDelayInSeconds": 0,
+          "retried": false,
+          "executed": false,
+          "callbackFromWorker": true,
+          "responseTimeoutSeconds": 0,
+          "workflowInstanceId": "8a3eee59-cb6d-4fbb-98cb-3f3166ad0bf9",
+          "workflowType": "archon_p7_jq",
+          "taskId": "43a799b7-669d-44be-88e9-17645466aff1",
+          "reasonForIncompletion": "Missing 'queryExpression' in input parameters",
+          "callbackAfterSeconds": 0,
+          "outputData": {},
+          "workflowTask": {
+            "name": "archon_p7_jq",
+            "taskReferenceName": "jq_ref",
+            "inputParameters": {
+              "queryExpression": "${workflow.input.q}",
+              "items": "${workflow.input.items}"
+            },
+            "type": "JSON_JQ_TRANSFORM",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_jq",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          },
+          "rateLimitPerFrequency": 0,
+          "rateLimitFrequencyInSeconds": 0,
+          "workflowPriority": 0,
+          "iteration": 0,
+          "subworkflowChanged": false,
+          "firstStartTime": 0,
+          "executionMetadata": {
+            "additionalContext": {},
+            "additionalContextMap": {},
+            "empty": true
+          },
+          "taskDefinition": {
+            "createTime": 0,
+            "updateTime": 0,
+            "name": "archon_p7_jq",
+            "retryCount": 0,
+            "timeoutSeconds": 0,
+            "inputKeys": [],
+            "outputKeys": [],
+            "runtimeMetadata": [],
+            "timeoutPolicy": "TIME_OUT_WF",
+            "retryLogic": "FIXED",
+            "retryDelaySeconds": 60,
+            "responseTimeoutSeconds": 0,
+            "inputTemplate": {},
+            "rateLimitPerFrequency": 0,
+            "rateLimitFrequencyInSeconds": 1,
+            "backoffScaleFactor": 1,
+            "maxRetryDelaySeconds": 0,
+            "backoffJitterMs": 0,
+            "totalTimeoutSeconds": 0,
+            "taskStatusListenerEnabled": true,
+            "enforceSchema": false
+          },
+          "queueWaitTime": -52,
+          "loopOverTask": false
+        }
+      ],
+      "input": {
+        "items": [
+          1
+        ]
+      },
+      "output": {},
+      "reasonForIncompletion": "Task 43a799b7-669d-44be-88e9-17645466aff1 failed with status: FAILED and reason: 'Missing 'queryExpression' in input parameters'",
+      "taskToDomain": {},
+      "failedReferenceTaskNames": [
+        "jq_ref"
+      ],
+      "workflowDefinition": {
+        "createTime": 1793629064355,
+        "updateTime": 0,
+        "name": "archon_p7_jq",
+        "version": 1,
+        "tasks": [
+          {
+            "name": "archon_p7_jq",
+            "taskReferenceName": "jq_ref",
+            "inputParameters": {
+              "queryExpression": "${workflow.input.q}",
+              "items": "${workflow.input.items}"
+            },
+            "type": "JSON_JQ_TRANSFORM",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_jq",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          }
+        ],
+        "inputParameters": [],
+        "outputParameters": {},
+        "schemaVersion": 2,
+        "restartable": true,
+        "workflowStatusListenerEnabled": false,
+        "timeoutPolicy": "ALERT_ONLY",
+        "timeoutSeconds": 0,
+        "variables": {},
+        "inputTemplate": {},
+        "enforceSchema": true,
+        "metadata": {},
+        "maskedFields": []
+      },
+      "priority": 0,
+      "variables": {},
+      "lastRetriedTime": 0,
+      "failedTaskNames": [
+        "archon_p7_jq"
+      ],
+      "history": [],
+      "rateLimited": false,
+      "startTime": 1793629064679,
+      "workflowName": "archon_p7_jq",
+      "workflowVersion": 1
+    }
+  }
+}

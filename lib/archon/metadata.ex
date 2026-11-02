@@ -139,6 +139,15 @@ defmodule Archon.Metadata do
     end
   end
 
+  @doc """
+  The validation options of a definition validated against this store: the type rules read
+  task definitions from it (`task_def_lookup`, ADR 0026 decision 2), as upstream's
+  `WorkflowTaskTypeConstraint` reads `MetadataDAO`. Registration, validation and the start
+  requests with an inline definition use it.
+  """
+  @spec validation_opts() :: Validation.opts()
+  def validation_opts, do: [task_def_lookup: &metadata().get_task_def(&1)]
+
   ## Workflow definitions
 
   @doc """
@@ -148,7 +157,7 @@ defmodule Archon.Metadata do
   """
   @spec register_workflow_def(WorkflowDef.t()) :: :ok | {:error, error()}
   def register_workflow_def(%WorkflowDef{} = definition) do
-    with :ok <- validate(definition, &WorkflowDef.validate/1),
+    with :ok <- validate(definition, &WorkflowDef.validate(&1, validation_opts())),
          :ok <- WorkflowDef.check_schema(definition) do
       case metadata().create_workflow_def(%{definition | create_time: Runtime.now()}) do
         :ok ->
@@ -165,7 +174,7 @@ defmodule Archon.Metadata do
   @doc "Upstream `updateWorkflowDef(WorkflowDef)`: inserts or replaces it with its `updateTime`."
   @spec update_workflow_def(WorkflowDef.t()) :: :ok | {:error, error()}
   def update_workflow_def(%WorkflowDef{} = definition) do
-    with :ok <- validate(definition, &WorkflowDef.validate/1),
+    with :ok <- validate(definition, &WorkflowDef.validate(&1, validation_opts())),
          :ok <- WorkflowDef.check_schema(definition) do
       store_workflow_def(definition)
     end
@@ -191,7 +200,7 @@ defmodule Archon.Metadata do
   defp workflow_def_element(nil),
     do: {:error, [{"<list element>", "WorkflowDef cannot be null"}]}
 
-  defp workflow_def_element(definition), do: WorkflowDef.validate(definition)
+  defp workflow_def_element(definition), do: WorkflowDef.validate(definition, validation_opts())
 
   defp bulk_update(definition, {successes, response}) do
     case WorkflowDef.check_schema(definition) do
@@ -263,7 +272,7 @@ defmodule Archon.Metadata do
   """
   @spec validate_workflow_def(WorkflowDef.t()) :: :ok | {:error, {:invalid, term()}}
   def validate_workflow_def(%WorkflowDef{} = definition) do
-    with :ok <- validate(definition, &WorkflowDef.validate/1) do
+    with :ok <- validate(definition, &WorkflowDef.validate(&1, validation_opts())) do
       WorkflowDef.check_schema(definition)
     end
   end

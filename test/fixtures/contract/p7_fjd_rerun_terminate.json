@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/workflow/1236ef32-24f3-417d-ad78-eec5b713eba7?reason=archon-p7",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

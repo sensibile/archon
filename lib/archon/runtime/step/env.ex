@@ -17,8 +17,11 @@ defmodule Archon.Runtime.Step.Env do
   `Archon.Runtime.WorkflowServer` fills it for each event from the store, the queue and the
   metadata.
 
-    * `now`, `new_id`, `jitter`, `evaluate_script`, `task_defs`, `latest_workflow_versions` and
-      `system_tasks` - as in `Archon.Decider.Context`, which `context/1` builds from them.
+    * `now`, `new_id`, `jitter`, `evaluate_script`, `task_def_lookup`, `workflow_def_lookup`,
+      `evaluate_jq`, `task_defs`, `latest_workflow_versions`, `system_tasks` and
+      `max_workflow_variables_payload_kb` - as in `Archon.Decider.Context`, which `context/1`
+      builds from them. `Archon.Runtime.WorkflowServer` gives the lookups the metadata store
+      (ADR 0026, decision 2).
     * `poll_data` - the last poll time (epoch ms) by `{task_type, domain}`, for
       `getActiveDomain`. A missing key is upstream's missing `PollData`.
     * `in_progress` - the number of `IN_PROGRESS` tasks by task definition name, for the
@@ -32,6 +35,8 @@ defmodule Archon.Runtime.Step.Env do
       recovery check of a terminal workflow.
     * `offsets_reset` - for `:reset_callbacks`, the IDs of the tasks whose queue message was made
       due while the env was read (ADR 0025, decision 2: the one env value that is not only read).
+    * `http_in_flight` - the IDs of the `HTTP` tasks whose request the workflow process has sent
+      and not had the result of (ADR 0026, decision 7). Empty until the `HTTP` slice fills it.
 
   The settings default to upstream's `ConductorProperties`:
 
@@ -48,6 +53,8 @@ defmodule Archon.Runtime.Step.Env do
       count after which its evaluation offset grows.
     * `max_decide_iterations` - 100, the decide loop iterations of one event (ADR 0018,
       decision 4).
+    * `max_workflow_variables_payload_kb` - 256, the cap of a workflow's `variables`
+      (`maxWorkflowVariablesPayloadSizeThresholdKB`, ADR 0026, decision 3).
   """
 
   alias Archon.Decider.{Context, SystemTasks}
@@ -60,15 +67,20 @@ defmodule Archon.Runtime.Step.Env do
     :new_id,
     :jitter,
     :evaluate_script,
+    :task_def_lookup,
+    :workflow_def_lookup,
+    :evaluate_jq,
     task_defs: %{},
     latest_workflow_versions: %{},
     system_tasks: %{},
+    max_workflow_variables_payload_kb: 256,
     poll_data: %{},
     in_progress: %{},
     queued: MapSet.new(),
     workflows: %{},
     outbox_pending?: false,
     offsets_reset: MapSet.new(),
+    http_in_flight: MapSet.new(),
     workflow_offset_timeout_ms: 30_000,
     max_postpone_ms: 3_600_000,
     active_worker_last_poll_ms: 10_000,
@@ -83,15 +95,20 @@ defmodule Archon.Runtime.Step.Env do
           new_id: (-> String.t()),
           jitter: (non_neg_integer() -> non_neg_integer()),
           evaluate_script: Script.evaluator(),
+          task_def_lookup: Context.task_def_lookup(),
+          workflow_def_lookup: Context.workflow_def_lookup(),
+          evaluate_jq: Context.jq_evaluator(),
           task_defs: %{optional(String.t()) => TaskDef.t()},
           latest_workflow_versions: %{optional(String.t()) => integer()},
           system_tasks: SystemTasks.t(),
+          max_workflow_variables_payload_kb: non_neg_integer(),
           poll_data: %{optional({String.t(), String.t()}) => integer()},
           in_progress: %{optional(String.t()) => non_neg_integer()},
           queued: MapSet.t(String.t()),
           workflows: %{optional(String.t()) => Workflow.t() | nil},
           outbox_pending?: boolean(),
           offsets_reset: MapSet.t(String.t()),
+          http_in_flight: MapSet.t(String.t()),
           workflow_offset_timeout_ms: non_neg_integer(),
           max_postpone_ms: non_neg_integer(),
           active_worker_last_poll_ms: non_neg_integer(),
@@ -102,8 +119,9 @@ defmodule Archon.Runtime.Step.Env do
         }
 
   @doc """
-  Builds an env. `now` is required; `new_id`, `jitter`, `evaluate_script` and `system_tasks`
-  default as in `Archon.Decider.Context.new/1`, the rest as the struct does.
+  Builds an env. `now` is required; `new_id`, `jitter`, `evaluate_script`, the lookups,
+  `evaluate_jq` and `system_tasks` default as in `Archon.Decider.Context.new/1`, the rest as the
+  struct does.
   """
   @spec new(keyword()) :: t()
   def new(opts) do
@@ -112,6 +130,9 @@ defmodule Archon.Runtime.Step.Env do
       |> Keyword.put_new(:new_id, &Context.uuid4/0)
       |> Keyword.put_new(:jitter, &Context.uniform_jitter/1)
       |> Keyword.put_new(:evaluate_script, &Script.evaluate/3)
+      |> Keyword.put_new(:task_def_lookup, &Context.no_task_def/1)
+      |> Keyword.put_new(:workflow_def_lookup, &Context.no_workflow_def/2)
+      |> Keyword.put_new(:evaluate_jq, &Context.no_jq/2)
       |> Keyword.put_new(:system_tasks, SystemTasks.default())
 
     struct!(__MODULE__, opts)
@@ -125,9 +146,13 @@ defmodule Archon.Runtime.Step.Env do
       new_id: env.new_id,
       jitter: env.jitter,
       evaluate_script: env.evaluate_script,
+      task_def_lookup: env.task_def_lookup,
+      workflow_def_lookup: env.workflow_def_lookup,
+      evaluate_jq: env.evaluate_jq,
       task_defs: env.task_defs,
       latest_workflow_versions: env.latest_workflow_versions,
-      system_tasks: env.system_tasks
+      system_tasks: env.system_tasks,
+      max_workflow_variables_payload_kb: env.max_workflow_variables_payload_kb
     }
   end
 

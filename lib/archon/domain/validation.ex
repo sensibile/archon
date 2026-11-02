@@ -15,11 +15,18 @@ defmodule Archon.Domain.Validation do
 
     * `:owner_email_mandatory` - `conductor.app.ownerEmailMandatory` (default `false`)
     * `:name_validation` - `conductor.app.workflow.name-validation.enabled` (default `false`)
+    * `:task_def_lookup` - reads a task definition by name for the type rules that fall back to
+      upstream's `MetadataDAO#getTaskDef` (`Archon.Domain.TaskTypeConstraint.task_definition/2`);
+      without it no definition is found. `Archon.Metadata.validation_opts/0` gives the store's.
   """
 
-  alias Archon.Domain.Codec
+  alias Archon.Domain.{Codec, TaskDef}
 
-  @type opts :: [owner_email_mandatory: boolean(), name_validation: boolean()]
+  @type opts :: [
+          owner_email_mandatory: boolean(),
+          name_validation: boolean(),
+          task_def_lookup: (String.t() -> {:ok, TaskDef.t()} | {:error, :not_found})
+        ]
   @type result :: :ok | {:error, [Codec.error()]}
 
   @doc "Turns a list of errors into a validation result."

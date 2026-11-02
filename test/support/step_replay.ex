@@ -39,9 +39,101 @@ defmodule Archon.StepReplay do
     :counters.get(clock, 1)
   end
 
-  @doc "An env at the next clock reading."
+  @doc """
+  An env at the next clock reading. Unless `opts` give them, the lookups read the definitions
+  the fixtures registered (`fixture_task_def/1`, `fixture_workflow_def/2`), as the server's store
+  would.
+  """
   @spec env(:counters.counters_ref(), keyword()) :: Env.t()
-  def env(clock, opts \\ []), do: Env.new(Keyword.put(opts, :now, tick(clock)))
+  def env(clock, opts \\ []) do
+    opts
+    |> Keyword.put(:now, tick(clock))
+    |> Keyword.put_new(:task_def_lookup, &fixture_task_def/1)
+    |> Keyword.put_new(:workflow_def_lookup, &fixture_workflow_def/2)
+    |> Env.new()
+  end
+
+  @doc """
+  A `task_def_lookup` over the task definitions the fixtures register (`POST` and `PUT
+  /api/metadata/taskdefs` answered 200), the last registration of a name in capture order
+  winning.
+  """
+  @spec fixture_task_def(String.t()) :: {:ok, TaskDef.t()} | {:error, :not_found}
+  def fixture_task_def(name) do
+    case Map.fetch(registered().task_defs, name) do
+      {:ok, task_def} -> {:ok, task_def}
+      :error -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  A `workflow_def_lookup` over the workflow definitions the fixtures register (`POST` and `PUT
+  /api/metadata/workflow` answered 200): that version, or the latest for `nil`.
+  """
+  @spec fixture_workflow_def(String.t(), integer() | nil) ::
+          {:ok, WorkflowDef.t()} | {:error, :not_found}
+  def fixture_workflow_def(name, version) do
+    versions = Map.get(registered().workflow_defs, name, %{})
+
+    found =
+      if version == nil,
+        do: versions |> Enum.max_by(&elem(&1, 0), fn -> nil end) |> then(&(&1 && elem(&1, 1))),
+        else: Map.get(versions, version)
+
+    if found, do: {:ok, found}, else: {:error, :not_found}
+  end
+
+  # Read once per test run: the fixtures do not change while it runs.
+  defp registered do
+    case :persistent_term.get({__MODULE__, :registered}, nil) do
+      nil ->
+        registered = read_registered()
+        :persistent_term.put({__MODULE__, :registered}, registered)
+        registered
+
+      registered ->
+        registered
+    end
+  end
+
+  defp read_registered do
+    # In capture order, so a later registration of a name replaces an earlier one.
+    exchanges =
+      ArchonWeb.ContractCase.scenario()
+      |> Enum.map(&elem(&1, 1))
+      |> Enum.uniq()
+      |> Enum.map(&Contract.fixture/1)
+      |> Enum.filter(&(&1["response"]["status"] == 200))
+
+    task_defs =
+      for %{
+            "request" => %{"method" => method, "path" => "/api/metadata/taskdefs", "body" => body}
+          } <-
+            exchanges,
+          method in ["POST", "PUT"],
+          json <- List.wrap(body),
+          is_map(json),
+          {:ok, %TaskDef{name: name} = task_def} <- [TaskDef.from_json(json)],
+          is_binary(name),
+          into: %{},
+          do: {name, task_def}
+
+    workflow_defs =
+      for %{"request" => %{"method" => method, "path" => path, "body" => body}} <- exchanges,
+          method in ["POST", "PUT"],
+          path |> URI.parse() |> Map.fetch!(:path) == "/api/metadata/workflow",
+          json <- List.wrap(body),
+          is_map(json),
+          {:ok, %WorkflowDef{name: name, version: version} = definition} <- [
+            WorkflowDef.from_json(json)
+          ],
+          is_binary(name),
+          reduce: %{} do
+        acc -> Map.update(acc, name, %{version => definition}, &Map.put(&1, version, definition))
+      end
+
+    %{task_defs: task_defs, workflow_defs: workflow_defs}
+  end
 
   @doc """
   The server's stored definition (`metadata` fixture) with task definitions embedded as

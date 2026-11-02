@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_dynamic",
+    "body": {
+      "task": "archon_p7_worker"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "1455e0ef-1b13-4a10-bda4-8d6f19815349"
+  }
+}

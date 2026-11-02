@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_start_workflow",
+    "body": {
+      "request": {
+        "version": 1
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "bd204e53-1c70-4939-ba9b-457de7913c85"
+  }
+}

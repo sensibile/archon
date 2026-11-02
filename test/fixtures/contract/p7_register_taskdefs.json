@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/taskdefs",
+    "body": [
+      {
+        "name": "archon_p7_worker",
+        "retryCount": 0,
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600
+      },
+      {
+        "name": "NOOP",
+        "retryCount": 0,
+        "retryLogic": "FIXED",
+        "retryDelaySeconds": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

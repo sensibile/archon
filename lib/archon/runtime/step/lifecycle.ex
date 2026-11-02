@@ -46,14 +46,11 @@ defmodule Archon.Runtime.Step.Lifecycle do
   (`IllegalStateException`) or `:invalid` (`IllegalArgumentException`), and its message.
   """
 
-  alias Archon.Decider.Parameters
+  alias Archon.Decider.{Parameters, SystemTasks}
   alias Archon.Domain.{Task, Workflow, WorkflowDef, WorkflowTask}
   alias Archon.Runtime.Step.{Decide, Env, Schedule, State, SubWorkflow}
 
   @type reply :: :ok | {:error, {:conflict | :not_found | :invalid_state | :invalid, String.t()}}
-
-  # Retried in place, with the same task ID (taskToBeRescheduled).
-  @in_place ["DO_WHILE", "FORK_JOIN", "JOIN", "EXCLUSIVE_JOIN"]
 
   @doc """
   Upstream `pauseWorkflow`: a terminal workflow is a conflict, a paused one stays as it is. A
@@ -209,12 +206,19 @@ defmodule Archon.Runtime.Step.Lifecycle do
   end
 
   # taskToBeRescheduled
-  defp reschedule_task(state, %Task{task_type: type} = task) when type in @in_place do
+  defp reschedule_task(%State{env: env, wf: wf} = state, %Task{} = task) do
+    if SystemTasks.in_place?(task.task_type),
+      do: reschedule_in_place(state, task),
+      else: reschedule_copy(state, env, wf, task)
+  end
+
+  # Retried in place, with the same task ID.
+  defp reschedule_in_place(state, task) do
     task = %{task | retried: false, retry_count: task.retry_count + 1, status: :in_progress}
     {task, State.put_task(state, task)}
   end
 
-  defp reschedule_task(%State{env: env, wf: wf} = state, %Task{} = task) do
+  defp reschedule_copy(state, env, wf, %Task{} = task) do
     id = env.new_id.()
 
     copy = %{
@@ -436,9 +440,14 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
     # addTaskToQueue: worker tasks are queued, asynchronous system tasks evaluated when due.
     cond do
-      not Schedule.system_task?(env, task) -> Schedule.push(state, task)
-      Schedule.async?(task) and Schedule.delay_ms(task) == 0 -> State.due(state, [task.task_id])
-      true -> state
+      not Schedule.system_task?(env, task) ->
+        Schedule.push(state, task)
+
+      Schedule.async?(env, task) and Schedule.delay_ms(task) == 0 ->
+        State.due(state, [task.task_id])
+
+      true ->
+        state
     end
   end
 
@@ -623,12 +632,21 @@ defmodule Archon.Runtime.Step.Lifecycle do
     state = State.save_task(state, task)
 
     # addTaskToQueue; an asynchronous system task is evaluated when due. A synchronous one is
-    # started in place, which for the MVP types (SWITCH, DECISION, FORK, DO_WHILE) changes
-    # nothing, and is then pushed as upstream does with a SCHEDULED task (the decide loop runs it).
+    # started in place (for SWITCH, DECISION, FORK and DO_WHILE that changes nothing) and, while
+    # still SCHEDULED, pushed as upstream does (the decide loop runs it).
     state =
-      if Schedule.system_task?(env, task) and Schedule.async?(task),
-        do: due_now(state, task),
-        else: Schedule.push(state, task)
+      cond do
+        Schedule.async?(env, task) ->
+          due_now(state, task)
+
+        Schedule.sync_system_task?(env, task) ->
+          state = Schedule.start_sync(state, task)
+          started = State.task(state, task.task_id)
+          if started.status == :scheduled, do: Schedule.push(state, started), else: state
+
+        true ->
+          Schedule.push(state, task)
+      end
 
     finalize_rerun(state, task)
   end

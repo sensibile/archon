@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_fjd_legacy",
+    "body": {
+      "dynamic": {
+        "dynamicTasks": [
+          {
+            "taskName": "archon_p7_worker",
+            "referenceName": "legacy_a_ref",
+            "input": {
+              "x": 1
+            }
+          },
+          {
+            "taskName": "archon_p7_worker",
+            "referenceName": "legacy_b_ref",
+            "input": {
+              "x": 2
+            },
+            "type": "SIMPLE"
+          }
+        ]
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "759649a2-0262-47f2-a2be-03b78b06f613"
+  }
+}

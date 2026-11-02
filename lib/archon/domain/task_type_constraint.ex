@@ -19,7 +19,8 @@ defmodule Archon.Domain.TaskTypeConstraint do
   their path is the task's own path (`tasks[0]`), represented here by `""`.
 
   Not ported yet (ADR 0014): `HTTP`, `KAFKA_PUBLISH` and `JSON_JQ_TRANSFORM`, which fall back to
-  a `MetadataDAO` lookup of the task definition.
+  a `MetadataDAO` lookup of the task definition. The lookup is wired (`task_definition/2`,
+  ADR 0026 decision 2); the Phase 7 slices add their rules.
 
   `DECISION.caseExpression` and `SWITCH.expression` with the `javascript` evaluator (not
   `graaljs`, as upstream) are parsed without running (`Archon.Script.validate_syntax/1`, ADR
@@ -32,22 +33,44 @@ defmodule Archon.Domain.TaskTypeConstraint do
   out-of-range values is not reproduced.
   """
 
-  alias Archon.Domain.{Codec, DateTimeUtils, WorkflowTask}
+  alias Archon.Domain.{Codec, DateTimeUtils, TaskDef, Validation, WorkflowTask}
   alias Archon.Script
 
   @date ~r/^\d+-\d+-\d+(?: \d+:\d+(?: \S+)?)?\z/
 
   @termination_statuses ["COMPLETED", "FAILED", "TERMINATED"]
 
-  @doc "Violations of the type rules for `task`, each with the task's own path `\"\"`."
-  @spec errors(WorkflowTask.t()) :: [Codec.error()]
-  def errors(%WorkflowTask{} = task), do: task |> messages() |> Enum.map(&{"", &1})
+  @doc """
+  Violations of the type rules for `task`, each with the task's own path `\"\"`. A rule that
+  reads the task definition (`task_definition/2`) takes it from `opts[:task_def_lookup]`
+  (`t:Archon.Domain.Validation.opts/0`).
+  """
+  @spec errors(WorkflowTask.t(), Validation.opts()) :: [Codec.error()]
+  def errors(%WorkflowTask{} = task, opts \\ []),
+    do: task |> messages(opts) |> Enum.map(&{"", &1})
 
-  defp messages(%WorkflowTask{type: "EVENT"} = task) do
+  @doc """
+  The task definition a rule reads (upstream `getTaskDefinition`): the embedded one, else the
+  one `opts[:task_def_lookup]` finds by name, else `nil` (no lookup given or none stored).
+  """
+  @spec task_definition(WorkflowTask.t(), Validation.opts()) :: TaskDef.t() | nil
+  def task_definition(%WorkflowTask{task_definition: %TaskDef{} = task_def}, _opts), do: task_def
+
+  def task_definition(%WorkflowTask{name: name}, opts) do
+    with lookup when is_function(lookup, 1) <- Keyword.get(opts, :task_def_lookup),
+         true <- is_binary(name),
+         {:ok, %TaskDef{} = task_def} <- lookup.(name) do
+      task_def
+    else
+      _none -> nil
+    end
+  end
+
+  defp messages(%WorkflowTask{type: "EVENT"} = task, _opts) do
     required(is_nil(task.sink), "sink", "EVENT", task)
   end
 
-  defp messages(%WorkflowTask{type: "DECISION"} = task) do
+  defp messages(%WorkflowTask{type: "DECISION"} = task, _opts) do
     required(
       is_nil(task.case_value_param) and is_nil(task.case_expression),
       "caseValueParam or caseExpression",
@@ -56,7 +79,7 @@ defmodule Archon.Domain.TaskTypeConstraint do
     ) ++ decision_cases(task, "DECISION") ++ script_syntax(task.case_expression, "DECISION", task)
   end
 
-  defp messages(%WorkflowTask{type: "SWITCH"} = task) do
+  defp messages(%WorkflowTask{type: "SWITCH"} = task, _opts) do
     evaluator =
       cond do
         is_nil(task.evaluator_type) -> required(true, "evaluatorType", "SWITCH", task)
@@ -72,11 +95,11 @@ defmodule Archon.Domain.TaskTypeConstraint do
     evaluator ++ decision_cases(task, "SWITCH") ++ script
   end
 
-  defp messages(%WorkflowTask{type: "DYNAMIC"} = task) do
+  defp messages(%WorkflowTask{type: "DYNAMIC"} = task, _opts) do
     required(is_nil(task.dynamic_task_name_param), "dynamicTaskNameParam", "DYNAMIC", task)
   end
 
-  defp messages(%WorkflowTask{type: "FORK_JOIN_DYNAMIC"} = task) do
+  defp messages(%WorkflowTask{type: "FORK_JOIN_DYNAMIC"} = task, _opts) do
     legacy = task.dynamic_fork_join_tasks_param
     tasks_param = task.dynamic_fork_tasks_param
     input_param = task.dynamic_fork_tasks_input_param_name
@@ -106,11 +129,11 @@ defmodule Archon.Domain.TaskTypeConstraint do
     end
   end
 
-  defp messages(%WorkflowTask{type: "FORK_JOIN", fork_tasks: []} = task) do
+  defp messages(%WorkflowTask{type: "FORK_JOIN", fork_tasks: []} = task, _opts) do
     ["forkTasks should have atleast one task for taskType: FORK_JOIN taskName: #{task.name}"]
   end
 
-  defp messages(%WorkflowTask{type: "TERMINATE"} = task) do
+  defp messages(%WorkflowTask{type: "TERMINATE"} = task, _opts) do
     status = Map.get(task.input_parameters || %{}, "terminationStatus")
 
     optional =
@@ -131,16 +154,16 @@ defmodule Archon.Domain.TaskTypeConstraint do
     optional ++ status_errors
   end
 
-  defp messages(%WorkflowTask{type: "DO_WHILE"} = task) do
+  defp messages(%WorkflowTask{type: "DO_WHILE"} = task, _opts) do
     required(is_nil(task.loop_condition), "loopCondition", "DO_WHILE", task) ++
       required(task.loop_over in [nil, []], "loopOver", "DO_WHILE", task)
   end
 
-  defp messages(%WorkflowTask{type: "SUB_WORKFLOW"} = task) do
+  defp messages(%WorkflowTask{type: "SUB_WORKFLOW"} = task, _opts) do
     required(is_nil(task.sub_workflow_param), "subWorkflowParam", "SUB_WORKFLOW", task)
   end
 
-  defp messages(%WorkflowTask{type: "WAIT"} = task) do
+  defp messages(%WorkflowTask{type: "WAIT"} = task, _opts) do
     input = task.input_parameters || %{}
     duration = input |> Map.get("duration") |> wait_input()
     until = input |> Map.get("until") |> wait_input()
@@ -153,7 +176,7 @@ defmodule Archon.Domain.TaskTypeConstraint do
     both ++ wait_parse_errors(duration, until)
   end
 
-  defp messages(%WorkflowTask{}), do: []
+  defp messages(%WorkflowTask{}, _opts), do: []
 
   # isWaitTaskValid: only the first non-blank, non-expression input is parsed.
   defp wait_parse_errors(duration, until) do

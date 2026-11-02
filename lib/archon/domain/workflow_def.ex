@@ -191,6 +191,20 @@ defmodule Archon.Domain.WorkflowDef do
     definition |> collect_tasks() |> Enum.find(&(&1.task_reference_name == ref_name))
   end
 
+  @doc """
+  The definition with the task named `workflow_task.task_reference_name` (the first one,
+  nested included) replaced by `workflow_task`; unchanged when there is none. A mapper that
+  changes its workflow task in place upstream (`DYNAMIC`, `HTTP`) changes the definition the
+  workflow holds this way (ADR 0026, decisions 4 and 7).
+  """
+  @spec replace_task(t(), WorkflowTask.t()) :: t()
+  def replace_task(%__MODULE__{tasks: tasks} = definition, %WorkflowTask{} = workflow_task) do
+    case WorkflowTask.replace_in_list(tasks, workflow_task) do
+      {:ok, tasks} -> %{definition | tasks: tasks}
+      :error -> definition
+    end
+  end
+
   @doc "Upstream `containsType`: whether any task, nested ones included, has `type`."
   @spec contains_type?(t(), String.t()) :: boolean()
   def contains_type?(%__MODULE__{} = definition, type) do
@@ -243,7 +257,7 @@ defmodule Archon.Domain.WorkflowDef do
     Validation.result(
       Validation.not_empty("name", d.name, "WorkflowDef name cannot be null or empty") ++
         Validation.valid_name("name", d.name, opts) ++
-        tasks_errors(d.tasks) ++
+        tasks_errors(d.tasks, opts) ++
         Validation.min(
           "schemaVersion",
           d.schema_version,
@@ -262,17 +276,17 @@ defmodule Archon.Domain.WorkflowDef do
     )
   end
 
-  defp tasks_errors(nil),
+  defp tasks_errors(nil, _opts),
     do: [{"tasks", "must not be null"}, {"tasks", "WorkflowTask list cannot be empty"}]
 
-  defp tasks_errors([]), do: [{"tasks", "WorkflowTask list cannot be empty"}]
+  defp tasks_errors([], _opts), do: [{"tasks", "WorkflowTask list cannot be empty"}]
 
-  defp tasks_errors(tasks) do
+  defp tasks_errors(tasks, opts) do
     tasks
     |> Enum.with_index()
     |> Enum.flat_map(fn
       {nil, _index} -> []
-      {task, index} -> task |> WorkflowTask.errors() |> Validation.nest("tasks[#{index}]")
+      {task, index} -> task |> WorkflowTask.errors(opts) |> Validation.nest("tasks[#{index}]")
     end)
   end
 

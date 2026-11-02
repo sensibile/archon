@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_jq",
+    "body": {
+      "q": ".items[",
+      "items": [
+        1
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "a9cc3441-20c0-41c8-946d-b4eedecb6113"
+  }
+}

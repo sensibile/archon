@@ -3,7 +3,7 @@
     "method": "DELETE",
     "path": "/api/workflow/bulk/remove?archiveWorkflow=false",
     "body": [
-      "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01",
+      "bf7e7a65-cf29-4533-88b2-bb4e17e1ebee",
       "00000000-0000-0000-0000-000000000000"
     ]
   },
@@ -15,7 +15,7 @@
         "00000000-0000-0000-0000-000000000000": "No such workflow found by id: 00000000-0000-0000-0000-000000000000"
       },
       "bulkSuccessfulResults": [
-        "5b50a9eb-dd4f-45cf-81e9-f5b3eb367b01"
+        "bf7e7a65-cf29-4533-88b2-bb4e17e1ebee"
       ]
     }
   }
