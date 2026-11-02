@@ -179,6 +179,26 @@ defmodule Archon.Runtime.DynamicTest do
       assert task(id, "join") == nil
     end
 
+    # finalizeRerun schedules the new branches without setTaskDomains, unlike a decide.
+    test "a rerun from the FORK gives the new branches no domain" do
+      {:ok, id} =
+        Runtime.start_workflow(%{
+          name: "p7c_fork",
+          input: %{"inputs" => [%{"a" => 1}]},
+          task_to_domain: %{"*" => "d"}
+        })
+
+      [branch] = scheduled(id, 1)
+      assert branch.domain == "d"
+      update(id, branch, :completed)
+      await_status(id, :completed)
+
+      assert rerun(id, re_run_from_task_id: task(id, "fjd").task_id) == :ok
+      [rerun_branch] = scheduled(id, 1)
+      assert rerun_branch.task_id != branch.task_id
+      assert rerun_branch.domain == nil
+    end
+
     test "a rerun from the FORK whose mapper terminates fails the workflow" do
       id = start("p7c_fork", %{"inputs" => [%{"a" => 1}]})
       complete_all(id, 1)
