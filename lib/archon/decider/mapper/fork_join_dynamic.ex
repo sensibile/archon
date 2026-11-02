@@ -310,20 +310,29 @@ defmodule Archon.Decider.Mapper.ForkJoinDynamic do
       | dynamic_forks: [context.workflow_task.task_reference_name | context.dynamic_forks]
     }
 
+    # Accumulated in reverse with the reference names seen, so the work stays linear in the
+    # number of tasks made.
     branches
-    |> Enum.reduce_while({:ok, [], [], []}, fn branch, {:ok, merged, tasks, join_on} ->
+    |> Enum.reduce_while({:ok, [], [], [], MapSet.new()}, fn branch,
+                                                             {:ok, merged, tasks, join_on, seen} ->
       with {:ok, branch} <- merge_input(branch, Map.get(inputs, branch.task_reference_name)),
            {:ok, forked} <- schedule_branch(branch, context),
-           :ok <- distinct(context.workflow, branch, tasks, forked) do
+           {:ok, seen} <- distinct(context.workflow, branch, seen, forked) do
         last = List.last(forked).reference_task_name
-        {:cont, {:ok, [changed(branch, forked) | merged], tasks ++ forked, join_on ++ [last]}}
+
+        {:cont,
+         {:ok, [changed(branch, forked) | merged], Enum.reverse(forked, tasks), [last | join_on],
+          seen}}
       else
         terminate -> {:halt, terminate}
       end
     end)
     |> case do
-      {:ok, merged, tasks, join_on} -> {:ok, Enum.reverse(merged), tasks, join_on}
-      terminate -> terminate
+      {:ok, merged, tasks, join_on, _seen} ->
+        {:ok, Enum.reverse(merged), Enum.reverse(tasks), Enum.reverse(join_on)}
+
+      terminate ->
+        terminate
     end
   end
 
@@ -357,24 +366,12 @@ defmodule Archon.Decider.Mapper.ForkJoinDynamic do
   # A reference name the fork already made (two branches leading to the same tasks): upstream
   # keeps both and drops one when it adds them; here the workflow ends, which also keeps branch
   # lists that share their sub-lists from multiplying.
-  defp distinct(workflow, branch, tasks, forked) do
-    refs = Enum.map(tasks, & &1.reference_task_name)
-    forked_refs = Enum.map(forked, & &1.reference_task_name)
-
-    case Enum.find(forked_refs, &(&1 in refs)) || first_repeat(forked_refs) do
-      nil -> :ok
-      ref -> {:terminate, no_tasks_created(workflow, branch) <> duplicate(ref)}
-    end
-  end
-
-  defp first_repeat(refs) do
-    Enum.reduce_while(refs, MapSet.new(), fn ref, seen ->
-      if MapSet.member?(seen, ref), do: {:halt, ref}, else: {:cont, MapSet.put(seen, ref)}
+  defp distinct(workflow, branch, seen, forked) do
+    Enum.reduce_while(forked, {:ok, seen}, fn %Task{reference_task_name: ref}, {:ok, seen} ->
+      if MapSet.member?(seen, ref),
+        do: {:halt, {:terminate, no_tasks_created(workflow, branch) <> duplicate(ref)}},
+        else: {:cont, {:ok, MapSet.put(seen, ref)}}
     end)
-    |> case do
-      %MapSet{} -> nil
-      ref -> ref
-    end
   end
 
   defp duplicate(ref), do: " attempted to create a duplicate task reference name: #{ref}"
