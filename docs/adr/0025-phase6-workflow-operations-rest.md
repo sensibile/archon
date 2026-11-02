@@ -164,8 +164,10 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
       저장한다(`workflow_get_rerun_child_parent`, `workflow_get_rerun_top`).
     - **경우 2의 자식 시작.** upstream은 `SubWorkflow#start`를 바로 부르므로 시스템 태스크 실행기의 `pollCount` 증가와
       `startTime`이 없다. 규칙도 시작 효과를 바로 내고(`SubWorkflow.start`), 결과는 `{:sub_workflow_started, ...}`로 돌아온다.
-      태스크 ID와 재시도 횟수가 같아 결정적 자식 ID가 끝난 이전 자식과 같으면, 기존 경로(`SubWorkflow.started`)가 새 ID로 다시
-      시작한다(캡처의 새 자식 ID도 무작위 UUID다).
+      태스크 ID와 재시도 횟수가 같아 결정적 자식 ID가 이전 자식과 같다. 이전 자식이 성공하지 못하고 끝났으면 기존
+      경로(`SubWorkflow.started`)가 새 무작위 ID로 다시 시작하고(캡처의 새 자식 ID도 무작위 UUID다), 성공했으면 upstream
+      `SubWorkflow#start`의 `startWorkflowIdempotent`처럼 그 자식에 다시 붙는다(새 실행 없음). 위 경우 2의 "새 자식을 시작"은 이
+      upstream 동작을 뜻한다.
     - **경우 1의 동기 시스템 태스크.** MVP 동기 시스템 태스크(`SWITCH`·`DECISION`·`FORK`·`DO_WHILE`)는 upstream `start`가 아무것도
       하지 않으므로 `SCHEDULED`로 두고, upstream처럼 그 타입의 큐에 넣는다(`addTaskToQueue`). 진행은 결정 루프가 한다.
     - **늦게 닿는 경우 3.** 경우 3은 아래 outbox를 기다린 뒤라 upstream보다 늦게 쓴다. 그 사이 자식이 다시 완료해 SUB_WORKFLOW
