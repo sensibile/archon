@@ -266,6 +266,7 @@ defmodule Archon.Runtime.Lifecycle do
       workflow_input: input.(id),
       correlation_id: correlation_id.(id),
       last_retried_time: wf.last_retried_time,
+      task_status: task.status,
       task_update_time: task.update_time,
       task_retried: task.retried
     }
@@ -288,6 +289,10 @@ defmodule Archon.Runtime.Lifecycle do
   rescue
     exception ->
       Logger.warning("rerun goes on above #{id}: #{Exception.message(exception)}")
+      true
+  catch
+    :exit, reason ->
+      Logger.warning("rerun goes on above #{id}: #{inspect(reason)}")
       true
   end
 

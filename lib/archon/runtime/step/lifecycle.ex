@@ -694,6 +694,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
           workflow_input: map() | nil,
           correlation_id: String.t() | nil,
           last_retried_time: integer(),
+          task_status: Task.status(),
           task_update_time: integer(),
           task_retried: boolean()
         }
@@ -710,7 +711,8 @@ defmodule Archon.Runtime.Step.Lifecycle do
   `last_retried_time` read then.
 
   The message comes once the outbox below is empty, which is later than upstream's write. A task
-  that moved on since it was read (`task_update_time`, `task_retried`) is left as it is, and so
+  that moved on since it was read (`task_status`, `task_update_time`, `task_retried`) is left as
+  it is, and so
   is the workflow: the child already completed again and told it (so the workflow may have
   completed too), or the task was retried meanwhile. The rerun below stands either way.
   """
@@ -732,7 +734,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
   defp moved_on?(%Task{} = task, request) do
     (task.retried and not request.task_retried) or
       (Task.terminal?(task.status) and Task.successful?(task.status) and
-         task.update_time != request.task_update_time)
+         (task.status != request.task_status or task.update_time != request.task_update_time))
   end
 
   defp rerun_parent_task(state, %Task{} = task, request, now) do
