@@ -311,5 +311,22 @@ defmodule ArchonWeb.ContractCaseTest do
 
       assert check("t", upstream, no_route, new_state(), expect: :no_route) == new_state()
     end
+
+    test "a started step takes Archon's start for upstream's error and binds nothing" do
+      upstream = %{
+        "response" => %{
+          "status" => 500,
+          "content_type" => "application/json",
+          "body" => %{"status" => 500, "message" => "class java.lang.Integer cannot be cast"}
+        }
+      }
+
+      started = %{status: 200, content_type: "text/plain;charset=UTF-8", path: "/", body: @a}
+      assert check("t", upstream, started, new_state(), expect: :started) == new_state()
+
+      assert_raise ExUnit.AssertionError, ~r/not a start/, fn ->
+        check("t", upstream, %{started | status: 500}, new_state(), expect: :started)
+      end
+    end
   end
 end

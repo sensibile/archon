@@ -25,7 +25,9 @@ defmodule Archon.Decider.Mapper do
     Decision,
     DoWhile,
     ForkJoin,
+    Inline,
     Join,
+    Lambda,
     Simple,
     SubWorkflow,
     Switch,
@@ -56,7 +58,9 @@ defmodule Archon.Decider.Mapper do
     "JOIN" => Join,
     "DO_WHILE" => DoWhile,
     "SUB_WORKFLOW" => SubWorkflow,
-    "WAIT" => Wait
+    "WAIT" => Wait,
+    "INLINE" => Inline,
+    "LAMBDA" => Lambda
   }
 
   @doc "The mapper for a task type, `UserDefined` when none is registered."
