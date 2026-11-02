@@ -28,6 +28,12 @@ defmodule Archon.Decider.Evaluator do
   alias Archon.Domain.Codec
   alias Archon.Script
 
+  @types ["value-param", "javascript", "graaljs"]
+
+  @doc "Whether an evaluator is registered for `type` (upstream's bean map has the name)."
+  @spec registered?(String.t() | nil) :: boolean()
+  def registered?(type), do: type in @types
+
   @doc "Evaluates `expression` against the task input with the evaluator of `type`."
   @spec evaluate(String.t() | nil, String.t() | nil, Codec.json_object(), Script.evaluator()) ::
           {:ok, Codec.json() | Script.value()} | {:error, Script.Error.t()} | :unregistered
