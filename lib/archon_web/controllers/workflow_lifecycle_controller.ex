@@ -5,8 +5,7 @@
 #
 # Derived from conductor-oss rest/src/main/java/com/netflix/conductor/rest/controllers/
 # WorkflowResource.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
-# Modified by sensibile: the Phase 6 handlers (ADR 0025) on Archon.Runtime.Lifecycle; `rerun`
-# answers the 404 of a path without a handler until slice 6f implements it.
+# Modified by sensibile: the Phase 6 handlers (ADR 0025) on Archon.Runtime.Lifecycle.
 
 defmodule ArchonWeb.WorkflowLifecycleController do
   @moduledoc """
@@ -14,10 +13,7 @@ defmodule ArchonWeb.WorkflowLifecycleController do
   `Archon.Runtime.Lifecycle`.
 
   A workflow the store does not have is a 404 `"No such workflow found by id: <id>"`
-  (`ExecutionDAOFacade#getWorkflowModel`); the other errors are `ArchonWeb.Errors`'s. `rerun` is
-  still a skeleton (ADR 0025, decision 7): it answers the 404 of a path without a handler, and the
-  contract replay (`ArchonWeb.ContractCase`) skips the steps that reach an action of
-  `unimplemented/0` until slice 6f implements it.
+  (`ExecutionDAOFacade#getWorkflowModel`); the other errors are `ArchonWeb.Errors`'s.
 
   `retry`, `restart` and `resetcallbacks` read no body, so the JSON `Content-Type` check of
   `ArchonWeb.Request` that keeps a browser's cross-origin "simple" request from an action (ADR 0023,
@@ -25,18 +21,26 @@ defmodule ArchonWeb.WorkflowLifecycleController do
   CORS preflight (a form, `fetch` in `no-cors` mode with no body, `<a ping>`). A request a browser
   marks as cross-origin is refused with a 403 instead (ADR 0025, decision 3, a deliberate
   difference): `Sec-Fetch-Site` other than `same-origin` or `none`, or, without it, an `Origin`
-  whose host and port are not the request's (`conn.host`, `conn.port`, from its `Host`). Clients that are not browsers send neither
+  whose host and port are not the request's (`conn.host`, `conn.port`, from its `Host`).
+  `rerun` reads a required JSON body, so the `Content-Type` check already keeps those requests
+  from it (a form or `text/plain` is refused, no body is the missing-body 500). Clients that are not browsers send neither
   header and are answered as upstream.
   """
 
   use ArchonWeb, :controller
 
+  alias Archon.Domain.RerunWorkflowRequest
   alias Archon.Runtime.Lifecycle
 
   # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
   Module.register_attribute(__MODULE__, :unimplemented, persist: true)
 
-  @unimplemented [:rerun]
+  @unimplemented []
+
+  @rerun_handler "public java.lang.String " <>
+                   "com.netflix.conductor.rest.controllers.WorkflowResource.rerun(" <>
+                   "java.lang.String," <>
+                   "com.netflix.conductor.common.metadata.workflow.RerunWorkflowRequest)"
 
   plug :refuse_cross_origin when action in [:retry, :restart, :reset_callbacks]
 
@@ -74,9 +78,22 @@ defmodule ArchonWeb.WorkflowLifecycleController do
     end
   end
 
-  @doc "`POST /api/workflow/{workflowId}/rerun` (`rerun`, a `RerunWorkflowRequest` body). Not implemented yet."
+  @doc """
+  `POST /api/workflow/{workflowId}/rerun` (`rerun`, a required `RerunWorkflowRequest` body whose
+  `reRunFromWorkflowId` the path replaces): the workflow ID as text.
+  """
   @spec rerun(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def rerun(conn, _params), do: Errors.send_no_route(conn)
+  def rerun(conn, %{"workflowId" => id}) do
+    with {:ok, json, conn} <- body(conn),
+         {:ok, request} <- decode(conn, RerunWorkflowRequest.from_json(json)) do
+      request = %{request | re_run_from_workflow_id: id}
+
+      case Lifecycle.rerun(id, request) do
+        :ok -> Response.text(conn, id)
+        result -> reply(conn, id, result, & &1)
+      end
+    end
+  end
 
   @doc """
   `PUT /api/workflow/{workflowId}/skiptask/{taskReferenceName}` (`skipTaskFromWorkflow`): 200
@@ -167,6 +184,16 @@ defmodule ArchonWeb.WorkflowLifecycleController do
     do: Errors.send_error(conn, {:not_found, "No such workflow found by id: #{id}"})
 
   defp reply(conn, _id, {:error, reason}, _send), do: Errors.send_error(conn, reason)
+
+  defp body(conn) do
+    case Request.read_json(conn, handler: @rerun_handler) do
+      {:ok, json, conn} -> {:ok, json, conn}
+      {:error, reason, conn} -> Errors.send_error(conn, reason)
+    end
+  end
+
+  defp decode(_conn, {:ok, value}), do: {:ok, value}
+  defp decode(conn, {:error, errors}), do: Errors.send_error(conn, Request.codec_error(errors))
 
   defp query(_conn, {:ok, value}), do: {:ok, value}
   defp query(conn, {:error, reason}), do: Errors.send_error(conn, reason)

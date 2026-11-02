@@ -7,7 +7,7 @@
 # (pauseWorkflow, resumeWorkflow, retry, taskToBeRescheduled, clearRetriedTaskRuntimeState,
 # clearLegacySubWorkflowId, isJoinOnFailedPermissive, restart, updateAndPushParents,
 # adjustStateIfSubWorkflowChanged, findChangedSubWorkflowTask, resetUnsuccessfulJoinTasks,
-# skipTaskFromWorkflow, resetCallbacksForWorkflow),
+# skipTaskFromWorkflow, resetCallbacksForWorkflow, rerunWF, finalizeRerun),
 # core/.../core/dal/ExecutionDAOFacade.java (removeWorkflowIndex, removeTaskIndex), core/.../model/
 # WorkflowModel.java (toString, toShortString) and core/.../model/TaskModel.java (toTask)
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
@@ -35,6 +35,8 @@ defmodule Archon.Runtime.Step.Lifecycle do
       definition that has none yet, then a decide (ADR 0025, decision 2).
     * `reset_callbacks/1` - upstream `resetCallbacksForWorkflow`: the tasks whose queue message
       the env made due (`Env.offsets_reset`) lose their `callbackAfterSeconds`.
+    * `rerun/2`, `rerun_parent/2` - upstream `rerunWF` on the workflow that has the task (or the
+      whole workflow), and on each workflow above it (ADR 0025, decision 2).
     * `removable/2` - the checks of upstream `removeWorkflow` before anything is deleted
       (ADR 0025, decision 3); the deletion is `Archon.Runtime.WorkflowServer`'s.
     * `adjust/1` - upstream `adjustStateIfSubWorkflowChanged`, run by every decide.
@@ -46,7 +48,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
   alias Archon.Decider.Parameters
   alias Archon.Domain.{Task, Workflow, WorkflowDef, WorkflowTask}
-  alias Archon.Runtime.Step.{Decide, Env, Schedule, State}
+  alias Archon.Runtime.Step.{Decide, Env, Schedule, State, SubWorkflow}
 
   @type reply :: :ok | {:error, {:conflict | :not_found | :invalid_state | :invalid, String.t()}}
 
@@ -523,6 +525,259 @@ defmodule Archon.Runtime.Step.Lifecycle do
       task.status == :scheduled and is_integer(task.callback_after_seconds) and
         task.callback_after_seconds > 0 and not Schedule.system_task?(env, task)
 
+  @typedoc "What a rerun asks of the workflow that has the task (`Archon.Runtime.Lifecycle.rerun/2`)."
+  @type rerun :: %{
+          task_id: String.t() | nil,
+          task_input: map() | nil,
+          workflow_input: map() | nil,
+          correlation_id: String.t() | nil
+        }
+
+  @doc """
+  Upstream `rerunWF` on the workflow that has the task, or on the whole workflow without one. A
+  workflow that has not ended is a conflict; a task it does not have is upstream's
+  `IllegalArgumentException` (`Archon.Runtime.Lifecycle` found it there by reading).
+
+    * Without a task: the tasks are deleted and the workflow runs again from the start.
+    * A task that is not `SUB_WORKFLOW` (case 1): the tasks after it (`seq`) are deleted, it is
+      reset with `taskInput` if given and scheduled again; then `finalizeRerun`.
+    * A `SUB_WORKFLOW` task (case 2): nothing is deleted (a parallel `FORK` branch would be), the
+      task is reset in place without its child, which a new start replaces; then `finalizeRerun`.
+
+  Either way the workflow is `RUNNING` without its failure, takes the input and correlation ID
+  given, asks its parent to revive (`updateAndPushParents`) and is decided.
+  """
+  @spec rerun(State.t(), rerun()) :: {reply(), State.t()}
+  def rerun(%State{wf: wf} = state, %{task_id: task_id} = request) do
+    cond do
+      not Workflow.terminal?(wf.status) ->
+        {{:error,
+          {:conflict, "Workflow: #{long_string(wf)} is not in terminal state, unable to rerun."}},
+         state}
+
+      task_id == nil ->
+        state = State.delete_tasks(state, Enum.map(wf.tasks, & &1.task_id))
+        {:ok, state |> rerun_workflow(request) |> push_parents(true) |> Decide.settle()}
+
+      true ->
+        case State.task(state, task_id) do
+          nil -> {{:error, {:invalid, "Task #{task_id} not found"}}, state}
+          task -> {:ok, rerun_from(rerun_workflow(state, request), task, request)}
+        end
+    end
+  end
+
+  # The workflow fields every branch of rerunWF sets.
+  defp rerun_workflow(%State{} = state, request) do
+    wf = %{
+      State.set_status(state.wf, :running)
+      | reason_for_incompletion: nil,
+        failed_task_id: nil,
+        failed_reference_task_names: [],
+        failed_task_names: [],
+        revived_parent_end_count: revived_end_count(state)
+    }
+
+    wf = if request.correlation_id, do: %{wf | correlation_id: request.correlation_id}, else: wf
+    wf = if request.workflow_input, do: %{wf | input: request.workflow_input}, else: wf
+    state |> State.put_workflow(wf) |> State.save_workflow()
+  end
+
+  # As child_revived does: a workflow that ends no more reads its parent's endCount now.
+  defp revived_end_count(%State{wf: wf} = state) do
+    if Workflow.terminal?(wf.status),
+      do: parent_end_count(state),
+      else: wf.revived_parent_end_count
+  end
+
+  # Case 2: the SUB_WORKFLOW task in place, with a new child started at once (SubWorkflow#start,
+  # not the system task executor, so no pollCount or startTime); its result comes back as
+  # {:sub_workflow_started, ...} after the commit.
+  defp rerun_from(%State{now: now} = state, %Task{task_type: "SUB_WORKFLOW"} = task, _request) do
+    task = %{
+      reset(task, now)
+      | start_time: 0,
+        sub_workflow_id: nil,
+        status: :scheduled,
+        reason_for_incompletion: nil
+    }
+
+    state = State.save_task(state, task)
+
+    state =
+      case SubWorkflow.start(state, task) do
+        {:started, state} -> state
+        {:failed, failed} -> State.save_task(state, failed)
+      end
+
+    finalize_rerun(state, task)
+  end
+
+  # Case 1: the tasks after it go, it runs again.
+  defp rerun_from(%State{now: now, env: env} = state, %Task{} = task, request) do
+    later = for t <- state.wf.tasks, t.seq > task.seq, do: t.task_id
+    state = State.delete_tasks(state, later)
+
+    task = %{reset(task, now) | start_time: 0, status: :scheduled}
+    task = if request.task_input, do: %{task | input_data: request.task_input}, else: task
+    state = State.save_task(state, task)
+
+    # addTaskToQueue; an asynchronous system task is evaluated when due. A synchronous one is
+    # started in place, which for the MVP types (SWITCH, DECISION, FORK, DO_WHILE) changes
+    # nothing, and is then pushed as upstream does with a SCHEDULED task (the decide loop runs it).
+    state =
+      if Schedule.system_task?(env, task) and Schedule.async?(task),
+        do: due_now(state, task),
+        else: Schedule.push(state, task)
+
+    finalize_rerun(state, task)
+  end
+
+  # addTaskToQueue for an asynchronous system task: evaluated at once without a callback delay,
+  # else when the delay is over (the next :wake), as repair_canceled does.
+  defp due_now(state, task) do
+    if Schedule.delay_ms(task) == 0, do: State.due(state, [task.task_id]), else: state
+  end
+
+  # The fields every reset target of rerunWF clears.
+  defp reset(%Task{} = task, now) do
+    %{
+      task
+      | scheduled_time: now,
+        update_time: 0,
+        end_time: 0,
+        output_data: %{},
+        external_output_payload_storage_path: nil,
+        retried: false,
+        executed: false,
+        poll_count: 0
+    }
+  end
+
+  # finalizeRerun: the tasks of another reference that ended unsuccessfully run again, then the
+  # workflow is decided and asks its parent to revive.
+  defp finalize_rerun(%State{now: now, env: env} = state, %Task{reference_task_name: ref}) do
+    state.wf.tasks
+    |> Enum.filter(&(&1.reference_task_name != ref and unsuccessful_terminal?(&1)))
+    |> Enum.reduce(state, fn task, state ->
+      task =
+        if task.task_type == "SUB_WORKFLOW",
+          do: %{
+            task
+            | sub_workflow_id: nil,
+              output_data: Map.delete(task.output_data, "subWorkflowId")
+          },
+          else: task
+
+      task = %{task | executed: false, start_time: now, end_time: 0, reason_for_incompletion: nil}
+
+      cond do
+        task.task_type in ["JOIN", "DO_WHILE"] ->
+          State.save_task(state, %{task | status: :in_progress})
+
+        Schedule.sync_system_task?(env, task) ->
+          State.save_task(state, %{task | status: :in_progress})
+
+        not Schedule.system_task?(env, task) ->
+          task = %{task | status: :scheduled}
+          state |> State.save_task(task) |> Schedule.push(task)
+
+        true ->
+          task = %{task | status: :scheduled}
+          state |> State.save_task(task) |> due_now(task)
+      end
+    end)
+    |> push_parents(true)
+    |> Decide.settle()
+  end
+
+  @typedoc """
+  What a rerun asks of a workflow above the one that has the task: the `SUB_WORKFLOW` task that
+  leads there, the input and correlation ID (the top one only) and the `lastRetriedTime` read
+  before the rerun.
+  """
+  @type rerun_parent :: %{
+          task_id: String.t(),
+          workflow_input: map() | nil,
+          correlation_id: String.t() | nil,
+          last_retried_time: integer(),
+          task_status: Task.status(),
+          task_update_time: integer(),
+          task_retried: boolean(),
+          below_completed: boolean()
+        }
+
+  @doc """
+  Upstream `rerunWF` on a workflow above the one that has the task (case 3): its `SUB_WORKFLOW`
+  task leads there. The workflow runs again (also when it already does: a revival from below may
+  have come first) without its failure, takes the input and correlation ID given, and the task
+  goes back to `IN_PROGRESS` as of now. Nothing is deleted and `finalizeRerun` is not run. Then
+  it asks its parent to revive and is decided.
+
+  Upstream saves the workflow it read before the rerun went down, so a revival from below that
+  stamped `lastRetriedTime` meanwhile is written over: the workflow keeps the
+  `last_retried_time` read then.
+
+  The message comes once the outbox below is empty, which is later than upstream's write. A task
+  that moved on since it was read (`task_status`, `task_update_time`, `task_retried`) is left as
+  it is, and so is the workflow's state: the child already completed again and told it (so the
+  workflow may have completed too; `below_completed` says so when the task cannot tell), or the
+  task was retried meanwhile. The workflow only takes the input and correlation ID then. The
+  rerun below stands either way.
+  """
+  @spec rerun_parent(State.t(), rerun_parent()) :: {reply(), State.t()}
+  def rerun_parent(%State{now: now} = state, %{task_id: task_id} = request) do
+    case State.task(state, task_id) do
+      %Task{task_type: "SUB_WORKFLOW"} = task ->
+        if request.below_completed or moved_on?(task, request),
+          do: {:ok, take_fields(state, request)},
+          else: rerun_parent_task(state, task, request, now)
+
+      _gone ->
+        {{:error, {:invalid, "Task #{task_id} not found"}}, state}
+    end
+  end
+
+  # A child that failed again is no reason: upstream's case 3 writes over that end too, and the
+  # task reads the child again on its next evaluation.
+  defp moved_on?(%Task{} = task, request) do
+    (task.retried and not request.task_retried) or
+      (Task.terminal?(task.status) and Task.successful?(task.status) and
+         (task.status != request.task_status or task.update_time != request.task_update_time))
+  end
+
+  # rerunWF's input and correlation ID without the rest of case 3.
+  defp take_fields(%State{wf: wf} = state, request) do
+    updated =
+      if request.correlation_id, do: %{wf | correlation_id: request.correlation_id}, else: wf
+
+    updated =
+      if request.workflow_input, do: %{updated | input: request.workflow_input}, else: updated
+
+    if updated == wf,
+      do: state,
+      else: state |> State.put_workflow(updated) |> State.save_workflow()
+  end
+
+  defp rerun_parent_task(state, %Task{} = task, request, now) do
+    state = rerun_workflow(state, request)
+    state = put_last_retried_time(state, request.last_retried_time)
+
+    task = %{
+      reset(task, now)
+      | output_data: task.output_data,
+        external_output_payload_storage_path: task.external_output_payload_storage_path,
+        start_time: now,
+        status: :in_progress,
+        reason_for_incompletion: nil
+    }
+
+    {:ok, state |> State.save_task(task) |> push_parents(true) |> Decide.settle()}
+  end
+
+  defp put_last_retried_time(%State{wf: wf} = state, time),
+    do: state |> State.put_workflow(%{wf | last_retried_time: time}) |> State.save_workflow()
+
   @doc """
   The checks of upstream `removeWorkflow` (`removeWorkflowIndex`, `removeTaskIndex`) with
   `archiveWorkflow`: only a terminal workflow, and none of its tasks may be running (a `SCHEDULED`
@@ -634,8 +889,9 @@ defmodule Archon.Runtime.Step.Lifecycle do
     "#{name}.#{version}/#{id}"
   end
 
-  # WorkflowModel#toString: name.version/id.STATUS
-  defp long_string(%Workflow{} = wf), do: "#{short_string(wf)}.#{status_name(wf.status)}"
+  @doc "Upstream `WorkflowModel#toString`: `name.version/id.STATUS`."
+  @spec long_string(Workflow.t()) :: String.t()
+  def long_string(%Workflow{} = wf), do: "#{short_string(wf)}.#{status_name(wf.status)}"
 
   defp name_version(%WorkflowDef{name: name, version: version}),
     do: {Parameters.java_string(name), Parameters.java_string(version)}

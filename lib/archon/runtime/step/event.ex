@@ -35,6 +35,10 @@ defmodule Archon.Runtime.Step.Event do
     * `{:skip_task, reference_name}` - upstream `skipTaskFromWorkflow` (ADR 0025, decision 2).
     * `:reset_callbacks` - upstream `resetCallbacksForWorkflow`; the env has made the queue
       messages due (`Env.offsets_reset`).
+    * `{:rerun, request}` - upstream `rerunWF` on the workflow that has the task, or on the whole
+      workflow (`Archon.Runtime.Step.Lifecycle.rerun/2`).
+    * `{:rerun_parent, request}` - upstream `rerunWF` on a workflow above it, whose
+      `SUB_WORKFLOW` task leads there (`Archon.Runtime.Step.Lifecycle.rerun_parent/2`).
 
   Removing a workflow (`{:remove, archive?}`, ADR 0025, decision 3) is a message of the process
   too, but not an event of the step: it deletes the workflow instead of committing to it.
@@ -64,4 +68,6 @@ defmodule Archon.Runtime.Step.Event do
           | {:child_revived, String.t()}
           | {:skip_task, String.t()}
           | :reset_callbacks
+          | {:rerun, Archon.Runtime.Step.Lifecycle.rerun()}
+          | {:rerun_parent, Archon.Runtime.Step.Lifecycle.rerun_parent()}
 end

@@ -45,7 +45,8 @@ defmodule Archon.Runtime.WorkflowServer do
   `IN_PROGRESS` and `CANCELED` `SUB_WORKFLOW` tasks and the failure workflow), and for `:recover`
   `outbox_pending?`. For `{:child_revived, task_id}`, `workflows` holds the parent and the
   children of the `SUB_WORKFLOW` tasks that ended unsuccessfully and of the task that revives;
-  for `{:retry, _}` and `{:restart, _}` the parent (its `endCount`, ADR 0021, L2). For
+  for `{:retry, _}`, `{:restart, _}`, `{:rerun, _}` and `{:rerun_parent, ...}` the parent (its
+  `endCount`, ADR 0021, L2). For
   `:reset_callbacks` of a workflow that has not ended, the env makes the queue message of each
   task `Archon.Runtime.Step.Lifecycle.callback_to_reset?/2` names due (`reset_offset/2`) and
   gives the ones that were there in `offsets_reset`: the one env that writes (ADR 0025,
@@ -55,7 +56,8 @@ defmodule Archon.Runtime.WorkflowServer do
 
   `start/1`, `start_idempotent/1`, `poll/3`, `update/1`, `terminate_workflow/2`,
   `cancel_by_parent/3`, the lifecycle operations (`pause/1`, `resume/1`, `retry/2`,
-  `restart/2`, `skip_task/2`, `reset_callbacks/1`, `remove/2`) and the outbox notices
+  `restart/2`, `skip_task/2`, `reset_callbacks/1`, `rerun/2`, `rerun_parent/2`, `remove/2`) and
+  the outbox notices
   `child_changed/3`, `child_revived/2` call the workflow's process, starting it first when it is
   not running (activation, `activate/2`). A call that meets a process just ending is tried once
   more. The call timeout is `config :archon, Archon.Runtime, call_timeout:` (30 s). A call that
@@ -314,6 +316,14 @@ defmodule Archon.Runtime.WorkflowServer do
   @doc "`:reset_callbacks`: `:ok` or `{:error, {:conflict, message}}`."
   @spec reset_callbacks(String.t()) :: :ok | {:error, term()}
   def reset_callbacks(id), do: call(id, :existing, :reset_callbacks)
+
+  @doc "`{:rerun, request}`: `:ok` or `{:error, {kind, message}}`."
+  @spec rerun(String.t(), Lifecycle.rerun()) :: :ok | {:error, term()}
+  def rerun(id, request), do: call(id, :existing, {:rerun, request})
+
+  @doc "`{:rerun_parent, request}`: `:ok` or `{:error, {kind, message}}`."
+  @spec rerun_parent(String.t(), Lifecycle.rerun_parent()) :: :ok | {:error, term()}
+  def rerun_parent(id, request), do: call(id, :existing, {:rerun_parent, request})
 
   @doc """
   `{:remove, archive?}` (see Removal): `:ok` once removed, `{:error, {:invalid, message}}`,
@@ -1211,7 +1221,7 @@ defmodule Archon.Runtime.WorkflowServer do
       {:child_revived, task_id} ->
         %{env | workflows: Map.merge(failed_children(wf, task_id), parent(wf))}
 
-      {lifecycle, _arg} when lifecycle in [:retry, :restart] ->
+      {lifecycle, _arg} when lifecycle in [:retry, :restart, :rerun, :rerun_parent] ->
         %{env | workflows: parent(wf)}
 
       :reset_callbacks ->

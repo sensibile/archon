@@ -5,7 +5,7 @@
 #
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/WorkflowExecutorOps.java
 # (pauseWorkflow, resumeWorkflow, retry, findLastFailedSubWorkflowIfAny, restart,
-# skipTaskFromWorkflow, resetCallbacksForWorkflow) and
+# skipTaskFromWorkflow, resetCallbacksForWorkflow, rerun, rerunWF) and
 # core/.../service/WorkflowServiceImpl.java (deleteWorkflow, terminateRemove) at commit
 # 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: what needs other workflows or the metadata is read here, and the
@@ -16,7 +16,7 @@
 defmodule Archon.Runtime.Lifecycle do
   @moduledoc """
   The lifecycle operations of the runtime API (ADR 0018, decision 9; ADR 0025, decisions 2 and 3):
-  upstream `pauseWorkflow`, `resumeWorkflow`, `retry`, `restart`, `skipTaskFromWorkflow`,
+  upstream `pauseWorkflow`, `resumeWorkflow`, `retry`, `restart`, `rerun`, `skipTaskFromWorkflow`,
   `resetCallbacksForWorkflow`, `deleteWorkflow` (`remove/2`) and `terminateRemove`. The workflow
   lifecycle REST (`ArchonWeb.WorkflowLifecycleController`) calls only these.
 
@@ -32,7 +32,9 @@ defmodule Archon.Runtime.Lifecycle do
   `{:error, {tag, reason}}` (`Archon.Runtime.WorkflowServer`), both transient.
   """
 
-  alias Archon.Domain.{Task, Workflow}
+  require Logger
+
+  alias Archon.Domain.{RerunWorkflowRequest, Task, Workflow}
   alias Archon.Runtime
   alias Archon.Runtime.Step.Lifecycle, as: Rules
   alias Archon.Runtime.WorkflowServer
@@ -143,6 +145,189 @@ defmodule Archon.Runtime.Lifecycle do
     else
       {:error, {_kind, _message}} = error -> error
       _missing -> {:error, {:not_found, "Unable to find latest definition for #{id}"}}
+    end
+  end
+
+  @doc """
+  Upstream `rerun` (ADR 0025, decision 2): the workflow or, with `reRunFromTaskId`, the task
+  runs again; the answer comes once every workflow on the way is `RUNNING` and decided.
+
+  Upstream's recursive `rerunWF` is done in three steps:
+
+    1. Reading only: a workflow that has not ended is a conflict, then the task is looked for in
+       the workflow and, when it is not there, in the child of each `SUB_WORKFLOW` task in turn,
+       depth first. A child on the way that has not ended is a conflict, one the store does not
+       have (or that does not belong to its task, ADR 0024, decision 2) is not found, as upstream
+       answers for the first child it cannot rerun. Found nowhere is `{:invalid, "Task <id> not
+       found"}`.
+    2. The workflow that has the task reruns from it (`{:rerun, request}`, cases 1 and 2); it
+       takes the input and correlation ID only when it is the top one (upstream passes `null`
+       down).
+    3. Each workflow above it, from its parent to the top, reruns its `SUB_WORKFLOW` task that
+       leads there (`{:rerun_parent, ...}`, case 3); only the top one takes the input and
+       correlation ID. A message each, after the answer below and once the outbox of the
+       workflow below is empty (its notices and revivals of this one delivered, as upstream does
+       them before it writes the parent), so a parent does not decide while its child is still
+       `FAILED` and a later notice does not undo the rerun. A workflow above that already runs
+       again (revived by the one below) is no error.
+  """
+  @spec rerun(String.t(), RerunWorkflowRequest.t()) :: :ok | {:error, term()}
+  def rerun(id, %RerunWorkflowRequest{} = request) when is_binary(id) do
+    with {:ok, wf} <- Runtime.get_workflow(id, true),
+         :ok <- rerunnable(wf),
+         {:ok, path} <- rerun_path(wf, request.re_run_from_task_id) do
+      run_rerun(path, request)
+    end
+  end
+
+  defp rerunnable(%Workflow{} = wf) do
+    if Workflow.terminal?(wf.status),
+      do: :ok,
+      else:
+        {:error,
+         {:conflict,
+          "Workflow: #{Rules.long_string(wf)} is not in terminal state, unable to rerun."}}
+  end
+
+  # [{workflow, sub_workflow_task_id} ...] as read, from the top down to the workflow that has
+  # the task, whose entry has no task (`nil`).
+  defp rerun_path(%Workflow{} = wf, nil), do: {:ok, [{wf, nil}]}
+
+  defp rerun_path(%Workflow{} = wf, task_id) do
+    case find_task(wf, task_id, [wf.workflow_id]) do
+      {:ok, path} -> {:ok, path}
+      :none -> {:error, {:invalid, "Task #{task_id} not found"}}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp find_task(%Workflow{tasks: tasks} = wf, task_id, seen) do
+    if Enum.any?(tasks, &(&1.task_id == task_id)) do
+      {:ok, [{wf, nil}]}
+    else
+      tasks
+      |> Enum.filter(&(&1.task_type == "SUB_WORKFLOW"))
+      |> Enum.reduce_while(:none, &find_below(wf, &1, task_id, seen, &2))
+    end
+  end
+
+  defp find_below(wf, task, task_id, seen, :none) do
+    case find_in_child(wf, task, task_id, seen) do
+      {:ok, path} -> {:halt, {:ok, [{wf, task.task_id} | path]}}
+      :none -> {:cont, :none}
+      {:error, _reason} = error -> {:halt, error}
+    end
+  end
+
+  # rerunWF(subWorkflowId, ...) of upstream: the child is read, must have ended, then searched.
+  defp find_in_child(%Workflow{} = parent, %Task{} = task, task_id, seen) do
+    child_id = Task.sub_workflow_id(task)
+
+    with false <- child_id in seen,
+         {:ok, child} <- Runtime.get_workflow(child_id || "", true),
+         true <- owned?(child, parent, task) do
+      case rerunnable(child) do
+        :ok -> find_task(child, task_id, [child_id | seen])
+        error -> error
+      end
+    else
+      _missing -> {:error, {:not_found, "No such workflow found by id: #{child_id || "null"}"}}
+    end
+  end
+
+  defp run_rerun(path, %RerunWorkflowRequest{} = request) do
+    [{%Workflow{workflow_id: top}, _task} | _rest] = path
+    [{%Workflow{workflow_id: target}, nil} | above] = Enum.reverse(path)
+
+    input = fn id -> if id == top, do: request.workflow_input end
+    correlation_id = fn id -> if id == top, do: request.correlation_id end
+
+    rerun = %{
+      task_id: request.re_run_from_task_id,
+      task_input: request.task_input,
+      workflow_input: input.(target),
+      correlation_id: correlation_id.(target)
+    }
+
+    with :ok <- not_found_as(WorkflowServer.rerun(target, rerun), target) do
+      above
+      |> Enum.zip([target | Enum.map(above, &elem(&1, 0).workflow_id)])
+      |> Enum.reduce_while(:ok, &rerun_above(&1, &2, input, correlation_id))
+    end
+  end
+
+  defp rerun_above({{%Workflow{} = wf, task_id}, below}, :ok, input, correlation_id) do
+    await_outbox(below)
+
+    # The workflow below completed again meanwhile and told this one: case 3 only takes the
+    # input and correlation ID (a completed workflow is not reopened), and the walk goes on.
+    rerun_parent(wf, task_id, input, correlation_id, completed?(below))
+  end
+
+  defp completed?(id) do
+    match?({:ok, %Workflow{status: :completed}}, Runtime.get_workflow(id, false))
+  end
+
+  defp rerun_parent(%Workflow{} = wf, task_id, input, correlation_id, below_completed?) do
+    id = wf.workflow_id
+    task = Enum.find(wf.tasks, &(&1.task_id == task_id))
+
+    request = %{
+      task_id: task_id,
+      workflow_input: input.(id),
+      correlation_id: correlation_id.(id),
+      last_retried_time: wf.last_retried_time,
+      task_status: task.status,
+      task_update_time: task.update_time,
+      task_retried: task.retried,
+      below_completed: below_completed?
+    }
+
+    case not_found_as(WorkflowServer.rerun_parent(id, request), id) do
+      :ok -> {:cont, :ok}
+      error -> {:halt, error}
+    end
+  end
+
+  # A workflow removed since it was read is named, not the one in the path.
+  defp not_found_as({:error, :not_found}, id),
+    do: {:error, {:not_found, "No such workflow found by id: #{id}"}}
+
+  defp not_found_as(result, _id), do: result
+
+  # A store that cannot tell is asked again until the deadline, after which the rerun goes on.
+  defp outbox_empty?(id) do
+    Runtime.store().pending_outbox(id) == []
+  rescue
+    exception ->
+      Logger.warning("rerun could not read the outbox of #{id}: #{Exception.message(exception)}")
+      false
+  catch
+    :exit, reason ->
+      Logger.warning("rerun could not read the outbox of #{id}: #{inspect(reason)}")
+      false
+  end
+
+  # Upstream reruns the workflows below synchronously, their notices and revivals of the parent
+  # included, before it writes the parent. Here those go through the outbox of the workflow
+  # below (ADR 0021, decision 4), so the parent's message waits until it is empty, asking every
+  # `rerun_retry_ms` (100 ms) up to `rerun_timeout` (10 s); past that it goes on, logged.
+  defp await_outbox(id) do
+    deadline = System.monotonic_time(:millisecond) + Runtime.setting(:rerun_timeout, 10_000)
+    await_outbox(id, deadline)
+  end
+
+  defp await_outbox(id, deadline) do
+    cond do
+      outbox_empty?(id) ->
+        :ok
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        Logger.warning("rerun goes on above #{id} before its outbox is empty")
+
+      true ->
+        Process.sleep(Runtime.setting(:rerun_retry_ms, 100))
+        await_outbox(id, deadline)
     end
   end
 
