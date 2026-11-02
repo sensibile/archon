@@ -260,6 +260,39 @@ defmodule Archon.Runtime.QueueContract do
           assert q(ctx, :pop, ["order", 2, 0]) == ["b", "a"]
         end
 
+        # SqliteQueueDAO#resetOffsetTime: UPDATE ... SET deliver_on = now (ADR 0025, decision 2).
+        test "reset_offset makes a delayed message due now and keeps its priority", ctx do
+          q(ctx, :push, ["reset", "a", 0, 0])
+          q(ctx, :push, ["reset", "late", 5, 60_000])
+          q(ctx, :push, ["reset", "later", 0, 60_000])
+          ctx.advance.(1)
+
+          assert q(ctx, :reset_offset, ["reset", "late"])
+          assert q(ctx, :reset_offset, ["reset", "later"])
+          assert q(ctx, :size, ["reset"]) == 3
+          assert q(ctx, :pop, ["reset", 3, 0]) == ["late", "a", "later"]
+        end
+
+        test "reset_offset of a due message is true and of a missing one false", ctx do
+          q(ctx, :push, ["reset", "a", 0, 0])
+          assert q(ctx, :reset_offset, ["reset", "a"])
+          refute q(ctx, :reset_offset, ["reset", "missing"])
+          refute q(ctx, :reset_offset, ["missing", "a"])
+          refute q(ctx, :contains?, ["reset", "missing"])
+          assert q(ctx, :pop, ["reset", 2, 0]) == ["a"]
+        end
+
+        # Unlike a push, it does not clear the popped mark or the unack time.
+        test "reset_offset leaves a popped message hidden until its unack timeout", ctx do
+          q(ctx, :push, ["reset", "a", 0, 0])
+          assert q(ctx, :pop, ["reset", 1, 0]) == ["a"]
+
+          assert q(ctx, :reset_offset, ["reset", "a"])
+          assert q(ctx, :pop, ["reset", 1, 0]) == []
+          ctx.advance.(60_000)
+          assert q(ctx, :pop, ["reset", 1, 0]) == ["a"]
+        end
+
         test "queues are independent", ctx do
           q(ctx, :push, ["one", "a", 0, 0])
           q(ctx, :push, ["two", "a", 0, 0])

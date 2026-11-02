@@ -7,9 +7,11 @@
 # (startWorkflow's cleanup, decide, updateTask, terminateWorkflow),
 # org/conductoross/conductor/core/execution/WorkflowSweeper.java and ExecutorUtils.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
+# Derived also from core/.../core/dal/ExecutionDAOFacade.java (removeWorkflow) at the same commit.
 # Modified by sensibile: one process per workflow is the only writer of the workflow; it runs
 # Archon.Runtime.Step and its effects instead of taking a lock, and its own timer replaces the
-# decider queue (ADR 0018, decisions 1, 2, 6 and 7).
+# decider queue (ADR 0018, decisions 1, 2, 6 and 7); a removal waits for the outbox to be empty
+# (ADR 0025, decision 3).
 
 defmodule Archon.Runtime.WorkflowServer do
   @moduledoc """
@@ -43,16 +45,23 @@ defmodule Archon.Runtime.WorkflowServer do
   `IN_PROGRESS` and `CANCELED` `SUB_WORKFLOW` tasks and the failure workflow), and for `:recover`
   `outbox_pending?`. For `{:child_revived, task_id}`, `workflows` holds the parent and the
   children of the `SUB_WORKFLOW` tasks that ended unsuccessfully and of the task that revives;
-  for `{:retry, _}` and `{:restart, _}` the parent (its `endCount`, ADR 0021, L2).
+  for `{:retry, _}` and `{:restart, _}` the parent (its `endCount`, ADR 0021, L2). For
+  `:reset_callbacks` of a workflow that has not ended, the env makes the queue message of each
+  task `Archon.Runtime.Step.Lifecycle.callback_to_reset?/2` names due (`reset_offset/2`) and
+  gives the ones that were there in `offsets_reset`: the one env that writes (ADR 0025,
+  decision 2, an exception to ADR 0018, decision 2). Read again after a failure, it is true again.
 
   ## Client functions
 
   `start/1`, `start_idempotent/1`, `poll/3`, `update/1`, `terminate_workflow/2`,
   `cancel_by_parent/3`, the lifecycle operations (`pause/1`, `resume/1`, `retry/2`,
-  `restart/2`) and the outbox notices `child_changed/3`, `child_revived/2` call the workflow's
-  process, starting it first when it is not running (activation, `activate/2`). A call that
-  meets a process just ending is tried once more. The call timeout is
-  `config :archon, Archon.Runtime, call_timeout:` (30 s).
+  `restart/2`, `skip_task/2`, `reset_callbacks/1`, `remove/2`) and the outbox notices
+  `child_changed/3`, `child_revived/2` call the workflow's process, starting it first when it is
+  not running (activation, `activate/2`). A call that meets a process just ending is tried once
+  more. The call timeout is `config :archon, Archon.Runtime, call_timeout:` (30 s). A call that
+  exits (a timeout, a process shut down, one ended again on the second try) and an activation
+  that fails for another reason than a missing workflow are `{:error, {:exit, reason}}`, which
+  REST answers as a retryable 500 (ADR 0023, decision 4; ADR 0025, decision 3).
 
   ## Lifetime
 
@@ -72,6 +81,15 @@ defmodule Archon.Runtime.WorkflowServer do
       instead of hibernating when its `:wake` timer, saved with a commit, is more than
       `evict_after` (and `activation_margin`) away and its outbox is empty. The next request activates it again and
       `Archon.Runtime.Waker` does before the timer is due.
+
+  ## Removal
+
+  `{:remove, archive?}` (ADR 0025, decision 3) is decided at once: the checks of
+  `Archon.Runtime.Step.Lifecycle.removable/2` first, then, when the outbox runner is not done or
+  entries are left, `{:error, :outbox_pending}` without waiting (the caller asks again,
+  `Archon.Runtime.Lifecycle.remove/2`). Otherwise the workflow, its tasks and its outbox are
+  deleted from the store, then the queue messages of its tasks (a failure there is logged, as
+  upstream does), and the process answers `:ok` and ends.
 
   ## Outbox
 
@@ -289,6 +307,21 @@ defmodule Archon.Runtime.WorkflowServer do
   @spec restart(String.t(), WorkflowDef.t() | nil) :: :ok | {:error, term()}
   def restart(id, definition), do: call(id, :existing, {:restart, definition})
 
+  @doc "`{:skip_task, reference_name}`: `:ok` or `{:error, {:invalid_state, message}}`."
+  @spec skip_task(String.t(), String.t()) :: :ok | {:error, term()}
+  def skip_task(id, ref), do: call(id, :existing, {:skip_task, ref})
+
+  @doc "`:reset_callbacks`: `:ok` or `{:error, {:conflict, message}}`."
+  @spec reset_callbacks(String.t()) :: :ok | {:error, term()}
+  def reset_callbacks(id), do: call(id, :existing, :reset_callbacks)
+
+  @doc """
+  `{:remove, archive?}` (see Removal): `:ok` once removed, `{:error, {:invalid, message}}`,
+  `{:error, :outbox_pending}` or `{:error, :not_found}`.
+  """
+  @spec remove(String.t(), boolean()) :: :ok | {:error, term()}
+  def remove(id, archive?) when is_boolean(archive?), do: call(id, :existing, {:remove, archive?})
+
   @doc """
   `{:child_revived, task_id}` to the parent, from the child's outbox runner: `:ok` once the
   parent saved it, or `{:error, reason}`.
@@ -306,18 +339,26 @@ defmodule Archon.Runtime.WorkflowServer do
     do: call(parent_id, :existing, {:child_changed, task_id, child})
 
   defp call(id, mode, request, retry? \\ true) do
-    with {:ok, pid} <- activate(id, mode) do
-      try do
-        GenServer.call(pid, request, Runtime.setting(:call_timeout, 30_000))
-      catch
-        # A process that ends :normal has answered every call it took; one that is shut down
-        # may have stopped after its commit, so that call is not sent again.
-        :exit, {reason, _call} when retry? and reason in [:noproc, :normal] ->
-          call(id, mode, request, false)
+    case activate(id, mode) do
+      {:ok, pid} ->
+        try do
+          GenServer.call(pid, request, Runtime.setting(:call_timeout, 30_000))
+        catch
+          # A process that ends :normal has answered every call it took; one that is shut down
+          # may have stopped after its commit, so that call is not sent again.
+          :exit, {reason, _call} when retry? and reason in [:noproc, :normal] ->
+            call(id, mode, request, false)
 
-        :exit, {reason, _call} ->
-          {:error, reason}
-      end
+          :exit, {reason, _call} ->
+            {:error, {:exit, reason}}
+        end
+
+      {:error, :not_found} = error ->
+        error
+
+      # ADR 0025, decision 3: transient as an exit is (ADR 0023, decision 4).
+      {:error, reason} ->
+        {:error, {:exit, reason}}
     end
   end
 
@@ -411,6 +452,15 @@ defmodule Archon.Runtime.WorkflowServer do
   def handle_call(_event, _from, %__MODULE__{workflow: nil} = state),
     do: {:reply, {:error, :not_found}, state, idle_timeout()}
 
+  def handle_call({:remove, archive?}, _from, state) do
+    with :ok <- Lifecycle.removable(state.workflow, archive?),
+         :ok <- outbox_empty(state) do
+      remove_workflow(state)
+    else
+      error -> reply_and_settle(error, state)
+    end
+  end
+
   def handle_call(event, _from, state) do
     {reply, state} = handle_event(event, state)
     reply_and_settle(reply, state)
@@ -480,6 +530,51 @@ defmodule Archon.Runtime.WorkflowServer do
   def handle_info(message, state) do
     Logger.warning("workflow #{state.id} ignored #{inspect(message)}")
     noreply(state)
+  end
+
+  ## Removal
+
+  # ADR 0025, decision 3: the work for other workflows is done before the workflow goes.
+  defp outbox_empty(%__MODULE__{runner: nil, kick?: false, ack: []} = state) do
+    case guard(fn -> Runtime.store().pending_outbox(state.id) end) do
+      {:ok, []} -> :ok
+      {:ok, _entries} -> {:error, :outbox_pending}
+      {:error, reason} -> {:error, {:env, reply_reason(reason)}}
+    end
+  end
+
+  defp outbox_empty(_state), do: {:error, :outbox_pending}
+
+  # ExecutionDAOFacade#removeWorkflow: the store, then the queue messages of the tasks.
+  defp remove_workflow(%__MODULE__{workflow: workflow} = state) do
+    case guard(fn -> Runtime.store().remove_workflow(state.id) end) do
+      {:ok, result} when result in [:ok, {:error, :not_found}] ->
+        Enum.each(workflow.tasks, &remove_message(state, &1))
+        cancel_timer(state.timer)
+        {:stop, :normal, result, %{state | workflow: nil, timer: nil}}
+
+      {:ok, {:error, reason}} ->
+        reply_and_settle({:error, {:commit, reason}}, state)
+
+      {:error, reason} ->
+        Logger.error("workflow #{state.id} could not be removed: #{inspect(reason)}")
+        reply_and_settle({:error, {:commit, reply_reason(reason)}}, state)
+    end
+  end
+
+  defp remove_message(state, %Task{task_id: task_id} = task) do
+    queue = Schedule.queue_name(task)
+
+    case guard(fn -> Runtime.queue().remove(queue, task_id) end) do
+      {:ok, :ok} ->
+        :ok
+
+      failed ->
+        Logger.info(
+          "could not remove task #{task_id} of workflow #{state.id} from queue #{queue}: " <>
+            inspect(failed)
+        )
+    end
   end
 
   ## Running events
@@ -1119,6 +1214,11 @@ defmodule Archon.Runtime.WorkflowServer do
       {lifecycle, _arg} when lifecycle in [:retry, :restart] ->
         %{env | workflows: parent(wf)}
 
+      :reset_callbacks ->
+        if Workflow.terminal?(wf.status),
+          do: env,
+          else: %{env | offsets_reset: reset_offsets(env, wf)}
+
       _other ->
         env
     end
@@ -1213,6 +1313,15 @@ defmodule Archon.Runtime.WorkflowServer do
         task.status == :scheduled,
         not Schedule.system_task?(env, task),
         Runtime.queue().contains?(Schedule.queue_name(task), task.task_id),
+        into: MapSet.new(),
+        do: task.task_id
+  end
+
+  # resetCallbacksForWorkflow's queueDAO.resetOffsetTime, for the tasks the rule may change.
+  defp reset_offsets(env, %Workflow{tasks: tasks}) do
+    for task <- tasks,
+        Lifecycle.callback_to_reset?(env, task),
+        Runtime.queue().reset_offset(Schedule.queue_name(task), task.task_id),
         into: MapSet.new(),
         do: task.task_id
   end

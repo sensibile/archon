@@ -136,6 +136,17 @@ defmodule Archon.Runtime.Step.State do
     end
   end
 
+  @doc """
+  Puts the tasks in the order the stores read them (`seq`, then task ID), for a task added
+  out of `seq` order (a skipped task has none, ADR 0025, decision 2), so the rest of the step and
+  the process see the order a later read gives.
+  """
+  @spec sort_tasks(t()) :: t()
+  def sort_tasks(%__MODULE__{wf: wf, stored: stored} = state) do
+    sort = &Enum.sort_by(&1, fn task -> {task.seq, task.task_id} end)
+    %{state | wf: %{wf | tasks: sort.(wf.tasks)}, stored: %{stored | tasks: sort.(stored.tasks)}}
+  end
+
   @doc "Deletes tasks (DO_WHILE `keepLastN`, upstream `removeTask`)."
   @spec delete_tasks(t(), [String.t()]) :: t()
   def delete_tasks(state, []), do: state

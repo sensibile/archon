@@ -11,7 +11,8 @@
 # counted from the pop, instead of a periodic processAllUnacks; times are epoch milliseconds from
 # the application clock instead of the database's current_timestamp; every write is fenced by the
 # node epoch, and `apply_ops/2` applies a store commit's queue operations in the commit's
-# transaction (ADR 0021, decisions 2, 3 and 7).
+# transaction (ADR 0021, decisions 2, 3 and 7); resetOffsetTime is `reset_offset/3` (ADR 0025,
+# decision 2).
 
 defmodule Archon.Runtime.Queue.Postgres do
   @moduledoc """
@@ -35,7 +36,7 @@ defmodule Archon.Runtime.Queue.Postgres do
 
   ## Writes
 
-  `push`, `pop`, `ack`, `remove` and `postpone` each run in `Archon.Runtime.Postgres.transaction!/2`,
+  `push`, `pop`, `ack`, `remove`, `postpone` and `reset_offset` each run in `Archon.Runtime.Postgres.transaction!/2`,
   so they raise `Archon.Runtime.Postgres.FencedError` when the node epoch is stale (ADR 0021,
   decision 7). `apply_ops/2` is for `Archon.Runtime.Store.Postgres`: it applies a commit's queue
   operations in the caller's transaction, which has already passed the fence.
@@ -122,6 +123,21 @@ defmodule Archon.Runtime.Queue.Postgres do
     Postgres.transaction!(instance, fn ->
       postpone_at(instance, queue, id, priority, Postgres.now(instance) + delay_ms)
     end)
+  end
+
+  @impl Queue
+  @spec reset_offset(Postgres.t(), String.t(), String.t()) :: boolean()
+  def reset_offset(instance \\ Postgres.runtime(), queue, id)
+      when is_binary(queue) and is_binary(id) do
+    storable?(queue) and storable?(id) and
+      Postgres.transaction!(instance, fn ->
+        # SqliteQueueDAO#resetOffsetTime: only the delivery time moves.
+        query!(
+          instance,
+          "UPDATE #{table(instance)} SET deliver_on = $3 WHERE queue_name = $1 AND message_id = $2",
+          [queue, id, Postgres.now(instance)]
+        ).num_rows > 0
+      end)
   end
 
   @impl Queue

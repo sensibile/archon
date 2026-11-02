@@ -13,6 +13,7 @@
   `status` 변환, `int` 넘침, `null` correlationId를 적었다.
 - 갱신: 2026-11-02 조각 6e. 결정 5 끝 "조각 6e가 정한 것"에 구현에서 정한 세부(모르는 자식, 응답 없음의 문구, 대기의
   30초 상한, 변환 실패 문구, `ArchonWeb.Request` 보충)를 적었다.
+- 갱신: 2026-11-02 조각 6d. 구현하며 정한 것과 결정 3의 기술을 바로잡은 것을 결정 3 끝 "조각 6d에서 정한 것"에 적었다.
 
 ## 맥락
 
@@ -212,6 +213,35 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
 - **`DELETE /api/workflow/{workflowId}/terminate-remove?reason=&archiveWorkflow=true`**는 upstream `WorkflowServiceImpl.terminateRemove`
   처럼 종료(`Runtime.terminate_workflow/2`) 다음에 지우기다. `COMPLETED` 워크플로우는 종료가 409 `"Cannot terminate a COMPLETED
   workflow."`이므로 지우지 않는다. `FAILED`·`TIMED_OUT`은 종료가 상태를 `TERMINATED`로 바꾼 뒤 지운다(upstream과 같음).
+
+- **조각 6d에서 정한 것(2026-11-02).**
+  - **종료 요청의 자식 종료는 outbox가 아니다.** `DELETE /api/workflow/{id}`와 terminate-remove의 종료(`Step.Terminate.by_request`)는
+    upstream `cancelNonTerminalTasks`처럼 실행 중인 자식을 커밋 전 효과로 끝낸다. outbox로 가는 것은 부모 알림(`notify_parent`),
+    부모 되살림, 실패 워크플로우 시작, 그리고 결정 중에 끝난 워크플로우(태스크 실패 등)의 자식 종료다. 그래서 "실행 중 자식이 있는
+    부모의 terminate-remove"는 기다리지 않고 지우며 자식은 응답 때 이미 `TERMINATED`이고, 전달 대기가 실제로 걸리는 것은 "부모가
+    기다리는 자식의 terminate-remove"다(부모의 SUB_WORKFLOW 태스크는 `CANCELED`, 부모는 `TERMINATED`). 위 1의 판정 조건은 그대로다.
+  - **판정에 쓰는 프로세스 상태.** `runner`가 `nil`이 아니거나, 커밋이 더한 항목을 아직 실행기에 넘기지 않았거나(`kick?`),
+    되돌려 받은 실패 워크플로우 항목의 ack가 남았거나(`ack`), 저장소의 `pending_outbox`가 비지 않았으면 "전달 대기"
+    (`{:error, :outbox_pending}`)다. 지우기는 저장소(`Store.remove_workflow/1`) 다음 태스크마다 큐 메시지(`Queue.remove/2`) 순서이고, 큐
+    실패는 upstream처럼 로그만 남긴다. 저장소 지우기가 실패하면 프로세스는 남고 `{:error, {:commit, _}}`(retryable 500)다.
+  - **대기 설정.** `config :archon, Archon.Runtime, remove_timeout:`(10초)과 `remove_retry_ms:`(100ms). "전달 대기"의 응답은
+    `ArchonWeb.Errors`의 고정 문구 `"Temporary server error, retry the request"` 500 `retryable` 참이다.
+  - **`call/4`의 오류.** 없는 워크플로우의 활성화(`{:error, :not_found}`)만 그대로 두고, 그 밖의 활성화 실패와 모든 exit는
+    `{:error, {:exit, 이유}}`다.
+  - **지워진 부모.** 자식의 `notify_parent`·`revive_parent`는 활성화가 `:not_found`이므로 outbox가 ack하고(`Outbox.classify`) 자식은
+    그대로 진행한다. 시험으로 고정했다(`test/archon/runtime/lifecycle_cleanup_test.exs`).
+  - **skiptask의 순서와 모양.** 건너뛴 태스크는 `seq` 0이고 저장소가 `(seq, taskId)` 순으로 읽으므로 앞에 온다. 규칙도 태스크를 더한 뒤 같은
+    순서로 다시 놓아(`State.sort_tasks/1`) 같은 프로세스의 뒤 결정(마지막 태스크로 정하는 워크플로우 출력 등)이 다시 읽은 순서와 같다.
+    upstream은 `workflowTask` 없이 저장하고 응답의 `toTask`가 이름과 ref만 가진 `WorkflowTask`를 채우므로, archon은 그 `WorkflowTask`를
+    처음부터 저장한다(응답이 같다). `taskInput` 등 body는 읽지 않는다(위 결정 2).
+  - **resetcallbacks의 Env.** `Env.offsets_reset`(지연을 없앤 태스크 ID 집합)에 `reset_offset/2`의 참 결과를 담는다. 거르기는
+    `Step.Lifecycle.callback_to_reset?/2`(시스템 태스크가 아니고 `SCHEDULED`, `callbackAfterSeconds > 0`)다. 메모리 큐는 꺼냄 표시를
+    따로 두어(`popped?`) 꺼낸 메시지의 `unack` 시각을 지킨다.
+  - **body 없는 POST의 교차 출처 요청.** Codex 보안 리뷰가 retry·restart·resetcallbacks에 교차 출처 폼 POST가 닿는다고 지적했고
+    (ADR 0023 결정 3의 Content-Type 검사는 body를 읽는 액션만 지킨다), 자체 리뷰가 타입 거르기로는 Content-Type 없는 요청과
+    `<a ping>`이 남는다고 보탰다. 그래서 타입이 아니라 출처 헤더로 거절한다("upstream과 의도적으로 다른 점").
+  - **retry의 `updateTime`(Phase 4 코드 수정).** upstream `retry`는 `updateTasks`가 시각을 찍은 같은 객체를 `scheduleTask`로 저장하므로 새
+    태스크의 `updateTime`이 0이 아니다(`workflow_get_retried`). archon은 다시 찍힌 태스크로 스케줄하도록 고쳤다.
 
 ### 4. 조회
 
@@ -463,6 +493,14 @@ ADR 0023의 목록에 더해 다음이 생긴다.
 - **remove의 전달 대기 500**(결정 3): outbox 전달이 마감(예 10초)까지 끝나지 않으면 `archiveWorkflow`와 상관없이 아무것도 지우지
   않고 500 `retryable` 참이다. upstream은 종료의 부수 효과를 동기로 끝내므로 이 응답이 없다. bulk remove·terminate-remove는 ID마다
   이 대기를 하므로 전달이 계속 실패하는 ID가 많으면 요청이 길어진다(받아들이는 비용).
+- **body 없는 생명주기 POST의 교차 출처 요청 거절**(결정 3 끝, 조각 6d): retry·restart·resetcallbacks는 body를 읽지 않으므로
+  ADR 0023 결정 3의 JSON `Content-Type` 검사를 거치지 않고, 브라우저가 preflight 없이 다른 사이트에서 POST할 수 있다(폼,
+  body 없는 `no-cors` `fetch`, `<a ping>`). 브라우저가 교차 출처로 표시한 요청(`Sec-Fetch-Site`가 `same-origin`·`none`이 아님, 그
+  헤더가 없으면 `Origin`의 호스트·포트가 `Host`와 다름)을 403 `"Cross-origin request refused"`로 거절한다. 두 헤더를 보내지 않는
+  클라이언트(SDK, curl)는 upstream과 같다. `Sec-Fetch-Site`를 보내지 않는 오래된 브라우저가 TLS를 끝내거나 `Host`를 바꾸는
+  프록시 뒤에서 같은 출처로 부르면 `Origin`과 `Host`의 포트·이름이 달라 403이 될 수 있다(upstream도 다른 출처의 UI를 지원하지
+  않는다). 인증 없는 MVP의 나머지 위험(같은 호스트의 다른 프로세스, 이 검사로 막지 못하는 DNS rebinding)은 ADR 0024 결정 4대로
+  인증 ADR이 다룬다.
 - **task 실행 로그**(결정 1): Later. `TaskResult.logs`를 저장하지 않는다(Phase 5와 같음).
 
 ## 대안

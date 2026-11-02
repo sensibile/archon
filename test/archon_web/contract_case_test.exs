@@ -33,17 +33,41 @@ defmodule ArchonWeb.ContractCaseTest do
   end
 
   describe "skip?/1" do
+    # A step that reaches an action still not implemented, the first of these in slice order
+    # (ADR 0025, decision 8); slice 6h removes the skipping.
+    @unimplemented_steps [
+      {"workflow_rerun", ArchonWeb.WorkflowLifecycleController, :rerun},
+      {"workflow_bulk_pause", ArchonWeb.WorkflowBulkController, :pause}
+    ]
+
+    defp unimplemented_step do
+      Enum.find(@unimplemented_steps, fn {_name, controller, action} ->
+        action in controller.unimplemented()
+      end)
+    end
+
     test "a step reaching an action its controller has not implemented is skipped" do
-      assert :pause in ArchonWeb.WorkflowLifecycleController.unimplemented()
-      assert skip?({:exchange, "workflow_pause"})
+      if step = unimplemented_step() do
+        {name, _controller, _action} = step
+        assert skip?({:exchange, name})
+      end
+
+      refute :pause in ArchonWeb.WorkflowLifecycleController.unimplemented()
+      refute skip?({:exchange, "workflow_pause"})
       refute skip?({:exchange, "workflow_get_paused"})
       refute skip?({:exchange, "route_unsupported_workflow_decide", expect: :no_route})
     end
 
     test "a step requiring an action not implemented yet is skipped, waits too" do
-      requires = [requires: [{ArchonWeb.WorkflowLifecycleController, :pause}]]
-      assert skip?({:exchange, "workflow_get_paused", requires})
-      assert skip?({:wait_status, "workflow_start_life", "PAUSED", requires})
+      if step = unimplemented_step() do
+        {_name, controller, action} = step
+        requires = [requires: [{controller, action}]]
+        assert skip?({:exchange, "workflow_get_paused", requires})
+        assert skip?({:wait_status, "workflow_start_life", "PAUSED", requires})
+      end
+
+      implemented = [requires: [{ArchonWeb.WorkflowLifecycleController, :pause}]]
+      refute skip?({:exchange, "workflow_get_paused", implemented})
       refute skip?({:wait_status, "workflow_start_life", "RUNNING"})
       refute skip?({:exchange, "health", requires: [{ArchonWeb.HealthController, :check}]})
     end

@@ -4,17 +4,21 @@
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
 #
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/WorkflowExecutorOps.java
-# (pauseWorkflow, resumeWorkflow, retry, findLastFailedSubWorkflowIfAny, restart) at commit
+# (pauseWorkflow, resumeWorkflow, retry, findLastFailedSubWorkflowIfAny, restart,
+# skipTaskFromWorkflow, resetCallbacksForWorkflow) and
+# core/.../service/WorkflowServiceImpl.java (deleteWorkflow, terminateRemove) at commit
 # 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: what needs other workflows or the metadata is read here, and the
 # operation itself is a message to the workflow's process (ADR 0018, decision 9); the retry goes
-# down only to children that belong to their task (ADR 0024, decision 2).
+# down only to children that belong to their task (ADR 0024, decision 2); a removal asks again
+# until the workflow's outbox is empty (ADR 0025, decision 3).
 
 defmodule Archon.Runtime.Lifecycle do
   @moduledoc """
-  The lifecycle operations of the runtime API (ADR 0018, decision 9): upstream
-  `pauseWorkflow`, `resumeWorkflow`, `retry` and `restart`. REST is Later (ADR 0001); these are
-  the functions it will call.
+  The lifecycle operations of the runtime API (ADR 0018, decision 9; ADR 0025, decisions 2 and 3):
+  upstream `pauseWorkflow`, `resumeWorkflow`, `retry`, `restart`, `skipTaskFromWorkflow`,
+  `resetCallbacksForWorkflow`, `deleteWorkflow` (`remove/2`) and `terminateRemove`. The workflow
+  lifecycle REST (`ArchonWeb.WorkflowLifecycleController`) calls only these.
 
   Each one is a message to the workflow's process (`Archon.Runtime.Step.Lifecycle` has the
   rules) and answers once its commit and the decide that follows are saved. A workflow that runs
@@ -23,7 +27,9 @@ defmodule Archon.Runtime.Lifecycle do
 
   Errors are `{:error, :not_found}` for a workflow the store does not have, or
   `{:error, {kind, message}}` with upstream's exception (`:conflict`, `:not_found`,
-  `:invalid_state` for `IllegalStateException`) and its message.
+  `:invalid_state` for `IllegalStateException`, `:invalid` for `IllegalArgumentException`) and its
+  message. A process that did not answer is `{:error, {:exit, reason}}` and a failure of the step
+  `{:error, {tag, reason}}` (`Archon.Runtime.WorkflowServer`), both transient.
   """
 
   alias Archon.Domain.{Task, Workflow}
@@ -138,6 +144,68 @@ defmodule Archon.Runtime.Lifecycle do
       {:error, {_kind, _message}} = error -> error
       _missing -> {:error, {:not_found, "Unable to find latest definition for #{id}"}}
     end
+  end
+
+  @doc """
+  Upstream `skipTaskFromWorkflow`: a `SKIPPED` task for `reference_name`, then a decide. The
+  request's `SkipTaskRequest` is not used (ADR 0025, decision 2).
+  """
+  @spec skip_task(String.t(), String.t()) :: :ok | {:error, term()}
+  def skip_task(id, reference_name) when is_binary(id) and is_binary(reference_name),
+    do: WorkflowServer.skip_task(id, reference_name)
+
+  @doc """
+  Upstream `resetCallbacksForWorkflow`: the `SCHEDULED` worker tasks with a callback delay are due
+  now and lose the delay (only those whose queue message is there).
+  """
+  @spec reset_callbacks(String.t()) :: :ok | {:error, term()}
+  def reset_callbacks(id) when is_binary(id), do: WorkflowServer.reset_callbacks(id)
+
+  @doc """
+  Upstream `deleteWorkflow(workflowId, archiveWorkflow)` on the default server (ADR 0025,
+  decision 3): with `archive_workflow` only a terminal workflow (`{:error, {:invalid, message}}`
+  otherwise); the workflow, its tasks, its outbox and its tasks' queue messages are deleted and
+  its process ends. Children and parent are left as they are.
+
+  The workflow's process removes it only once its outbox is empty, so the work its termination
+  left for other workflows (a child termination, the notice to its parent) is not lost. While it
+  is not, this asks again every `remove_retry_ms` (100 ms) until `remove_timeout` (10 s) has
+  passed, then answers `{:error, :outbox_pending}` with nothing removed (a retryable 500). Each
+  try is decided again by the process, so a workflow another client revived meanwhile meets the
+  `archive_workflow` check again.
+  """
+  @spec remove(String.t(), boolean()) :: :ok | {:error, term()}
+  def remove(id, archive_workflow \\ true) when is_binary(id) and is_boolean(archive_workflow) do
+    deadline = System.monotonic_time(:millisecond) + Runtime.setting(:remove_timeout, 10_000)
+    remove_until(id, archive_workflow, deadline)
+  end
+
+  defp remove_until(id, archive_workflow, deadline) do
+    case WorkflowServer.remove(id, archive_workflow) do
+      {:error, :outbox_pending} = pending ->
+        left = deadline - System.monotonic_time(:millisecond)
+
+        if left > 0 do
+          Process.sleep(min(left, Runtime.setting(:remove_retry_ms, 100)))
+          remove_until(id, archive_workflow, deadline)
+        else
+          pending
+        end
+
+      result ->
+        result
+    end
+  end
+
+  @doc """
+  Upstream `terminateRemove`: `Archon.Runtime.terminate_workflow/2`, then `remove/2`. A
+  `COMPLETED` workflow is not terminated (`{:error, :conflict}`) and so not removed; a `FAILED`
+  or `TIMED_OUT` one is `TERMINATED` first.
+  """
+  @spec terminate_remove(String.t(), String.t() | nil, boolean()) :: :ok | {:error, term()}
+  def terminate_remove(id, reason, archive_workflow \\ true)
+      when is_binary(id) and is_boolean(archive_workflow) do
+    with :ok <- Runtime.terminate_workflow(id, reason), do: remove(id, archive_workflow)
   end
 
   defp status_name(status), do: status |> Atom.to_string() |> String.upcase()

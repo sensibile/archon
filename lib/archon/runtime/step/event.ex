@@ -32,6 +32,12 @@ defmodule Archon.Runtime.Step.Event do
       latest one.
     * `{:child_revived, task_id}` - the child of the `SUB_WORKFLOW` task runs again (one level of
       upstream `updateAndPushParents`).
+    * `{:skip_task, reference_name}` - upstream `skipTaskFromWorkflow` (ADR 0025, decision 2).
+    * `:reset_callbacks` - upstream `resetCallbacksForWorkflow`; the env has made the queue
+      messages due (`Env.offsets_reset`).
+
+  Removing a workflow (`{:remove, archive?}`, ADR 0025, decision 3) is a message of the process
+  too, but not an event of the step: it deletes the workflow instead of committing to it.
   """
 
   alias Archon.Domain.{TaskResult, Workflow, WorkflowDef}
@@ -56,4 +62,6 @@ defmodule Archon.Runtime.Step.Event do
           | {:retry, boolean()}
           | {:restart, WorkflowDef.t() | nil}
           | {:child_revived, String.t()}
+          | {:skip_task, String.t()}
+          | :reset_callbacks
 end
