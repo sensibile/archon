@@ -118,7 +118,13 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
 
 모두 upstream 매퍼·태스크를 그대로 옮긴다. 문구는 upstream 문자열을 쓴다.
 
-- **TERMINATE.** 매퍼는 `IN_PROGRESS`, 입력은 `getTaskInputV2`(태스크 정의 없음). 실행은 `terminationStatus`가 `COMPLETED`·`FAILED`·
+- **문자열이 아닌 입력(결정 3·5·6 공통).** upstream은 몇몇 입력을 `try` 밖에서 `(String)`으로 캐스트한다(TERMINATE
+  `terminationStatus`, INLINE `evaluatorType`·`expression`, JSON_JQ_TRANSFORM `queryExpression`). 표현식이 수 같은 값을 내면
+  `ClassCastException`이 태스크 실패 경로가 아니라 결정·예약 밖으로 새어 나간다. 이 ADR의 실패 문구 서술은 문자열 입력에만 해당한다.
+  문자열이 아닌 경우의 결과(워크플로우 상태, 오류 응답)는 7a가 캡처하고, 해당 조각이 그 결과에 맞추거나 맞출 수 없으면 의도적
+  차이로 적는다.
+
+- **TERMINATE.** 매퍼는 `IN_PROGRESS`, 입력은 `getTaskInputV2`(태스크 정의 없음). 실행은 문자열 `terminationStatus`가 `COMPLETED`·`FAILED`·
   `TERMINATED`면 출력에 `workflowOutput`(맵이면 그대로, 다른 값이면 `{"output": 값}`, 없으면 빈 맵)을 넣고 `COMPLETED`, 아니면
   `"given termination status is not valid"`로 `FAILED`(upstream 반환 `false`, 결정 2)다. 워크플로우 쪽(`end_execution`, 출력 덮어쓰기, 남은 태스크 `CANCELED`,
   실패 워크플로우)은 이미 있는 경로를 쓴다.
@@ -169,7 +175,8 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
 - 평가는 ADR 0015의 `evaluate_script`(QuickJS-ng, 시간 4초, 요청마다 새 realm)를 그대로 쓴다. 새 엔진·새 설정은 없다.
 - **INLINE.** 입력은 `getTaskInputV2`(태스크 정의의 `inputTemplate` 합침). `evaluatorType`(기본 `javascript`)이 `javascript`·`graaljs`면
   `expression`을 `$` = 태스크 입력 전체로 평가하고, `value-param`이면 기존 `Archon.Decider.Evaluator`를 쓴다. 출력 `result`로
-  `COMPLETED`. 오류는 출력 `error`와 `reasonForIncompletion`에 같은 메시지(upstream처럼 원인 예외가 있으면 그 메시지)를 넣고, 상태는
+  `COMPLETED`. 문자열 입력의 오류는(문자열이 아닌 `evaluatorType`·`expression`은 결정 3 머리의 공통 규칙) 출력 `error`와
+  `reasonForIncompletion`에 같은 메시지(upstream처럼 원인 예외가 있으면 그 메시지)를 넣고, 상태는
   upstream `Inline`처럼 예외 종류로 정한다.
 
   | 오류 | upstream 예외 | 상태 |
@@ -206,8 +213,8 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   `queryExpression`이 없으면 `"Missing 'queryExpression' in input parameters"`로 `FAILED`. 성공은 출력 `result`(첫 결과 또는 `null`)와
   `resultList`(전체), `COMPLETED`. 오류는 엔진 메시지를 출력 `error`와 `reasonForIncompletion`에 넣고 `FAILED`다. 일은 예약 때
   (`start`) 한다. upstream `execute`는 `start`를 다시 부르지만, `start`가 늘 종료 상태로 끝나 결정 루프의 미종료 검사에 걸리지 않으므로
-  불리지 않는다. archon은 `execute`를 두지 않는다. `queryExpression`이 문자열이 아니면 upstream은 `try` 밖의 `ClassCastException`으로
-  예약 오류(`"Error scheduling tasks: ..."`, 워크플로우 종료)가 된다. 이 경우는 7a 캡처로 확인해 맞춘다.
+  불리지 않는다. archon은 `execute`를 두지 않는다. `queryExpression`이 문자열이 아니면 결정 3 머리의 공통 규칙을 따른다
+  (upstream은 예약 중 예외라 `"Error scheduling tasks: ..."` 종료로 보인다. 7a 캡처로 확인).
 - **시간 상한.** jackson-jq에는 상한이 없다. archon은 풀의 시간 상한(기본 4초)을 넘으면 `Script not evaluated within <N> seconds,
   interrupted.`와 같은 모양의 jq 문구로 `FAILED`다(의도적 차이).
 - **값 변환.** upstream `JsonJqTransform`처럼 정수인 수는 정수, 아닌 수는 실수다. jq와 jackson-jq의 함수·숫자·오류 문구 차이는
@@ -306,13 +313,14 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   결정 7과 같음). 다른 조각은 스크립트·픽스처·픽스처 등록을 고치지 않는다. 빠진 것은 기록해 두고 7h가 더해 다시 캡처한다.
 - 시나리오는 정의 등록 → 시작 → 끝난 워크플로우 GET의 모양이다. 타입마다 성공 하나와 upstream이 실패·종료로 가는 경우 하나
   이상을 넣는다. 특히:
+  - 문자열이 아닌 입력(결정 3 머리): TERMINATE `terminationStatus`, INLINE `evaluatorType`·`expression`, JSON_JQ_TRANSFORM `queryExpression`
   - TERMINATE의 세 상태와 `workflowOutput`의 맵·맵 아닌 값, 진행 중 형제 태스크의 `CANCELED`, 실패 워크플로우
   - SET_VARIABLE의 덮어쓰기와 크기 초과(`FAILED_WITH_TERMINAL_ERROR`)
   - HUMAN을 `POST /api/tasks`로 끝내기, EXCLUSIVE_JOIN의 `defaultExclusiveJoinTask`와 실패
   - DYNAMIC의 정의 없음, 대상이 시스템 타입인 경우, FORK_JOIN_DYNAMIC의 세 입력 형태, 다음이 JOIN이 아닌 정의, 동적 가지 태스크의
     rerun·retry
   - INLINE의 `javascript`·`value-param`·모르는 평가기·스크립트 오류, LAMBDA
-  - JSON_JQ_TRANSFORM의 여러 결과, `null` 결과, 문법 오류, `queryExpression` 없음과 문자열 아님
+  - JSON_JQ_TRANSFORM의 여러 결과, `null` 결과, 문법 오류, `queryExpression` 없음
   - START_WORKFLOW의 성공(시작된 워크플로우 GET 포함)과 검증 실패
   - HTTP의 2xx JSON·글자·수 body, 표에 없는 2xx 코드, 4xx(짧은 body·긴 body·body 없음), 5xx, `asyncComplete`, `inputParameters`의
     `asyncComplete` 표현식, `uri`·`method` 없음, 연결 거부
