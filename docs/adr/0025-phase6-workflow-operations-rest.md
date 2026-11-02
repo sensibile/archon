@@ -14,6 +14,8 @@
 - 갱신: 2026-11-02 조각 6e. 결정 5 끝 "조각 6e가 정한 것"에 구현에서 정한 세부(모르는 자식, 응답 없음의 문구, 대기의
   30초 상한, 변환 실패 문구, `ArchonWeb.Request` 보충)를 적었다.
 - 갱신: 2026-11-02 조각 6d. 구현하며 정한 것과 결정 3의 기술을 바로잡은 것을 결정 3 끝 "조각 6d에서 정한 것"에 적었다.
+- 갱신: 2026-11-02 조각 6g. 결정 6 bulk 끝 "조각 6g 구현에서 정한 것"에 변환 순서, ID 값 변환, `null` ID, 실패 문구,
+  교차 출처 판단을 적었다.
 
 ## 맥락
 
@@ -374,6 +376,26 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   나옴) `COMPLETED` 워크플로우는 종료 실패로 오류에 들어가면서도 지워진다. 단건 terminate-remove와 다르지만 upstream 응답 그대로다.
   오류 문구가 없는 오류(`null` 메시지)는 upstream처럼 값이 `null`인 항목이다. Elixir 용어를 내보내지 않는 규칙(ADR 0023 결정 4)은
   여기도 같다.
+  - 조각 6g 구현에서 정한 것(upstream 서버에서 확인):
+    - 변환 순서는 Spring 그대로 body, 쿼리 값, 서비스의 메서드 검증이다. 빈 body와 `[]`에 잘못된 `useLatestDefinitions`가 오면
+      각각 body 없음 500과 쿼리 변환 500이고, 검증 400은 둘 다 통과한 뒤다. body 없음 문구의 핸들러 서명과 검증 경로
+      (`pauseWorkflow.arg0`, `deleteWorkflow.arg0`, `terminateRemove.arg0` 등)는 액션마다 upstream 메서드 이름이다.
+    - ID의 정수·불리언은 그 글자로 바뀐다(`[1, true]`는 ID `"1"`, `"true"`). 소수는 upstream이 적힌 글자 그대로(`1e3`, `1.50`)
+      쓰지만 archon은 부동소수 글자(`"1000.0"`, `"1.5"`)다. 공용 코덱의 기존 동작이고 그런 ID는 어차피 없다.
+      객체·배열 원소는 `"JSON parse error: ..."` 500이다.
+    - `null` ID는 upstream에서 없는 ID처럼 실패하고, 그 `null` 키를 Jackson이 쓰지 못해 응답이 500 `"Could not write JSON:
+      Null key for a Map not allowed in JSON (use a converting NullKeySerializer?)"`이다. 다른 ID의 작업은 이미 끝난 뒤다.
+      archon도 다른 ID를 모두 처리한 뒤 같은 500을 준다.
+    - 실패 문구는 같은 ID의 단건 REST 액션이 줄 문구다(없는 ID는 `"No such workflow found by id: <id>"`, 결정 3의 전달 대기
+      초과는 `"Temporary server error, retry the request"`). 단건 함수가 예외를 던지거나 끝나도 그 ID만 실패하고 다음 ID로
+      간다(upstream의 `catch (Exception e)`). 그래서 upstream `null` 메시지 항목은 archon에 생기지 않는다.
+    - 결정 3 끝의 교차 출처 거절은 bulk에 더하지 않는다. 일곱 액션 모두 아무것도 하기 전에 body를 읽으므로, 브라우저가
+      preflight 없이 보낼 수 있는 요청(폼, `no-cors` `fetch`)은 JSON `Content-Type` 검사(ADR 0023 결정 3)나 body 없음에서
+      500으로 끝난다. `PUT`·`DELETE`는 언제나 preflight가 필요하다.
+    - 결정 3의 전달 대기 초과로 실패한 ID가 같은 요청에 다시 나오면, 그 지우기는 다시 기다리지 않고 같은 실패로 넣는다.
+      한 워크플로우의 ID를 1000번 보내 요청 하나를 약 2.8시간 붙잡는 것을 막는다. 대기 비용은 서로 다른 ID 수에만 비례한다.
+      같은 요청 안에서는 그 사이 outbox가 비워졌어도 다시 시도하지 않는다(재시도할 수 있는 500 그대로라 다음 요청이 지운다).
+      한도를 넘는 ID 목록은 변환하지 않고 크기만 센다(Jackson이 멈출 첫 변환 실패는 그대로 찾는다).
 
 ### 7. 골든 픽스처와 재생(BOSS 결정: 6a가 한 번에 캡처)
 
