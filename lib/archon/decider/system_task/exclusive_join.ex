@@ -23,12 +23,14 @@ defmodule Archon.Decider.SystemTask.ExclusiveJoin do
   same way, a failure there failing the join with that task's reason and a space. A terminal
   task that did not fail completes the join with its output; otherwise the join waits (`false`).
 
-  Upstream reads every joined task without checking that it exists when a permissive task
-  failed, and throws a `NullPointerException` when one never ran (the captured
-  `p7_exclusive_join_failed_*`: a 500 to the task update and a workflow left `RUNNING`). Here a
-  reference without a task is not terminal, as upstream's `Join` treats it, so such a failure
-  completes the join with the failed task's output and the workflow then fails for its
-  permissive task (deliberate difference).
+  When a joined task failed, upstream reads every joined task without checking that it exists
+  (for the permissive check and for the failure reasons), and throws a `NullPointerException`
+  when one never ran (the captured `p7_exclusive_join_failed_*`: a 500 to the task update and a
+  workflow left `RUNNING`). Here a reference without a task is not terminal and gives no reason,
+  as upstream's `Join` treats it: a permissive failure completes the join with the failed task's
+  output and the workflow then fails for its permissive task, and any other failure fails the
+  join with the existing tasks' reasons (deliberate difference; the decide usually ends the
+  workflow on such a failure before the join runs).
   """
 
   @behaviour Archon.Decider.SystemTask

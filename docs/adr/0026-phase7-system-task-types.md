@@ -177,8 +177,9 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     NOOP는 입력이 없고, SET_VARIABLE은 매퍼 문맥의 태스크 입력(태스크 ID 없이 푼 것), TERMINATE·HUMAN은 태스크 ID로 푼
     `getTaskInputV2`(태스크 정의 없음)다. EXCLUSIVE_JOIN 입력의 `defaultExclusiveJoinTask`는 정의 값이 `nil`이 아니면 넣는다(정의의
     기본값은 빈 목록이라 늘 들어간다).
-  - TERMINATE의 문자열이 아닌 `terminationStatus`는 정의 검사가 막으므로(7a 캡처의 400) 실행에서는 그냥 올바르지 않은 상태로
-    본다(`FAILED`, `changed?` 거짓). 결정 2의 `changed?` 거짓 경우는 Step 시험으로 정했다. 시작 결정에서 `FAILED`가 된 TERMINATE
+  - TERMINATE의 문자열이 아닌 `terminationStatus`는 정의 검사가 막는다(7a 캡처의 400). 검사를 거치지 않는 태스크(실행 데이터로
+    만드는 FORK_JOIN_DYNAMIC 가지 등)에는 남을 수 있는데, upstream은 그때 `ClassCastException`이 결정 밖으로 새고 archon은 그냥
+    올바르지 않은 상태로 본다(`FAILED`, `changed?` 거짓. 의도적 차이, 7h가 목록에 옮긴다). 결정 2의 `changed?` 거짓 경우는 Step 시험으로 정했다. 시작 결정에서 `FAILED`가 된 TERMINATE
     태스크는 같은 결정 루프의 다음 반복(동기 태스크 시작으로 다시 돎)에서 Decider가 실패로 처리해 워크플로우가 `FAILED`로 끝나고,
     그 태스크는 이유와 함께 저장된다.
   - SET_VARIABLE 크기는 Jackson이 쓰는 바이트 수를 직렬화 없이 센다(`SystemTask.SetVariable.json_size/1`: UTF-8, `"`·`\`·제어
@@ -192,10 +193,11 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     첫 `Decide.decide` 동안만 켜고, 그동안 `Schedule.apply_result/2`가 돌려받은 `variables`를 정의에도 넣는다.
   - HUMAN에는 `start`(`IN_PROGRESS`)와 아무것도 바꾸지 않는 `execute`가 있다. 큐에 넣지 않으며 취소는 기존
     `cancel_non_terminal`의 `CANCELED`다.
-  - **EXCLUSIVE_JOIN permissive 실패(의도적 차이).** upstream은 permissive 태스크가 실패하면 `joinOn`의 모든 ref를 null 확인 없이
-    읽어, 실행되지 않은 ref가 있으면(SWITCH의 다른 가지) `NullPointerException`이 결정 밖으로 샌다. 캡처는 `POST /api/tasks` 500,
+  - **EXCLUSIVE_JOIN permissive 실패(의도적 차이).** upstream은 join 대상이 실패하면(permissive 판정과 실패 이유 모으기에서)
+    `joinOn`의 모든 ref를 null 확인 없이 읽어, 실행되지 않은 ref가 있으면(SWITCH의 다른 가지) `NullPointerException`이 결정 밖으로
+    샌다. permissive가 아닌 실패는 보통 그 전에 결정이 워크플로우를 끝내므로, 닿는 경우는 permissive 실패다. 캡처는 `POST /api/tasks` 500,
     태스크 `FAILED` 저장, 워크플로우 `RUNNING`(EXCLUSIVE_JOIN `IN_PROGRESS`)이고 이후 결정도 매번 같은 예외라 워크플로우가 멈춘다.
-    archon은 이를 재현하지 않고, upstream `Join`이 고친 방식처럼 없는 ref를 비종료로 보고 실패 이유에서 뺀다. 그래서 그 경우
+    archon은 이를 재현하지 않고, upstream `Join`이 고친 방식처럼 없는 ref를 비종료로 보고 실패 이유에서 뺀다(두 자리 모두). 그래서 그 경우
     EXCLUSIVE_JOIN은 실패한 태스크의 출력으로 `COMPLETED`이고, 워크플로우는 끝날 때 permissive 실패로 `FAILED`가 된다
     (`Task <id> failed with status: FAILED and reason: 'null'`). 예외가 나지 않는 경우(모든 ref가 있음)는 upstream과 같다. 재생은
     단계 옵션 `expect: {:archon, status, conditions}`(이 조각이 더함)로 이 두 단계(`p7_exclusive_join_failed_update`,

@@ -356,6 +356,10 @@ defmodule Archon.Decider.SyncSystemTasksTest do
 
       assert %{task: %{reason_for_incompletion: "first null"}} =
                xjoin([hd(tasks), joined("b", :canceled)], @input)
+
+      # Upstream throws here: "b" never ran. Its reason is left out.
+      assert %{task: %{status: :failed, reason_for_incompletion: "first"}} =
+               xjoin([hd(tasks)], @input)
     end
 
     # Upstream throws a NullPointerException when a joined reference never ran (ADR 0026,

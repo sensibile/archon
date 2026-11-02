@@ -17,8 +17,10 @@ defmodule Archon.Decider.SystemTask.Terminate do
 
   Ending the workflow is the decide's (`Archon.Decider.Retry.successful_terminate?/1`,
   `Archon.Runtime.Step.Decide`). Upstream casts `terminationStatus` to a string outside any
-  `try`; the definition check already rejects one that is not a string (the captured 400s), so
-  here such a value is just not valid.
+  `try`, so one that is not a string throws a `ClassCastException` out of the decide. The
+  definition check rejects such a value (the captured 400s), but a task that is never checked
+  (a dynamic fork's task, built from runtime data) can still carry one; here it is just not
+  valid (deliberate difference).
   """
 
   @behaviour Archon.Decider.SystemTask
