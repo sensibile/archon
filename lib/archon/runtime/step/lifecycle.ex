@@ -622,15 +622,13 @@ defmodule Archon.Runtime.Step.Lifecycle do
     task = if request.task_input, do: %{task | input_data: request.task_input}, else: task
     state = State.save_task(state, task)
 
-    # addTaskToQueue for a worker task; an asynchronous system task is evaluated when due. A
-    # synchronous one is started in place, which for the MVP types (SWITCH, DECISION, FORK,
-    # DO_WHILE) changes nothing, as upstream's start does.
+    # addTaskToQueue; an asynchronous system task is evaluated when due. A synchronous one is
+    # started in place, which for the MVP types (SWITCH, DECISION, FORK, DO_WHILE) changes
+    # nothing, and is then pushed as upstream does with a SCHEDULED task (the decide loop runs it).
     state =
-      cond do
-        not Schedule.system_task?(env, task) -> Schedule.push(state, task)
-        Schedule.async?(task) -> State.due(state, [task.task_id])
-        true -> state
-      end
+      if Schedule.system_task?(env, task) and Schedule.async?(task),
+        do: State.due(state, [task.task_id]),
+        else: Schedule.push(state, task)
 
     finalize_rerun(state, task)
   end
@@ -695,7 +693,9 @@ defmodule Archon.Runtime.Step.Lifecycle do
           task_id: String.t(),
           workflow_input: map() | nil,
           correlation_id: String.t() | nil,
-          last_retried_time: integer()
+          last_retried_time: integer(),
+          task_update_time: integer(),
+          task_retried: boolean()
         }
 
   @doc """
@@ -708,27 +708,46 @@ defmodule Archon.Runtime.Step.Lifecycle do
   Upstream saves the workflow it read before the rerun went down, so a revival from below that
   stamped `lastRetriedTime` meanwhile is written over: the workflow keeps the
   `last_retried_time` read then.
+
+  The message comes once the outbox below is empty, which is later than upstream's write. A task
+  that moved on since it was read (`task_update_time`, `task_retried`) is left as it is, and so
+  is the workflow: the child already completed again and told it (so the workflow may have
+  completed too), or the task was retried meanwhile. The rerun below stands either way.
   """
   @spec rerun_parent(State.t(), rerun_parent()) :: {reply(), State.t()}
   def rerun_parent(%State{now: now} = state, %{task_id: task_id} = request) do
     case State.task(state, task_id) do
       %Task{task_type: "SUB_WORKFLOW"} = task ->
-        state = rerun_workflow(state, request)
-        state = put_last_retried_time(state, request.last_retried_time)
-
-        task = %{
-          reset(task, now)
-          | output_data: task.output_data,
-            start_time: now,
-            status: :in_progress,
-            reason_for_incompletion: nil
-        }
-
-        {:ok, state |> State.save_task(task) |> push_parents(true) |> Decide.settle()}
+        if moved_on?(task, request),
+          do: {:ok, state},
+          else: rerun_parent_task(state, task, request, now)
 
       _gone ->
         {{:error, {:invalid, "Task #{task_id} not found"}}, state}
     end
+  end
+
+  # A child that failed again is no reason: upstream's case 3 writes over that end too, and the
+  # task reads the child again on its next evaluation.
+  defp moved_on?(%Task{} = task, request) do
+    (task.retried and not request.task_retried) or
+      (Task.terminal?(task.status) and Task.successful?(task.status) and
+         task.update_time != request.task_update_time)
+  end
+
+  defp rerun_parent_task(state, %Task{} = task, request, now) do
+    state = rerun_workflow(state, request)
+    state = put_last_retried_time(state, request.last_retried_time)
+
+    task = %{
+      reset(task, now)
+      | output_data: task.output_data,
+        start_time: now,
+        status: :in_progress,
+        reason_for_incompletion: nil
+    }
+
+    {:ok, state |> State.save_task(task) |> push_parents(true) |> Decide.settle()}
   end
 
   defp put_last_retried_time(%State{wf: wf} = state, time),

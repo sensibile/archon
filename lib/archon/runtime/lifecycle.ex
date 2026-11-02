@@ -206,7 +206,7 @@ defmodule Archon.Runtime.Lifecycle do
       {:ok, [{wf, nil}]}
     else
       tasks
-      |> Enum.filter(&(String.upcase(&1.task_type || "") == "SUB_WORKFLOW"))
+      |> Enum.filter(&(&1.task_type == "SUB_WORKFLOW"))
       |> Enum.reduce_while(:none, &find_below(wf, &1, task_id, seen, &2))
     end
   end
@@ -249,32 +249,46 @@ defmodule Archon.Runtime.Lifecycle do
       correlation_id: correlation_id.(target)
     }
 
-    with :ok <- WorkflowServer.rerun(target, rerun) do
+    with :ok <- not_found_as(WorkflowServer.rerun(target, rerun), target) do
       above
       |> Enum.zip([target | Enum.map(above, &elem(&1, 0).workflow_id)])
       |> Enum.reduce_while(:ok, &rerun_above(&1, &2, input, correlation_id))
     end
   end
 
-  defp rerun_above(
-         {{%Workflow{workflow_id: id} = wf, task_id}, below},
-         :ok,
-         input,
-         correlation_id
-       ) do
+  defp rerun_above({{%Workflow{} = wf, task_id}, below}, :ok, input, correlation_id) do
     await_outbox(below)
+    id = wf.workflow_id
+    task = Enum.find(wf.tasks, &(&1.task_id == task_id))
 
     request = %{
       task_id: task_id,
       workflow_input: input.(id),
       correlation_id: correlation_id.(id),
-      last_retried_time: wf.last_retried_time
+      last_retried_time: wf.last_retried_time,
+      task_update_time: task.update_time,
+      task_retried: task.retried
     }
 
-    case WorkflowServer.rerun_parent(id, request) do
+    case not_found_as(WorkflowServer.rerun_parent(id, request), id) do
       :ok -> {:cont, :ok}
       error -> {:halt, error}
     end
+  end
+
+  # A workflow removed since it was read is named, not the one in the path.
+  defp not_found_as({:error, :not_found}, id),
+    do: {:error, {:not_found, "No such workflow found by id: #{id}"}}
+
+  defp not_found_as(result, _id), do: result
+
+  # A store that cannot tell does not hold the rerun up: it goes on, as past the deadline.
+  defp outbox_empty?(id) do
+    Runtime.store().pending_outbox(id) == []
+  rescue
+    exception ->
+      Logger.warning("rerun goes on above #{id}: #{Exception.message(exception)}")
+      true
   end
 
   # Upstream reruns the workflows below synchronously, their notices and revivals of the parent
@@ -288,7 +302,7 @@ defmodule Archon.Runtime.Lifecycle do
 
   defp await_outbox(id, deadline) do
     cond do
-      Runtime.store().pending_outbox(id) == [] ->
+      outbox_empty?(id) ->
         :ok
 
       System.monotonic_time(:millisecond) >= deadline ->

@@ -167,10 +167,17 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
       태스크 ID와 재시도 횟수가 같아 결정적 자식 ID가 끝난 이전 자식과 같으면, 기존 경로(`SubWorkflow.started`)가 새 ID로 다시
       시작한다(캡처의 새 자식 ID도 무작위 UUID다).
     - **경우 1의 동기 시스템 태스크.** MVP 동기 시스템 태스크(`SWITCH`·`DECISION`·`FORK`·`DO_WHILE`)는 upstream `start`가 아무것도
-      하지 않으므로 `SCHEDULED`로 두고 큐에 넣지 않는다(upstream과 같음).
+      하지 않으므로 `SCHEDULED`로 두고, upstream처럼 그 타입의 큐에 넣는다(`addTaskToQueue`). 진행은 결정 루프가 한다.
+    - **늦게 닿는 경우 3.** 경우 3은 아래 outbox를 기다린 뒤라 upstream보다 늦게 쓴다. 그 사이 자식이 다시 완료해 SUB_WORKFLOW
+      태스크가 바뀌었으면(읽을 때와 `updateTime`이 다른 성공한 태스크, 또는 그 사이 재시도된 태스크) 경우 3은 워크플로우와 태스크를
+      그대로 둔다. 자식이 바로 완료해 부모까지 끝났는데 경우 3이 다시 `RUNNING`으로 돌리는 일을 막는다. 자식이 다시 실패한
+      경우는 upstream처럼 경우 3이 덮어쓴다(재시도된 자식 사례). 아래의 rerun은 그대로다.
+      rerun 도중 위 워크플로우가 지워졌으면 그 ID로 404다.
     - **부모가 취소한 자식의 알림.** 끝나는 부모가 SUB_WORKFLOW 태스크를 `CANCELED`로 하고 자식을 끝내면, 자식의 종료 알림이 그
       태스크에 사유를 쓰지 않는다(`Step.SubWorkflow.child_changed`). upstream `cancelNonTerminalTasks`는 자식 종료가 태스크를 갱신한
       뒤 자기가 든 `CANCELED` 태스크를 다시 저장한다(`workflow_get_rerun_mid`). Phase 4의 모든 "부모가 자식을 취소" 경로에 적용된다.
+      사용자가 자식을 직접 끝내는 것과 부모 종료가 겹쳐 부모의 취소가 먼저 커밋되면 자식의 사유가 남지 않는다(upstream은 자식
+      갱신이 먼저면 남는다). 드문 경합의 사유 문구 차이로 받아들인다.
     - **읽기 검증의 404.** 내려가다 만난 자식이 저장소에 없거나 그 태스크의 자식이 아니면(ADR 0024 결정 2) 404
       `"No such workflow found by id: <자식 ID>"`다. ID가 없으면 `null`이다(upstream `getWorkflowModel(null)`).
     - **교차 출처.** rerun은 필수 JSON body를 읽으므로 결정 3의 `refuse_cross_origin`에 넣지 않는다. 폼·`text/plain`은 Content-Type

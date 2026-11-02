@@ -149,6 +149,8 @@ defmodule Archon.Runtime.RerunTest do
                workflow(parent)
 
       assert Task.sub_workflow_id(st) == child
+      # only case 3 writes this: the revival from below stamped it, case 3 keeps the value read
+      assert workflow(parent).last_retried_time == 0
       assert %Workflow{status: :running, tasks: [%Task{status: :scheduled} = t]} = workflow(child)
       assert t.task_id == t1.task_id and t.input_data == %{"c" => 1}
 
@@ -163,6 +165,45 @@ defmodule Archon.Runtime.RerunTest do
       assert eventually(fn -> Runtime.store().pending_outbox(parent) == [] end)
     end
 
+    test "a child that ends while the rerun waits for its outbox keeps its parent's end" do
+      {parent, child, t1} = failed_pair()
+      test = self()
+      held = :counters.new(1, [:atomics])
+
+      RuntimeHooks.install(
+        hook: fn
+          :outbox, ^child, {_entry, effect} ->
+            if :counters.get(held, 1) == 0 do
+              :counters.add(held, 1, 1)
+              send(test, {:held, self(), effect})
+
+              receive do
+                :release -> :ok
+              after
+                5_000 -> :ok
+              end
+            end
+
+          _point, _id, _data ->
+            :ok
+        end
+      )
+
+      rerun = Elixir.Task.async(fn -> rerun(parent, re_run_from_task_id: t1.task_id) end)
+      assert_receive {:held, runner, {:revive_parent, ^parent, _task}}, 2_000
+
+      # the worker finishes the task while the rerun waits on the child's outbox
+      finish(child, :completed)
+      send(runner, :release)
+
+      assert Elixir.Task.await(rerun, 5_000) == :ok
+      parent_wf = await_status(parent, :completed)
+      assert [%Task{status: :completed}] = parent_wf.tasks
+      Process.sleep(200)
+      assert workflow(parent).status == :completed
+      assert workflow(parent).end_count == parent_wf.end_count
+    end
+
     test "the input and correlation ID go to the top workflow only" do
       {parent, child, t1} = failed_pair()
       child_input = workflow(child).input
@@ -175,6 +216,28 @@ defmodule Archon.Runtime.RerunTest do
 
       assert %Workflow{input: %{"p" => 1}, correlation_id: "rerun-top"} = workflow(parent)
       assert %Workflow{input: ^child_input, correlation_id: nil} = workflow(child)
+    end
+  end
+
+  describe "a child's notice to a canceled task" do
+    test "a parent that ended and canceled the task keeps it without the child's reason" do
+      parent = start("rerun_parent")
+      child = child_of(parent)
+
+      assert Runtime.terminate_workflow(parent, "stop") == :ok
+      assert await_status(child, :terminated)
+      assert eventually(fn -> Runtime.store().pending_outbox(child) == [] end)
+      assert %Task{status: :canceled, reason_for_incompletion: nil} = task(parent, "st")
+    end
+
+    test "a child terminated on its own still cancels its task with the reason" do
+      parent = start("rerun_parent")
+      child = child_of(parent)
+
+      assert Runtime.terminate_workflow(child, "stop") == :ok
+      assert await_status(parent, :terminated)
+      assert %Task{status: :canceled, reason_for_incompletion: reason} = task(parent, "st")
+      assert reason =~ "Sub workflow rerun_child.1/#{child} failure reason: stop"
     end
   end
 
