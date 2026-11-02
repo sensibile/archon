@@ -5,6 +5,7 @@
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 2026-11-01 [ADR 0025](0025-phase6-workflow-operations-rest.md)가 Phase 6에서 열 Later 경로 33개의 비고에 "Phase 6"을 적었다.
   2026-11-02 조각 6h가 구현을 마친 그 33개의 분류를 Later에서 "Phase 6"으로 바꿨다(MVP처럼 구현됨, 결과 절).
+- 비고: 2026-11-02 [ADR 0026](0026-phase7-system-task-types.md)(Phase 7, 시스템 태스크 타입)은 새 경로를 열지 않아 이 분류를 바꾸지 않는다.
 
 ## 맥락
 

@@ -30,6 +30,7 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
    | Phase 4 | 영속성과 큐: PostgreSQL 우선 | [ADR 0021](0021-phase4-postgres-persistence.md) |
    | Phase 5 | Phoenix REST: MVP 엔드포인트부터 | [ADR 0023](0023-phase5-rest.md), [ADR 0024](0024-worker-input-trust-and-auth.md) |
    | Phase 6 | 워크플로우 운영 REST: 생명주기, 정리, 조회, signal, 동기 실행, metadata 목록·삭제, bulk | [ADR 0025](0025-phase6-workflow-operations-rest.md) |
+   | Phase 7 | MVP 밖 시스템 태스크 타입: TERMINATE, SET_VARIABLE, NOOP, HUMAN, EXCLUSIVE_JOIN, DYNAMIC, FORK_JOIN_DYNAMIC, START_WORKFLOW, INLINE, LAMBDA, JSON_JQ_TRANSFORM, HTTP | [ADR 0026](0026-phase7-system-task-types.md) |
 
 4. **MVP 태스크 타입은 SIMPLE, SWITCH, FORK_JOIN, JOIN, DO_WHILE, SUB_WORKFLOW, WAIT로 제한한다.**
    AI, HTTP, JQ, Event 같은 나머지 타입은 그 뒤에 붙인다.
