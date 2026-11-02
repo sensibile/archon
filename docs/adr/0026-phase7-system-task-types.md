@@ -208,8 +208,8 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   가리키는 것과 같다). `Archon.Decider.decide/2`는 예약할 태스크 가운데 그런 타입의 `workflow_task`가 정의의 같은 ref 태스크와
   다르면 정의에 써 넣고(`WorkflowDef.replace_task/2`, 중첩 포함) `Outcome.changed_workflow_tasks`에 담는다. `Step.Decide`는 그 결정에서
   바로 워크플로우를 저장한다. 7c·7g는 매퍼에서 콜백과 `workflow_task`만 채운다. 판정은 예약할 태스크 전체(재시도 사본 포함)를
-  보므로, 매퍼는 재시도 사본의 `workflow_task`가 정의와 달라지지 않게 한다(DO_WHILE 반복 안의 DYNAMIC은 upstream에서 정의가
-  아니라 사본을 바꾼다. 7c가 확인한다).
+  보는데 재시도 사본은 매퍼가 아니라 `Decider.Retry`가 만든다. 사본의 `workflow_task`가 정의와 다를 수 있는 경우(DO_WHILE 반복
+  안의 DYNAMIC은 upstream에서 정의가 아니라 사본을 바꾼다)는 7c가 확인하고, 필요하면 판정을 매퍼가 방금 만든 태스크로 좁힌다.
   캡처는 정의 없는 이름도 보여 준다. upstream은 시작 때 정의가 없는 모든 태스크에 기본 태스크 정의(이름은 정의의 태스크 이름
   `archon_p7_dynamic`)를 채우므로(`MetadataMapperService`), DYNAMIC 매퍼는 늘 그 정의를 쓰고 `"Invalid task specified ..."`로
   끝나지 않는다. 정의 없는 이름(`archon_p7_missing`)의 태스크가 그 타입으로 `SCHEDULED`에 남는다(`p7_dynamic_missing_get`).

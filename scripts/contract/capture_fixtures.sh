@@ -35,12 +35,12 @@ if [[ -z "${HTTP_STUB:-}" ]]; then
   stub_pid=$!
   trap 'kill "$stub_pid" 2>/dev/null; rm -rf "$tmp"' EXIT
   HTTP_STUB=http://127.0.0.1:18299
-  for _ in $(seq 1 120); do
-    curl -sf "$HTTP_STUB/json" >/dev/null && break
-    sleep 0.5
-  done
-  curl -sf "$HTTP_STUB/json" >/dev/null || { echo "the HTTP stub did not start" >&2; exit 1; }
 fi
+for _ in $(seq 1 120); do
+  curl -sf "$HTTP_STUB/json" >/dev/null && break
+  sleep 0.5
+done
+curl -sf "$HTTP_STUB/json" >/dev/null || { echo "the HTTP stub does not answer at $HTTP_STUB" >&2; exit 1; }
 
 # call NAME METHOD PATH [BODY]
 # Writes $OUT/NAME.json and leaves the response body in $tmp/body, status in $tmp/status.
