@@ -17,9 +17,10 @@ defmodule ArchonWeb.WorkflowBulkController do
   workflow functions of `Archon.Runtime` and `Archon.Runtime.Lifecycle`.
 
   The body is a list of workflow IDs (a value that is not an array is a list of one, an integer
-  or boolean is its text as Jackson converts them, a decimal the text of its float). Spring converts the body first, then the query
-  values, and only then does the service's method validation check the list: an empty list and
-  a list of more than 1000 IDs are a 400 `validationErrors` on `<method>.arg0`.
+  or boolean is its text as Jackson converts them, a decimal the text of its float). Spring
+  converts the body first, then the query values, and only then does the service's method
+  validation check the list: an empty list and a list of more than 1000 IDs are a 400
+  `validationErrors` on `<method>.arg0`.
 
   Each ID is handled in turn by the single function, as `WorkflowBulkServiceImpl` does, and the
   answer is a `BulkResponse`: the IDs that succeeded in request order, and for each ID that
