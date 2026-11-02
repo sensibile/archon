@@ -238,6 +238,34 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   예외를 `FAILED`로 두므로(`reasonForIncompletion`은 예외 메시지, 출력 `error`는 원인 메시지) 그대로 따른다.
 - 결과 값 변환(정수·실수·비유한 수)은 ADR 0015 결정 4를 따른다. 정답 기준도 ADR 0015 결정 7의 GraalJS 오라클이다.
 
+- **조각 7d에서 정한 것과 확인한 것(2026-11-03).** 기준 SHA upstream 서버에 INLINE·LAMBDA 경계 사례 38개를 돌려 확인했다.
+  - **문자열이 아닌 `evaluatorType`·`expression`(의도적 차이).** upstream은 `try` 밖 캐스트의 `ClassCastException`이 결정 밖으로
+    새어, 시작 요청이면 워크플로우를 지우고(`startWorkflow`의 `removeWorkflow`) 500을 답한다(`p7_inline_*_not_string_start`).
+    archon은 태스크를 `FAILED`로 끝내고 `reasonForIncompletion`과 출력 `error`에 upstream 예외 문구(``class <클래스> cannot be cast
+    to class java.lang.String (...)``)를 넣는다. 시작은 200이고 워크플로우는 `FAILED`다. 결정에서 예외를 던지면 워크플로우 프로세스가
+    죽고 복구가 같은 결정을 되풀이하므로, 매퍼·태스크가 던지는 대신 태스크를 실패시키는 기존 방식(ADR 0014, WAIT의 `duration`)을
+    따른다. 상태는 upstream `Inline`의 `catch` 규칙(`TerminateWorkflowException`이 아니면 `FAILED`)을 따랐고, 같은 캐스트를 `try`
+    안에서 하는 LAMBDA의 upstream 결과(`FAILED`, 같은 문구)와 같다. `<클래스>`는 Jackson이 준 값의 클래스로 서버에서 확인했다
+    (`Integer`, `Long`, `BigInteger`, `Double`, `Boolean`, `java.util.LinkedHashMap`, `java.util.ArrayList`). `evaluatorType`을 먼저 보고,
+    기본값 `javascript`는 `null`일 때만이다(`false`도 캐스트 오류).
+    재생은 이 두 단계에 단계 옵션 `expect: :started`(Archon이 시작해 ID를 답함, 바인딩 없음)를 쓴다. 7h가 "upstream과 의도적으로
+    다른 점"에 옮긴다.
+  - **평가 오류의 상태.** `Archon.Script.Error`의 `:syntax`·`:runtime`(upstream `handlePolyglotException`의
+    `TerminateWorkflowException`)은 `FAILED_WITH_TERMINAL_ERROR`, 나머지 `:timeout`·`:conversion`·`:limit`·`:crashed`·`:request`는
+    `FAILED`다. `:conversion`은 upstream `getObject`가 `Future` 밖에서 던지는 `PolyglotException`이라 감싸이지 않으므로 `FAILED`가 맞다.
+    LAMBDA는 모두 `FAILED`.
+  - **`python`.** upstream 서버에는 `python` 평가기가 등록되어 있어 `expression: "1"`이 `result: null`로 `COMPLETED`였다. archon은
+    `Unknown evaluator 'python' in INLINE task.`로 `FAILED_WITH_TERMINAL_ERROR`다(결정 1·ADR 0015 결정 5의 범위 밖).
+  - **빈 값.** `evaluatorType`이 없거나 `null`이면 `javascript`, 빈 문자열·공백이면 빈 값 오류(Java `isBlank`, 줄바꿈 없는 공백은
+    빈 값이 아님). 모르는 평가기는 빈 `expression`보다 먼저 본다(서버 확인). LAMBDA의 빈 식은 출력 `error` 없이 `FAILED`다.
+  - **매퍼.** 태스크 정의가 없으면 입력 계산에 호출자가 채운 `task_defs`(`UserDefined`와 같음), 그다음 `task_def_lookup`을 쓴다
+    (upstream `metadataDAO.getTaskDef`). 격리 그룹은 INLINE만,
+    `TaskMapperContext`의 정의에서만 읽는다. 등록된 평가기 목록은 `Archon.Decider.Evaluator.registered?/1`이 답한다.
+  - **엔진 문구.** 스크립트 오류 본문은 ADR 0015의 의도적 차이 그대로다(`Cannot read property` 대 `cannot read property`). 재생은
+    `p7_inline_script_error_get`·`p7_lambda_error_get`의 메시지 네 곳을 `ignore`하고, StepReplay 시험은 그 대소문자만 바꿔 비교한다.
+  - **오라클.** INLINE 식과 LAMBDA로 감싼 식 43개를 GraalJS 25.0.2 프로브와 `archon_js`에 돌려 35개가 같았다. 다른 8개는 모두
+    ADR 0015에 적은 차이(오류 본문 문구, `throw 'x'`·`new Error`의 줄 번호)이고 상태 분류는 같다.
+
 ### 6. JSON_JQ_TRANSFORM과 jq 엔진(조각 7e, BOSS 결정: jqlang vendoring)
 
 - **엔진.** [jqlang/jq](https://github.com/jqlang/jq)(MIT) 안정 릴리스의 소스와 정규식 라이브러리 oniguruma(BSD-2)를 `c_src/jq/`에

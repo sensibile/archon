@@ -256,8 +256,8 @@ defmodule Archon.Runtime.StepTest do
                 "Parent workflow has been terminated with reason: stop"}
              ]
 
+      # LAMBDA is a synchronous system task, which has no queue in Archon (ADR 0026, decision 5).
       assert [
-               {:queue_remove, "LAMBDA", "lambda"},
                {:queue_remove, "SIMPLE", "simple"},
                {:notify_parent, "parent", "ptask", ^stored}
              ] = post

@@ -20,7 +20,7 @@ defmodule Archon.Decider.SystemTasksTest do
       registry = SystemTasks.default()
 
       assert Enum.sort(Map.keys(registry)) ==
-               ~w(DECISION DO_WHILE FORK JOIN START_WORKFLOW SUB_WORKFLOW SWITCH WAIT)
+               ~w(DECISION DO_WHILE FORK INLINE JOIN LAMBDA START_WORKFLOW SUB_WORKFLOW SWITCH WAIT)
 
       # FORK_JOIN is the workflow task's type; its task's is FORK.
       refute SystemTasks.system_task?(registry, "FORK_JOIN")
