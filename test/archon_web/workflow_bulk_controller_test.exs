@@ -230,7 +230,7 @@ defmodule ArchonWeb.WorkflowBulkControllerTest do
   test "a removal that waits too long for one workflow's outbox fails that ID only" do
     saved = Application.get_env(:archon, Archon.Runtime)
     on_exit(fn -> Application.put_env(:archon, Archon.Runtime, saved) end)
-    Application.put_env(:archon, Archon.Runtime, Keyword.put(saved, :remove_timeout, 200))
+    Application.put_env(:archon, Archon.Runtime, Keyword.put(saved, :remove_timeout, 300))
 
     pending = start()
     other = start()
@@ -246,7 +246,7 @@ defmodule ArchonWeb.WorkflowBulkControllerTest do
     conn = bulk(:delete, "remove?archiveWorkflow=false", Jason.encode!(list))
 
     # the repeated pending ID did not wait again
-    assert System.monotonic_time(:millisecond) - started < 500
+    assert System.monotonic_time(:millisecond) - started < 550
 
     assert json_response(conn, 200) == %{
              "bulkSuccessfulResults" => [other],
