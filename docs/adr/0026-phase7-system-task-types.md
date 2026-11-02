@@ -36,7 +36,7 @@ upstream에서 각 타입이 사는 곳과 실행 방식은 다음과 같다(`co
 | JSON_JQ_TRANSFORM | `JsonJQTransformTaskMapper` 77 + `JsonJqTransform` 160 | 동기 | `IN_PROGRESS` | `start`(예약 때) |
 | HTTP | `HTTPTaskMapper` 99 + `HttpTask` 424 | 비동기 | `SCHEDULED` | `start`(나가는 요청) |
 
-archon에 이미 있는 것(`e2f73b7` 기준, Phase 6 조각 6f 머지 뒤):
+archon에 이미 있는 것(`5c2355f` 기준, Phase 6 조각 6h 머지 뒤):
 
 - `Archon.Decider.SystemTasks`(등록부, `isAsyncComplete` 규칙), `Archon.Decider.SystemTask.execute/3`(동기 실행),
   `Archon.Runtime.Step.Decide.execute_sync`(결정 루프의 동기 실행 반복), `Archon.Runtime.Step.Async`(비동기 태스크 평가).
@@ -236,7 +236,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
 - **시작(7f).** `Step.Async`가 `SCHEDULED` 비동기 태스크를 시작할 때 upstream `AsyncSystemTaskExecutor`처럼 `pollCount`를 올리고
   `startTime`을 찍어 커밋한 뒤 일을 효과로 넘긴다.
 - **시작이 멱등인 타입과 아닌 타입.** upstream은 `start`가 멱등인 SUB_WORKFLOW만 재전달 때 다시 실행하고, 나머지는 메시지를
-  `responseTimeoutSeconds`(정의가 없으면 1시간) 동안 예약해 두 번 실행하지 않는다(`isStartIdempotent`, `reserveSeconds`). 예약이 끝난
+  태스크의 `responseTimeoutSeconds`(0이면 1시간) 동안 예약해 두 번 실행하지 않는다(`isStartIdempotent`, `reserveSeconds`). 예약이 끝난
   뒤에도 `SCHEDULED`면 다시 실행하지 않고 `TIMED_OUT`(`"Task did not complete within its responseTimeout of <n>s"`)으로 둔다.
   archon은 시스템 태스크 표에 "시작 멱등" 성질을 두어 같게 한다.
   - START_WORKFLOW: archon에서는 멱등이다(아래, ID를 태스크로 정함). 그래서 SUB_WORKFLOW처럼 시작했는데 결과가 없는 태스크를
@@ -345,14 +345,14 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
 
 | 조각 | 범위 | 시험·정답 기준 | 선행 | 건드리는 파일·모듈 |
 |---|---|---|---|---|
-| 7a | 결정 2의 두 표와 behaviour, 주입 함수 셋과 설정 자리, 타입 제약의 태스크 정의 조회 연결, 결정 8의 캡처 전부·HTTP stub·`types:` 건너뛰기, 캡처에서 정의 변경이 보이면 Decider 계약(결정 4) | 기존 시험·재생 전부 그대로 통과(동작 무변경), 기존 픽스처 재캡처 비교, 건너뛰기를 뺀 전체 재생 | Phase 6 조각 6h 머지(같은 재생 장치·픽스처 등록·재캡처를 고친다) | `lib/archon/decider.ex`, `lib/archon/decider/{system_tasks,system_task,mapper,retry,context,outcome}.ex`, `lib/archon/decider/system_task/*`, `lib/archon/runtime/step/{schedule,async,postpone,recover,lifecycle,decide,env}.ex`, `lib/archon/runtime/tasks.ex`, `lib/archon/domain/{workflow_task,workflow_def,start_workflow_request,task_type_constraint}.ex`(조회 옵션), `lib/archon/metadata.ex`, `lib/archon/runtime.ex`(시작 검증의 조회), `config/config.exs`, `test/support/step_replay.ex`, `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`, `test/fixtures/contract/README.md`, `test/support/contract.ex`, `test/support/archon_web/contract_case.ex`, `test/support/http_stub.ex`, `test/archon/contract_test.exs`, `test/archon/domain/contract_round_trip_test.exs` |
+| 7a | 결정 2의 두 표와 behaviour, 주입 함수 셋과 설정 자리, 타입 제약의 태스크 정의 조회 연결, 결정 8의 캡처 전부·HTTP stub·`types:` 건너뛰기, 캡처에서 정의 변경이 보이면 Decider 계약(결정 4) | 기존 시험·재생 전부 그대로 통과(동작 무변경), 기존 픽스처 재캡처 비교, 건너뛰기를 뺀 전체 재생 | Phase 6 조각 6h 머지(같은 재생 장치·픽스처 등록·재캡처를 고친다) | `lib/archon/decider.ex`, `lib/archon/decider/{system_tasks,system_task,mapper,retry,context,outcome}.ex`, `lib/archon/decider/system_task/*`, `lib/archon/runtime/step/{schedule,async,postpone,recover,lifecycle,decide,env}.ex`, `lib/archon/runtime/tasks.ex`, `lib/archon/domain/{workflow_task,workflow_def,start_workflow_request,task_type_constraint}.ex`(조회 옵션), `lib/archon/metadata.ex`, `lib/archon/runtime.ex`(시작 검증의 조회), `config/config.exs`, `test/support/step_replay.ex`, `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`, `test/fixtures/contract/README.md`, `test/support/contract.ex`, `test/support/archon_web/contract_case.ex`, `test/archon_web/contract_case_test.exs`, `test/support/http_stub.ex`, `test/archon/contract_test.exs`, `test/archon/domain/contract_round_trip_test.exs` |
 | 7b | 결정 3: TERMINATE, SET_VARIABLE, NOOP, HUMAN, EXCLUSIVE_JOIN | upstream `TestDeciderService`·`TerminateTest`·`SetVariableTest`·`ExclusiveJoinTest` 등에서 옮긴 사례, FORK 가지 끝 SET_VARIABLE의 저장 시험, StepReplay, 픽스처 재생 | 7a | `lib/archon/decider/mapper/{terminate,set_variable,noop,human,exclusive_join}.ex`, `lib/archon/decider/system_task/{terminate,set_variable,noop,human,exclusive_join}.ex`, 두 표의 자기 줄, 해당 시험 |
 | 7c | 결정 4: DYNAMIC, FORK_JOIN_DYNAMIC, rerun의 동적 포크 분기, SUB_WORKFLOW 매퍼의 `workflow_def_lookup` 사용 | `DynamicTaskMapperTest`·`ForkJoinDynamicTaskMapperTest`에서 옮긴 사례, 동적 가지 rerun·retry 시험과 갱신이 늘 결정하는 회귀 시험(두 백엔드), 픽스처 재생 | 7a | `lib/archon/decider/mapper/{dynamic,fork_join_dynamic}.ex`, `lib/archon/decider/mapper/fork_join.ex`(공용 함수 꺼내기), `lib/archon/decider/mapper/sub_workflow.ex`(`latest_workflow_versions`에 없는 이름의 조회), `lib/archon/runtime/step/lifecycle.ex`(rerun 분기), 매퍼 표의 자기 줄, 해당 시험 |
 | 7d | 결정 5: INLINE, LAMBDA | GraalJS 오라클 비교, `InlineTest`·`LambdaTest` 사례, 픽스처 재생 | 7a | `lib/archon/decider/mapper/{inline,lambda}.ex`, `lib/archon/decider/system_task/{inline,lambda}.ex`, 두 표의 자기 줄, 해당 시험 |
 | 7e | 결정 6: jq vendoring, `archon_jq`, 풀 일반화와 `Archon.Jq.Pool`, JSON_JQ_TRANSFORM, 그 타입 제약 | jackson-jq 프로브 비교, `JsonJqTransformTest` 사례, 격리 시험(`$ENV`, `import`, 시간·출력 상한), 픽스처 재생 | 7a | `c_src/jq/*`, `c_src/archon_jq/*`, `Makefile`, `NOTICE`, `.github/workflows/ci.yml`(sanitize 빌드), `config/*.exs`, `lib/archon/script/{pool,worker}.ex`, `lib/archon/jq.ex`, `lib/archon/application.ex`, `lib/archon/decider/mapper/json_jq_transform.ex`, `lib/archon/decider/system_task/json_jq_transform.ex`, `lib/archon/domain/task_type_constraint.ex`(JQ 규칙 절), 두 표의 자기 줄, 해당 시험 |
 | 7f | 결정 7의 공통 비동기 경로(시작 멱등 성질, 결과 이벤트와 시도 확인, 복구·재평가 시각)와 START_WORKFLOW | 비동기 시작·결과 버림·복구 재시작 시험(두 백엔드), `StartWorkflowTest` 사례, 픽스처 재생 | 7a | `lib/archon/runtime/step/{async,event,effect,recover,postpone,start_workflow}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/effects.ex`, `lib/archon/runtime/workflow_server.ex`, `lib/archon/decider/mapper/start_workflow.ex`, 두 표의 자기 줄, 해당 시험 |
 | 7g | 결정 7의 HTTP(진행 중 집합, `evict_after` 예외, 결과 전달 API) | stub 대상 시험(성공·4xx·5xx·시간 초과·body 상한·동시 상한·진행 중 재시작 안 함·프로세스 교체 뒤 결과·`TIMED_OUT`), `HttpTaskTest` 사례, 픽스처 재생 | 7e, 7f | `mix.exs`·`mix.lock`(Finch), `lib/archon/runtime/http_task.ex`, `lib/archon/runtime/step/http.ex`, `lib/archon/runtime/step/{async,event,recover,postpone}.ex`(HTTP 분기), `lib/archon/runtime/workflow_server.ex`, `lib/archon/application.ex`, `config/*.exs`, `lib/archon/decider/mapper/http.ex`, `lib/archon/domain/task_type_constraint.ex`(HTTP 규칙 절), 두 표의 자기 줄, 해당 시험 |
-| 7h | 통합: `types:` 건너뛰기 제거와 전체 재생(두 백엔드), 빠진 픽스처, README 호환성 절(지원 타입 표, 의도적 차이), `TaskTypeConstraint` moduledoc, ADR 0003 결정 4 비고, 이 ADR `승인` | `mix test` 전부(두 백엔드), CI | 7b~7g | `test/support/archon_web/contract_case.ex`, `README.md`, `docs/adr/{0003,0026,README}.md`, 빠진 픽스처가 있으면 7a의 픽스처 파일들 |
+| 7h | 통합: `types:` 건너뛰기 제거와 전체 재생(두 백엔드), 빠진 픽스처, README 호환성 절(지원 타입 표, 의도적 차이), `TaskTypeConstraint` moduledoc, ADR 0003 결정 4 비고, 이 ADR `승인` | `mix test` 전부(두 백엔드), CI | 7b~7g | `test/support/archon_web/contract_case.ex`, `test/archon_web/contract_case_test.exs`, `README.md`, `docs/adr/{0003,0026,README}.md`, 빠진 픽스처가 있으면 7a의 픽스처 파일들 |
 
 - **병렬로 진행할 수 있는 묶음.**
   - 1차: 7a(Phase 6 마지막 조각 6h가 머지된 뒤).
