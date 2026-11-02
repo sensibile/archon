@@ -207,8 +207,12 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   - 시작할 때 `clearenv()`로 환경 변수를 비운다(`$ENV`·`env`가 서버 환경을 읽지 못함. 시간대는 UTC).
   - 라이브러리 검색 경로를 비워 `import`·`include`가 파일을 읽지 못하게 한다. `input`·`inputs`에는 추가 입력이 없다.
   - jq의 디버그·stderr 콜백은 버린다. `halt`·`halt_error`는 오류로 바꾼다.
-  - 시간 상한은 워커가 기다리다 OS 프로세스를 kill한다(ADR 0015 결정 2의 바깥 겹). 메모리 상한은 Linux에서 `setrlimit`으로 건다.
-    출력 크기 상한도 `archon_js`처럼 둔다.
+  - 시간 상한은 워커가 기다리다 OS 프로세스를 kill한다(ADR 0015 결정 2의 바깥 겹). 출력 크기 상한도 `archon_js`처럼 둔다.
+  - **메모리 상한은 지원하는 모든 호스트(Linux, macOS)에서 건다.** jq에는 QuickJS의 `JS_SetMemoryLimit` 같은 엔진 상한이 없고,
+    `[range(0; 100000000)]` 같은 쿼리는 시간 상한 전에 호스트 메모리를 다 쓸 수 있다. 그래서 호스트가 jq의 할당을 세어 상한
+    (기본 64MiB, `archon_js`와 같음)을 넘으면 오류로 끝낸다. vendoring 파일은 고치지 않으므로 빌드 플래그로 jq 할당 함수를 호스트의
+    세는 함수로 바꾸는 방식이고, Linux에서는 `setrlimit`을 2차 방어로 더한다. 방법은 7e가 정하되 두 플랫폼 모두에서 상한이 걸리는
+    것을 시험으로 보인다. 할 수 없으면 7e는 jq를 켜지 않고 BOSS에게 보고한다.
 - **풀.** `Archon.Script.Pool`·`Worker`를 실행 파일·인자·허용 op를 받게 일반화하고, 이름이 다른 두 번째 풀(`Archon.Jq.Pool`,
   설정 `config :archon, Archon.Jq.Pool`, 기본 시간 4초·워커 수 스케줄러 수)을 띄운다. 요청마다 쿼리를 새로 컴파일한다(upstream의
   Caffeine 캐시는 성능용이라 옮기지 않는다).
@@ -243,9 +247,10 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     복구(`Step.Recover`)가 바로 다시 시작한다. upstream은 START_WORKFLOW를 멱등으로 보지 않으므로 의도적 차이다.
   - HTTP: 멱등이 아니다. 시작한 태스크(`SCHEDULED`, `pollCount` > 0. `startTime`은 예약 때 이미 찍히므로 구분에 쓰지 않는다)는 결과가
     오기 전까지 다시 시작하지 않는다.
-    워크플로우 프로세스는 진행 중인 요청의 태스크 ID 집합을 상태에 두고, `:wake`나 다른 이벤트로 `Step.Async`가 평가할 때 그 태스크를
-    시작하지 않는다. 프로세스가 결과 전에 죽어 집합을 잃었으면, 복구는 그 태스크를 다시 보내지 않고 `startTime` +
-    `responseTimeoutSeconds`에 `TIMED_OUT`으로 둔다(upstream과 같음). 살아 있는 프로세스에서 진행 중인 요청(실행기 대기열에서
+    워크플로우 프로세스는 진행 중인 요청의 태스크 ID 집합을 상태에 두고, `:wake`나 다른 이벤트에서 그 태스크를 `Step.Async.evaluate`에
+    넘기지 않는다. `evaluate`는 시작 전에 `pollCount`를 올리므로, 거르기는 그보다 앞(평가할 태스크를 고르는 자리)이어야 한다. 그래야
+    결과의 `pollCount`가 태스크와 같아 버려지지 않는다. 진행 중이거나 대기열에 있는 요청 동안 `:wake`가 오는 시험을 둔다. 프로세스가
+    결과 전에 죽어 집합을 잃었으면, 복구는 그 태스크를 다시 보내지 않고 아래 마감에 `TIMED_OUT`으로 둔다(upstream과 같음). 살아 있는 프로세스에서 진행 중인 요청(실행기 대기열에서
     기다리는 것 포함)도 같은 마감에 `TIMED_OUT`으로 두고, 그 뒤 온 결과는 다른 시도가 아니어도 태스크가 끝났으므로 버린다(upstream도
     예약이 끝나면 `TIMED_OUT`이다). 마감은 기존 `Step.Async`의 응답 시간 초과 판정처럼 `updateTime`(시작 커밋 시각, upstream
     `hasExceededResponseTimeout`과 같음)부터 잰다. 실행기 대기열에서 아직 보내지 않은 요청은 마감이 지나면 보내지 않고 버린다. 그 뒤 재시도는
@@ -307,6 +312,9 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     차이). 리다이렉트처럼 `RestTemplate`의 전송 세부에 기대는 동작은 결정 8의 stub 픽스처로 정한다.
   - 대상 주소 제한은 없다(upstream과 같음). 정의를 등록할 수 있는 호출자는 서버가 닿는 어떤 주소로든 요청을 보낼 수 있다. 이는
     ADR 0024 결정 4(인증 없음, 기본 주소 `127.0.0.1`)의 신뢰 모델 안의 일이고, 대상 허용 목록은 인증 ADR에서 함께 본다.
+    **상속 위험(SSRF).** HTTP 포트에 닿는 호출자는 루프백 서비스나 클라우드 메타데이터 주소를 부르는 정의를 등록하고 응답을 태스크
+    출력으로 읽을 수 있다. 이 신뢰 의존을 7h가 README 호환성·배포 절에 경고로 적는다(포트를 외부에 열면 인증하는 역프록시 뒤에 두고
+    나가는 요청도 망에서 제한할 것).
   - 타입 제약: upstream HTTP 규칙(`http_request`, 최상위 `uri`·`method`, 또는 태스크 정의 `inputTemplate`의 `http_request` 중 하나,
     문구 `"inputParameters.http_request or inputParameters.uri field is required for taskType: HTTP taskName: <name>"`)을 옮긴다(7a의
     조회 연결을 쓴다).
@@ -352,7 +360,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
 | 7e | 결정 6: jq vendoring, `archon_jq`, 풀 일반화와 `Archon.Jq.Pool`, JSON_JQ_TRANSFORM, 그 타입 제약 | jackson-jq 프로브 비교, `JsonJqTransformTest` 사례, 격리 시험(`$ENV`, `import`, 시간·출력 상한), 픽스처 재생 | 7a | `c_src/jq/*`, `c_src/archon_jq/*`, `Makefile`, `NOTICE`, `.github/workflows/ci.yml`(sanitize 빌드), `config/*.exs`, `lib/archon/script/{pool,worker}.ex`, `lib/archon/jq.ex`, `lib/archon/application.ex`, `lib/archon/decider/mapper/json_jq_transform.ex`, `lib/archon/decider/system_task/json_jq_transform.ex`, `lib/archon/domain/task_type_constraint.ex`(JQ 규칙 절), 두 표의 자기 줄, 해당 시험 |
 | 7f | 결정 7의 공통 비동기 경로(시작 멱등 성질, 결과 이벤트와 시도 확인, 복구·재평가 시각)와 START_WORKFLOW | 비동기 시작·결과 버림·복구 재시작 시험(두 백엔드), `StartWorkflowTest` 사례, 픽스처 재생 | 7a | `lib/archon/runtime/step/{async,event,effect,recover,postpone,start_workflow}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/effects.ex`, `lib/archon/runtime/workflow_server.ex`, `lib/archon/decider/mapper/start_workflow.ex`, 두 표의 자기 줄, 해당 시험 |
 | 7g | 결정 7의 HTTP(진행 중 집합, `evict_after` 예외, 결과 전달 API) | stub 대상 시험(성공·4xx·5xx·시간 초과·body 상한·동시 상한·진행 중 재시작 안 함·프로세스 교체 뒤 결과·`TIMED_OUT`), `HttpTaskTest` 사례, 픽스처 재생 | 7e, 7f | `mix.exs`·`mix.lock`(Finch), `lib/archon/runtime/http_task.ex`, `lib/archon/runtime/step/http.ex`, `lib/archon/runtime/step/{async,event,recover,postpone}.ex`(HTTP 분기), `lib/archon/runtime/workflow_server.ex`, `lib/archon/application.ex`, `config/*.exs`, `lib/archon/decider/mapper/http.ex`, `lib/archon/domain/task_type_constraint.ex`(HTTP 규칙 절), 두 표의 자기 줄, 해당 시험 |
-| 7h | 통합: `types:` 건너뛰기 제거와 전체 재생(두 백엔드), 빠진 픽스처, README 호환성 절(지원 타입 표, 의도적 차이), `TaskTypeConstraint` moduledoc, ADR 0003 결정 4 비고, 이 ADR `승인` | `mix test` 전부(두 백엔드), CI | 7b~7g | `test/support/archon_web/contract_case.ex`, `test/archon_web/contract_case_test.exs`, `README.md`, `docs/adr/{0003,0026,README}.md`, 빠진 픽스처가 있으면 7a의 픽스처 파일들 |
+| 7h | 통합: `types:` 건너뛰기 제거와 전체 재생(두 백엔드), 빠진 픽스처, README 호환성 절(지원 타입 표, 의도적 차이, HTTP SSRF 경고), `TaskTypeConstraint` moduledoc, ADR 0003 결정 4 비고, 이 ADR `승인` | `mix test` 전부(두 백엔드), CI | 7b~7g | `test/support/archon_web/contract_case.ex`, `test/archon_web/contract_case_test.exs`, `README.md`, `docs/adr/{0003,0026,README}.md`, 빠진 픽스처가 있으면 7a의 픽스처 파일들 |
 
 - **병렬로 진행할 수 있는 묶음.**
   - 1차: 7a(Phase 6 마지막 조각 6h가 머지된 뒤).
