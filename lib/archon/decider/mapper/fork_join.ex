@@ -6,7 +6,8 @@
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/mapper/ForkJoinTaskMapper.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: returns a value through the Archon.Decider.Mapper behaviour; an empty
-# branch is passed over instead of throwing IndexOutOfBoundsException.
+# branch is passed over instead of throwing IndexOutOfBoundsException; the FORK task and the
+# JOIN lookup are shared with the FORK_JOIN_DYNAMIC mapper.
 
 defmodule Archon.Decider.Mapper.ForkJoin do
   @moduledoc """
@@ -15,27 +16,20 @@ defmodule Archon.Decider.Mapper.ForkJoin do
 
   The workflow terminates when the fork is not followed by a `JOIN`. Upstream throws
   `IndexOutOfBoundsException` on an empty branch; here that branch schedules nothing.
+
+  `fork_task/2` and `next_join/2` are shared with `Archon.Decider.Mapper.ForkJoinDynamic`.
   """
 
   @behaviour Archon.Decider.Mapper
 
   alias Archon.Decider.Mapper.Context
-  alias Archon.Domain.{TaskDef, WorkflowDef, WorkflowTask}
+  alias Archon.Domain.{Codec, Task, TaskDef, WorkflowDef, WorkflowTask}
 
   @impl true
   def map(%WorkflowTask{} = wt, %Context{} = context) do
-    task = Context.create_task(context)
-    now = context.decider.now
-
     fork_task = %{
-      task
-      | task_type: "FORK",
-        task_def_name: "FORK",
-        start_time: now,
-        end_time: now,
-        input_data: context.task_input,
-        status: :completed,
-        isolation_group_id: isolation_group_id(context.task_definition)
+      fork_task(context, context.task_input)
+      | isolation_group_id: isolation_group_id(context.task_definition)
     }
 
     with {:ok, branch_tasks} <- schedule_branches(wt.fork_tasks, context),
@@ -59,12 +53,40 @@ defmodule Archon.Decider.Mapper.ForkJoin do
   end
 
   defp join_task(definition, %WorkflowTask{task_reference_name: ref}) do
-    case WorkflowDef.next_task(definition, ref) do
-      %WorkflowTask{type: "JOIN"} = join ->
+    case next_join(definition, ref) do
+      %WorkflowTask{} = join ->
         {:ok, join}
 
-      _other ->
+      nil ->
         {:terminate, "Fork task definition is not followed by a join task.  Check the blueprint"}
+    end
+  end
+
+  @doc """
+  The `COMPLETED` `FORK` task both fork mappers start with, scheduled, started and ended at
+  `decider.now`, with `input`.
+  """
+  @spec fork_task(Context.t(), Codec.json_object()) :: Task.t()
+  def fork_task(%Context{} = context, input) do
+    now = context.decider.now
+
+    %{
+      Context.create_task(context)
+      | task_type: "FORK",
+        task_def_name: "FORK",
+        start_time: now,
+        end_time: now,
+        input_data: input,
+        status: :completed
+    }
+  end
+
+  @doc "The `JOIN` that follows the task named `ref` in the definition, or `nil`."
+  @spec next_join(WorkflowDef.t(), String.t()) :: WorkflowTask.t() | nil
+  def next_join(%WorkflowDef{} = definition, ref) do
+    case WorkflowDef.next_task(definition, ref) do
+      %WorkflowTask{type: "JOIN"} = join -> join
+      _other -> nil
     end
   end
 

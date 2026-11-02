@@ -551,7 +551,7 @@ ADR 0023의 목록에 더해 다음이 생긴다.
 - **remove의 보관본**(결정 3): 없다. upstream 기본 서버도 보관본을 읽지 못하므로 응답은 같다. 색인이 있는 upstream 설정과는 다르다.
 - **목록 순서**(결정 4·6): correlated, `running/{name}`, `latest-versions`는 정해진 순서다. upstream은 순서를 정하지 않는다.
 - **`validate`의 스키마 거절**(결정 6): ADR 0023 결정 5의 거절을 등록 전에 알려 준다. upstream은 통과시킨다.
-- **rerun의 동적 FORK 분기**(결정 2): MVP 태스크 타입 밖이라 옮기지 않는다.
+- **rerun의 동적 FORK 분기**(결정 2): MVP 태스크 타입 밖이라 옮기지 않는다. (2026-11-03 ADR 0026 조각 7c가 옮겨 이 차이는 없어졌다.)
 - **remove의 전달 대기 500**(결정 3): outbox 전달이 마감(예 10초)까지 끝나지 않으면 `archiveWorkflow`와 상관없이 아무것도 지우지
   않고 500 `retryable` 참이다. upstream은 종료의 부수 효과를 동기로 끝내므로 이 응답이 없다. bulk remove·terminate-remove는 ID마다
   이 대기를 하므로 전달이 계속 실패하는 ID가 많으면 요청이 길어진다(받아들이는 비용).

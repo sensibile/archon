@@ -46,6 +46,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
   (`IllegalStateException`) or `:invalid` (`IllegalArgumentException`), and its message.
   """
 
+  alias Archon.Decider
   alias Archon.Decider.{Parameters, SystemTasks}
   alias Archon.Domain.{Task, Workflow, WorkflowDef, WorkflowTask}
   alias Archon.Runtime.Step.{Decide, Env, Schedule, State, SubWorkflow, Terminate}
@@ -555,6 +556,9 @@ defmodule Archon.Runtime.Step.Lifecycle do
       reset with `taskInput` if given and scheduled again; then `finalizeRerun`.
     * A `SUB_WORKFLOW` task (case 2): nothing is deleted (a parallel `FORK` branch would be), the
       task is reset in place without its child, which a new start replaces; then `finalizeRerun`.
+    * The `FORK` task of a `FORK_JOIN_DYNAMIC` (case 1 with `finalizeRerun`'s first branch): the
+      tasks after it and the `FORK` itself are deleted and the mapper makes the fork, its
+      branches and its `JOIN` again (ADR 0026, decision 4).
 
   Either way the workflow is `RUNNING` without its failure, takes the input and correlation ID
   given, asks its parent to revive (`updateAndPushParents`) and is decided.
@@ -625,6 +629,36 @@ defmodule Archon.Runtime.Step.Lifecycle do
     finalize_rerun(state, task)
   end
 
+  # Case 1 for the FORK of a FORK_JOIN_DYNAMIC, as finalizeRerun's first branch: the FORK goes
+  # with the tasks after it and getTasksToBeScheduled makes the fork again, branches included
+  # (the decide's getNextTask(FORK) would only schedule the JOIN). Upstream writes the FORK as
+  # SCHEDULED first and resets it, which deleting it makes moot. A termination of the mapper or of
+  # the scheduling (a start that fails) terminates the workflow, as a decide's would; upstream
+  # throws it out of the rerun.
+  defp rerun_from(
+         %State{env: env} = state,
+         %Task{task_type: "FORK", workflow_task: %WorkflowTask{type: "FORK_JOIN_DYNAMIC"} = wt} =
+           task,
+         _request
+       ) do
+    later = for t <- state.wf.tasks, t.seq > task.seq, do: t.task_id
+    state = State.delete_tasks(state, later ++ [task.task_id])
+
+    case Decider.tasks_to_be_scheduled(state.wf, wt, 0, nil, Env.context(env)) do
+      {:ok, tasks} ->
+        # finalizeRerun schedules them without setTaskDomains.
+        {state, new} = Schedule.dedup_and_add(state, tasks)
+
+        case Schedule.schedule(state, new) do
+          {:terminate, termination, state} -> terminate_rerun(state, termination)
+          {state, _started?} -> state |> push_parents(true) |> Decide.settle()
+        end
+
+      {:terminate, termination} ->
+        terminate_rerun(state, termination)
+    end
+  end
+
   # Case 1: the tasks after it go, it runs again.
   defp rerun_from(%State{now: now, env: env} = state, %Task{} = task, request) do
     later = for t <- state.wf.tasks, t.seq > task.seq, do: t.task_id
@@ -636,9 +670,8 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
     # addTaskToQueue; an asynchronous system task is evaluated when due. A synchronous one is
     # started in place (for SWITCH, DECISION, FORK and DO_WHILE that changes nothing) and, while
-    # still SCHEDULED, pushed (the decide loop runs it). Upstream's rerunWF does not make a
-    # synchronous system task SCHEDULED first: it keeps the status it had (ADR 0026, decision 2,
-    # a difference left to slice 7c, which reruns FORK tasks of FORK_JOIN_DYNAMIC).
+    # still SCHEDULED, pushed (the decide loop runs it). Upstream's rerunWF makes it SCHEDULED
+    # too, in the early write before updateAndPushParents (ADR 0026, decision 4).
     state =
       cond do
         Schedule.async?(env, task) ->
@@ -681,6 +714,10 @@ defmodule Archon.Runtime.Step.Lifecycle do
        do: %{rerun | scheduled_time: before.scheduled_time + 1}
 
   defp rerun_scheduled_time(rerun, _before), do: rerun
+
+  # A rerun that ends in a termination: the workflow ends as a decide's termination ends it.
+  defp terminate_rerun(state, termination),
+    do: state |> push_parents(true) |> Terminate.by_decider(termination)
 
   # addTaskToQueue for an asynchronous system task: evaluated at once without a callback delay,
   # else when the delay is over (the next :wake), as repair_canceled does.

@@ -66,6 +66,11 @@ defmodule Archon.Decider do
   @doc false
   # Upstream's DYNAMIC and HTTP mappers change the definition's workflow task object, which the
   # scheduled task shares; the change shows in the workflow's definition (ADR 0026, decision 4).
+  # Only the tasks a mapper just made count: a task already in the workflow and a retry copy
+  # (`retried_task_id`) carry a workflow task upstream read back from the store, not the
+  # definition's object. They may differ from the definition: a DYNAMIC task of a DO_WHILE
+  # iteration is made from the loop task's own workflow tasks (Step.Decide), which leaves the
+  # definition as it is.
   # `changes?` is Mapper.changes_definition?/1 but for the tests.
   @spec change_definition(Outcome.t(), (String.t() | nil -> boolean())) :: Outcome.t()
   def change_definition(outcome, changes? \\ &Mapper.changes_definition?/1)
@@ -76,9 +81,12 @@ defmodule Archon.Decider do
       ) do
     definition = outcome.workflow.workflow_definition
 
+    in_workflow = MapSet.new(outcome.workflow.tasks, & &1.task_id)
+
     changed =
-      for %Task{workflow_task: %WorkflowTask{type: type, task_reference_name: ref} = wt} <-
+      for %Task{workflow_task: %WorkflowTask{type: type, task_reference_name: ref} = wt} = task <-
             outcome.tasks_to_be_scheduled,
+          task.retried_task_id == nil and not MapSet.member?(in_workflow, task.task_id),
           changes?.(type),
           WorkflowDef.task_by_ref_name(definition, ref) not in [nil, wt],
           do: wt
@@ -447,16 +455,25 @@ defmodule Archon.Decider do
   @doc """
   Upstream `getTasksToBeScheduled`: maps `workflow_task` with its type's mapper
   (`Archon.Decider.Mapper`) and drops tasks whose reference name is already in progress or
-  terminal in the workflow.
+  terminal in the workflow. `dynamic_forks` are the dynamic forks a mapper maps this task under
+  (`Archon.Decider.Mapper.Context`).
   """
   @spec tasks_to_be_scheduled(
           Workflow.t(),
           WorkflowTask.t(),
           integer(),
           String.t() | nil,
-          Context.t()
+          Context.t(),
+          [String.t()]
         ) :: {:ok, [Task.t()]} | {:terminate, Termination.t()}
-  def tasks_to_be_scheduled(workflow, %WorkflowTask{} = wt, retry_count, retried_task_id, context) do
+  def tasks_to_be_scheduled(
+        workflow,
+        %WorkflowTask{} = wt,
+        retry_count,
+        retried_task_id,
+        context,
+        dynamic_forks \\ []
+      ) do
     mapper_context = %Mapper.Context{
       workflow: workflow,
       task_definition: wt.task_definition,
@@ -465,7 +482,8 @@ defmodule Archon.Decider do
       retry_count: retry_count,
       retry_task_id: retried_task_id,
       task_id: context.new_id.(),
-      decider: context
+      decider: context,
+      dynamic_forks: dynamic_forks
     }
 
     case Mapper.module_for(wt.type).map(wt, mapper_context) do

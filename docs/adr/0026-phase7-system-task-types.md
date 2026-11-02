@@ -128,7 +128,7 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     `Step.Lifecycle`이 부른다(upstream `rerunWF`도 `start`를 부른다). rerun 대상은 `start` 뒤에도 `SCHEDULED`일 때만 큐에 넣는다.
     다만 archon은 이전부터 rerun 대상을 먼저 `SCHEDULED`로 두는데, upstream `rerunWF`는 동기 시스템 태스크의 상태를 바꾸지 않고
     (`FORK`는 `COMPLETED`로 남음) `FORK_JOIN_DYNAMIC`은 `COMPLETED`로 둔다. 7a는 동작을 바꾸지 않으므로 이 차이는 FORK rerun을
-    옮기는 7c가 맞춘다(`p7_fjd_rerun_fork_get`).
+    옮기는 7c가 맞춘다(`p7_fjd_rerun_fork_get`). (조각 7c가 다시 확인해 차이가 아님을 결정 4 끝에 적었다.)
   - `Result`의 태스크는 `changed?`와 상관없이 상태에 넣고, `workflow`가 오면 그 자리에서 `State.save_workflow`를 부른다
     (`Step.Schedule.apply_result/2`). upstream `SetVariable`이 `execute` 안에서 `updateWorkflow`를 부르는 것과 같은 시점이다.
   - 조회 둘의 기본값은 `Context`·`Step.Env` 모두 "없음"이고(순수 시험이 저장소를 읽지 않게), 메타데이터 저장소를 읽는 함수는
@@ -245,6 +245,66 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   `archon_p7_dynamic`)를 채우므로(`MetadataMapperService`), DYNAMIC 매퍼는 늘 그 정의를 쓰고 `"Invalid task specified ..."`로
   끝나지 않는다. 정의 없는 이름(`archon_p7_missing`)의 태스크가 그 타입으로 `SCHEDULED`에 남는다(`p7_dynamic_missing_get`).
   `workflowDefinition`의 `taskDefinition`도 그 기본 정의로 남는다. 위 "없으면 ... 종료한다"는 이 동작으로 바뀐다(정답은 캡처).
+
+- **조각 7c에서 정한 것(2026-11-03).**
+  - DYNAMIC의 태스크 정의는 박힌 정의, 없으면 풀린 이름으로 `task_def_lookup`이다. upstream처럼 `MetadataDAO`에 해당하는 조회만
+    보고 `task_defs`는 보지 않는다. 시작한 워크플로우에는 늘 박힌 정의가 있으므로(`Archon.Runtime.populate/1`) 조회는 박힌 정의가
+    없는 순수 시험 같은 경우에만 쓰인다. 이름은 `String.valueOf`(`Parameters.java_string/1`)다.
+  - **정의 변경 판정을 매퍼가 방금 만든 태스크로 좁혔다.** 워크플로우에 이미 있는 태스크와 재시도 사본(`retried_task_id`가 있는
+    것)은 `Archon.Decider.change_definition`이 보지 않는다. upstream에서 그 태스크의 `workflowTask`는 저장소에서 읽은 사본이라 정의
+    객체가 아니기 때문이다. 이것이 드러나는 경우가 DO_WHILE 안 DYNAMIC이다. 반복의 첫 태스크는 `scheduleNextIteration`이 DO_WHILE
+    태스크의 `loopOver`로 만드는데, 둘째 반복에서 실패한 DYNAMIC의 재시도 사본은 둘째 반복의 이름을 갖는다. 좁히지 않으면 그 이름이
+    정의에 써진다(`Archon.Runtime.DynamicTest`가 지킨다).
+  - **DO_WHILE 반복의 첫 DYNAMIC(의도적 차이).** archon은 `Step.Decide`가 `DoWhile.execute`의 결과로 예약하는 태스크의 정의 변경을
+    반영하지 않는다. upstream은 DO_WHILE을 만든 결정 안의 첫 반복에서는 정의를, 그 뒤 반복에서는 DO_WHILE 태스크 자신의
+    `workflowTask.loopOver` 사본을 바꾼다. 보이는 차이는 저장된 `workflowDefinition`·DO_WHILE 태스크 JSON 안의 이름과 태스크
+    정의뿐이다. DYNAMIC 매퍼는 매번 `dynamicTaskNameParam`으로 이름을 다시 풀고 박힌 정의가 늘 있으므로 예약되는 태스크는 같다.
+    반복 본문의 둘째 이후 DYNAMIC(`getNextTask` 경로)은 upstream처럼 정의를 바꾼다.
+  - FORK_JOIN 매퍼에서 `ForkJoin.fork_task/2`(완료된 FORK)와 `ForkJoin.next_join/2`(다음 JOIN)를 꺼내 FORK_JOIN_DYNAMIC이 같이 쓴다.
+    FORK_JOIN_DYNAMIC의 JOIN은 upstream `createJoinTask`처럼 JOIN 매퍼를 거치지 않는다. 입력은 JOIN 정의의 `inputParameters`를 풀지
+    않은 그대로에 `joinOn`을 더한 것이다. FORK 입력의 `forkedTaskDefs`는 가지 입력을 합친 뒤의 워크플로우 태스크이고, 가지가
+    DYNAMIC이면 풀린 이름이다(upstream은 FORK 입력이 그 객체를 쥔 채 저장된다).
+  - **FORK_JOIN_DYNAMIC의 문자열이 아닌 입력(의도적 차이).** upstream은 간단 형태의 `forkTaskWorkflow`·`forkTaskWorkflowVersion`·
+    `forkTaskType`·`forkTaskName`을 `(String)`으로 캐스트해 문자열이 아니면 종료 경로 밖의 `ClassCastException`이 난다. archon은
+    `String.valueOf`처럼 읽고, 버전은 정수면 그대로 쓴다. `forkTaskInputs`의 `null` 원소도 upstream은 `NullPointerException`이지만
+    archon은 맵이 아닌 원소처럼 `{"input": null}` 가지로 만든다. 옛 형태(`DynamicForkJoinTaskList`)의 변환 실패(원소나 그 `input`이
+    객체가 아님)도 upstream은 예외가 새지만 archon은 값이 없을 때와 같은 `"Dynamic tasks could not be created. ..."`로 종료한다.
+  - 오류 문구의 Java `toString` 중 `WorkflowModel.toShortString()`(`<이름>.<버전>/<ID>`)과 `WorkflowTask.toString()`(`<이름>/<ref>`)은
+    단순해서 재현했다. 예외 메시지(가지 입력이 맵이 아닐 때의 `ClassCastException`)는 재현하지 않고 `"<값> is not a map"`이다. 가지가
+    DYNAMIC인데 만들 태스크가 없을 때(같은 ref가 이미 진행 중) upstream 문구의 이름은 매퍼가 바꾼 이름이지만 archon은 정의의 이름이다.
+    위 "앞부분만 맞춘다"는 이 범위로 좁힌다.
+  - **끝없는 동적 포크 매핑(의도적 차이).** 가지 목록이 자기 FORK_JOIN_DYNAMIC으로 되돌아오면(가지가 같은 목록을 다시 가리키는
+    FORK_JOIN_DYNAMIC) upstream은 매퍼가 끝없이 재귀하다 `StackOverflowError`로 결정이 실패한다. BEAM 프로세스에는 스택 상한이
+    없어 같은 입력이 노드 메모리를 다 쓸 수 있으므로(Codex 보안 리뷰 지적), archon은 위에서 매핑 중인 동적 포크의 ref를
+    `Mapper.Context.dynamic_forks`로 내려 보내 같은 ref를 다시 만나면 `"No dynamic tasks could be created ... attempted to create a
+    duplicate task reference name: <ref>"`로 종료한다. 한 FORK가 이미 만든 ref를 다른 가지가 다시 만들어도 같은 문구로 종료한다
+    (upstream은 둘 다 만들고 `dedupAndAddTasks`가 하나를 버린다). 같은 하위 목록을 나눠 쓰는 가지가 곱절로 불어나는 것도 이것이
+    막는다.
+    간단 형태는 이름이 없거나 워크플로우에 이미 동적 포크가 있으면 가지 ref가 단계마다 길어져(`_fjd_0`, `__fjd_0_0`, ...) 같은 ref
+    검사를 피하므로(자체 리뷰 지적), 다음 JOIN 검사를 가지 매핑보다 먼저 한다. 그러면 가지 안의 동적 포크는 정의에서 바로 뒤에
+    JOIN이 오는 ref여야 하므로 중첩이 정의의 유한한 ref로 묶인다. 생기는 차이는 JOIN도 없고 가지도 잘못됐을 때 JOIN 문구가 먼저
+    나오는 것뿐이다(upstream은 가지 오류가 먼저).
+  - SUB_WORKFLOW 매퍼는 버전이 없을 때 `latest_workflow_versions`, 없으면 `workflow_def_lookup.(name, nil)`의 버전을 쓴다. 간단 형태의
+    `forkTaskWorkflow` 가지가 이 경로를 탄다.
+  - **rerun.** FORK_JOIN_DYNAMIC이 만든 FORK 태스크의 rerun은 upstream `finalizeRerun`의 첫 분기다. 뒤 태스크와 FORK 자신을 지우고
+    `Decider.tasks_to_be_scheduled/5`로 FORK·가지·JOIN을 새로 만들어 예약한 뒤 부모를 깨우고 결정한다(`p7_fjd_rerun_fork_get`). 매퍼가
+    종료를 돌려주거나 새 태스크의 예약(동기 시스템 태스크의 `start` 실패, 조각 7e의 `"Error scheduling tasks: ..."`)이 종료하면
+    워크플로우를 종료한다. upstream은 그 예외가 rerun 요청 밖으로 새므로 의도적 차이다. 한 가지의 rerun은 기존
+    경로(seq로 뒤 태스크 삭제, `finalizeRerun`)가 이미 캡처와 같다. 다른 가지의 첫 시도가 `SCHEDULED`가 되고 JOIN은 그대로다
+    (`p7_fjd_rerun_branch_get`).
+  - 7a가 결정 2에 남긴 "rerun 대상이 동기 시스템 태스크면 upstream은 상태를 바꾸지 않는다"는 다시 확인해 보니 차이가 아니다.
+    upstream `rerunWF`는 SUB_WORKFLOW가 아닌 직접 rerun 대상을 `updateAndPushParents` 전에 먼저 `SCHEDULED`로 쓰고(이른 쓰기), 그
+    객체에 `start`를 부른다. 그래서 FORK 같은 동기 시스템 태스크도 `SCHEDULED`다. `FORK_JOIN_DYNAMIC` 분기는 태스크 타입이 그
+    이름일 때만 타는데, 매퍼가 늘 `FORK`를 만들므로 닿지 않는다. archon 동작은 그대로 둔다.
+  - `Step.Tasks.lazy_evaluate?/2`는 고치지 않았다. 동적 가지의 갱신이 결정하는지는 런타임 시험(두 백엔드)이 지킨다.
+  - 재생: FORK_JOIN_DYNAMIC 단계의 JOIN `pollCount`·`updateTime`은 upstream 시스템 태스크 워커가 따로 평가하는 시점에 달려 같은
+    단계라도 캡처마다 다르므로 `ignore`한다. retry 뒤 JOIN의 `endTime`(`p7_fjd_retried_get` 한 단계)도 `ignore`한다. upstream retry
+    코드는 취소된 JOIN을 `IN_PROGRESS`로 돌릴 때 `endTime`을 그대로 두고(archon과 같음), 태스크 `endTime`을 0으로 만드는 upstream
+    코드(`DeciderService`, `WorkflowExecutorOps`의 재시도·rerun 재설정)도 이 경로에 닿지 않는데 캡처는 0이다. 같은 기준 SHA 서버에서
+    같은 단계(시작, 한 가지 `FAILED`, retry)를 세 번 다시 돌려 보니 retry 뒤 JOIN의 `endTime`은 세 번 모두 취소 시각 그대로였다
+    (2026-11-03, 픽스처는 바꾸지 않음). 캡처의 0은 재현되지 않는 경합 값으로 보고 archon은 코드와 재현 결과를 따른다.
+  - DYNAMIC이 시스템 타입을 가리키는 재생 단계(`p7_dynamic_system_*`)는 NOOP(7b)이 매퍼 표에 들어가야 켜진다. 7c는 등록한 가짜 동기
+    시스템 타입으로 같은 경로를 시험했다(`Archon.Runtime.Step.DynamicStepTest`).
 
 ### 5. 스크립트 타입: INLINE, LAMBDA(조각 7d)
 
