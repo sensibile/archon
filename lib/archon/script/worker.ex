@@ -4,17 +4,18 @@
 
 defmodule Archon.Script.Worker do
   @moduledoc """
-  One `archon_js` process behind an Erlang port (`{:packet, 4}`, ADR 0015).
+  One evaluator process (`archon_js`, ADR 0015, or `archon_jq`, ADR 0026 decision 6) behind an
+  Erlang port (`{:packet, 4}`), with the options of its `Archon.Script.Pool`.
 
-  The worker runs one request at a time. The engine interrupts a script at `timeout`; if no
-  answer has come `grace` milliseconds after that, the worker kills the OS process, answers
-  with a timeout and starts a new process. A process that exits on its own is replaced the same
-  way. Neither stops the worker.
+  The worker runs one request at a time. The evaluator stops itself at `timeout`; if no answer
+  has come `grace` milliseconds after that, the worker kills the OS process, answers with a
+  timeout and starts a new process. A process that exits on its own is replaced the same way;
+  so is one that answers and exits (`archon_jq` over its memory limit). Neither stops the
+  worker.
   """
 
   use GenServer
 
-  alias Archon.Script
   alias Archon.Script.Error
 
   require Logger
@@ -40,9 +41,8 @@ defmodule Archon.Script.Worker do
   end
 
   @impl true
-  def handle_info({:run, {op, script, input}, from}, %{current: nil} = state) do
-    payload = JSON.encode!(%{"op" => Atom.to_string(op), "script" => script, "input" => input})
-    true = Port.command(state.port, payload)
+  def handle_info({:run, request, from}, %{current: nil} = state) do
+    true = Port.command(state.port, JSON.encode!(request))
     ref = make_ref()
 
     timer =
@@ -54,18 +54,22 @@ defmodule Archon.Script.Worker do
   def handle_info({port, {:data, data}}, %{port: port, current: current} = state)
       when current != nil do
     Process.cancel_timer(current.timer)
-    finish(state, decode(data, state.opts))
+    {reply, exiting?} = decode(data, state.opts)
+    # An evaluator that answers on its way out (archon_jq over a limit) is replaced before the
+    # next request can reach it. It ends by itself, so closing its port is enough.
+    state = if exiting?, do: state |> tap(&close(&1.port)) |> open(), else: state
+    finish(state, reply)
   end
 
   def handle_info({:deadline, ref}, %{current: %{ref: ref}} = state) do
-    Logger.warning("archon_js did not answer within the time limit; restarting it")
+    Logger.warning("#{name(state)} did not answer within the time limit; restarting it")
     kill(state.port)
     error = %Error{kind: :timeout, reason: "interrupted", timeout: state.opts[:timeout]}
     finish(open(state), {:error, error})
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    Logger.warning("archon_js exited with status #{status}; restarting it")
+    Logger.warning("#{name(state)} exited with status #{status}; restarting it")
     state = open(state)
 
     case state.current do
@@ -93,16 +97,7 @@ defmodule Archon.Script.Worker do
   defp open(state) do
     opts = state.opts
 
-    args =
-      Enum.flat_map(
-        [
-          memory_limit: "--memory-limit",
-          stack_limit: "--stack-limit",
-          timeout: "--timeout-ms",
-          max_output: "--max-output"
-        ],
-        fn {key, flag} -> [flag, Integer.to_string(opts[key])] end
-      )
+    args = Enum.flat_map(opts[:args], fn {key, flag} -> [flag, Integer.to_string(opts[key])] end)
 
     port =
       Port.open({:spawn_executable, opts[:executable]}, [
@@ -114,6 +109,14 @@ defmodule Archon.Script.Worker do
       ])
 
     %{state | port: port}
+  end
+
+  defp name(state), do: Path.basename(state.opts[:executable])
+
+  defp close(port) do
+    Port.close(port)
+  catch
+    :error, :badarg -> :ok
   end
 
   defp kill(nil), do: :ok
@@ -135,22 +138,26 @@ defmodule Archon.Script.Worker do
     :error, :badarg -> :ok
   end
 
+  # The reply, and whether the evaluator exits after this answer.
   defp decode(data, opts) do
     case JSON.decode(data) do
       {:ok, %{"ok" => value}} ->
-        {:ok, Script.decode_value(value)}
+        {{:ok, opts[:decode].(value)}, false}
 
       {:ok, %{"error" => kind, "message" => message} = error} ->
-        {:error,
-         %Error{
-           kind: error_kind(kind),
-           reason: message,
-           line: error["line"],
-           timeout: opts[:timeout]
-         }}
+        reply =
+          {:error,
+           %Error{
+             kind: error_kind(kind),
+             reason: message,
+             line: error["line"],
+             timeout: opts[:timeout]
+           }}
+
+        {reply, error["exit"] == true}
 
       _malformed ->
-        {:error, %Error{kind: :crashed, reason: "sent a malformed response"}}
+        {{:error, %Error{kind: :crashed, reason: "sent a malformed response"}}, false}
     end
   end
 

@@ -4,16 +4,19 @@
 
 defmodule Archon.Script.Pool do
   @moduledoc """
-  The `archon_js` worker pool (ADR 0015, decision 2).
+  A pool of evaluator processes behind Erlang ports: the `archon_js` pool (ADR 0015, decision 2)
+  and, started by `Archon.Jq.Pool` with its own options, the `archon_jq` pool (ADR 0026,
+  decision 6).
 
   A supervisor (`:rest_for_one`) over a dispatcher and `workers` `Archon.Script.Worker`s, each
-  owning one `archon_js` port. A request waits in the dispatcher until a worker is idle; the
+  owning one port of `executable`. A request waits in the dispatcher until a worker is idle; the
   worker answers the caller directly. At most `max_queue` requests wait; beyond that a request
   fails at once with `Script evaluation queue is full`, and a waiting request whose caller has
   exited is dropped instead of run. A worker that stops while busy is answered for by the
   dispatcher, and if the dispatcher restarts, the workers restart and register again.
 
-  Options (defaults from `config :archon, Archon.Script.Pool`, then the values below):
+  Options of the `archon_js` pool (defaults from `config :archon, Archon.Script.Pool`, then the
+  values below):
 
     * `:name` - the pool name, `Archon.Script.Pool` by default.
     * `:workers` - number of worker processes, `System.schedulers_online/0` by default.
@@ -26,6 +29,14 @@ defmodule Archon.Script.Pool do
     * `:max_output` - largest result in bytes, 16 MiB.
     * `:max_queue` - most requests waiting for a worker, 1000.
     * `:executable` - path of `archon_js`, `priv/archon_js` by default.
+
+  What makes a pool run one evaluator rather than another (set by `start_link/1` for
+  `archon_js`, by `Archon.Jq.Pool` for `archon_jq`):
+
+    * `:args` - the options passed to `executable`, as `{option, flag}` pairs: the process is
+      started with `flag value` for each.
+    * `:ops` - the `"op"` values a request may carry; any other is rejected without a worker.
+    * `:decode` - turns the `"ok"` value of an answer into the result.
   """
 
   use Supervisor
@@ -39,21 +50,38 @@ defmodule Archon.Script.Pool do
     memory_limit: 64 * 1024 * 1024,
     stack_limit: 1024 * 1024,
     max_output: 16 * 1024 * 1024,
-    max_queue: 1_000
+    max_queue: 1_000,
+    args: [
+      memory_limit: "--memory-limit",
+      stack_limit: "--stack-limit",
+      timeout: "--timeout-ms",
+      max_output: "--max-output"
+    ],
+    ops: ["eval", "parse"],
+    decode: &Script.decode_value/1
   ]
 
   @doc false
-  def start_link(opts) do
-    opts = options(opts)
-    Supervisor.start_link(__MODULE__, opts, name: opts[:name])
-  end
+  def start_link(opts), do: opts |> options() |> start_pool()
+
+  @doc false
+  # Starts a pool from complete options (`Archon.Jq.Pool` builds its own).
+  @spec start_pool(keyword()) :: Supervisor.on_start()
+  def start_pool(opts), do: Supervisor.start_link(__MODULE__, opts, name: opts[:name])
 
   @doc "Runs one `archon_js` operation on the pool `name`."
   @spec run(atom(), Script.op(), String.t(), term()) ::
           {:ok, Script.value()} | {:error, Error.t()}
-  def run(name, op, script, input) when op in [:eval, :parse] and is_binary(script) do
-    GenServer.call(dispatcher(name), {:run, op, script, input}, :infinity)
-  end
+  def run(name, op, script, input) when op in [:eval, :parse] and is_binary(script),
+    do: request(name, %{"op" => Atom.to_string(op), "script" => script, "input" => input})
+
+  @doc """
+  Sends one request, a JSON object whose `"op"` is one of the pool's `:ops`, to the pool `name`
+  and answers the decoded result or the error.
+  """
+  @spec request(atom(), %{required(String.t()) => term()}) :: {:ok, term()} | {:error, Error.t()}
+  def request(name, %{"op" => op} = request) when is_binary(op),
+    do: GenServer.call(dispatcher(name), {:run, request}, :infinity)
 
   @doc false
   def dispatcher(name), do: Module.concat(name, Dispatcher)
@@ -78,7 +106,8 @@ defmodule Archon.Script.Pool do
     }
 
     children = [
-      {__MODULE__.Dispatcher, name: dispatcher(name), max_queue: opts[:max_queue]},
+      {__MODULE__.Dispatcher,
+       name: dispatcher(name), max_queue: opts[:max_queue], ops: opts[:ops]},
       worker_supervisor
     ]
 
@@ -108,14 +137,23 @@ defmodule Archon.Script.Pool do
     def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: opts[:name])
 
     @impl true
-    def init(opts),
-      do: {:ok, %{idle: [], busy: %{}, queue: :queue.new(), max_queue: opts[:max_queue]}}
+    def init(opts) do
+      {:ok,
+       %{
+         idle: [],
+         busy: %{},
+         queue: :queue.new(),
+         max_queue: opts[:max_queue],
+         ops: opts[:ops]
+       }}
+    end
 
     @impl true
-    def handle_call({:run, op, script, input}, from, state) do
-      request = {op, script, input}
-
+    def handle_call({:run, request}, from, state) do
       cond do
+        request["op"] not in state.ops ->
+          {:reply, {:error, %Error{kind: :request, reason: "unknown op #{request["op"]}"}}, state}
+
         state.idle != [] ->
           [worker | idle] = state.idle
           {:noreply, assign(%{state | idle: idle}, worker, request, from)}

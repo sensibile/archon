@@ -28,6 +28,11 @@ if config_env() == :prod do
     metadata: Archon.Runtime.Metadata.Postgres
 end
 
+# The evaluator pools take `timeout`, `grace`, `memory_limit`, `max_output`, `max_queue`, `workers`
+# and `executable`: `config :archon, Archon.Script.Pool` for archon_js (ADR 0015, which also takes
+# `stack_limit`) and `config :archon, Archon.Jq.Pool` for archon_jq (ADR 0026, decision 6). See
+# each module for the defaults.
+
 # `evict_after` (ADR 0021, decision 6) is left to its default by backend: off with the memory
 # store, 60 s with the Postgres one.
 

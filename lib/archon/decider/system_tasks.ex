@@ -90,7 +90,8 @@ defmodule Archon.Decider.SystemTasks do
       "HUMAN" => %Spec{module: SystemTask.Human},
       "EXCLUSIVE_JOIN" => %Spec{module: SystemTask.ExclusiveJoin},
       "INLINE" => %Spec{module: SystemTask.Inline},
-      "LAMBDA" => %Spec{module: SystemTask.Lambda}
+      "LAMBDA" => %Spec{module: SystemTask.Lambda},
+      "JSON_JQ_TRANSFORM" => %Spec{module: SystemTask.JsonJqTransform}
     }
   end
 

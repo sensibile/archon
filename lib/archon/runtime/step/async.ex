@@ -211,6 +211,10 @@ defmodule Archon.Runtime.Step.Async do
           nil ->
             dispose(state, task, async_complete?)
 
+          # No asynchronous type fails its start; upstream's executor would only log it.
+          {:error, _reason} ->
+            dispose(state, task, async_complete?)
+
           result ->
             state |> Schedule.apply_result(result) |> dispose(result.task, async_complete?)
         end

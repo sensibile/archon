@@ -59,7 +59,7 @@ defmodule Archon.Runtime.Step.Env do
 
   alias Archon.Decider.{Context, SystemTasks}
   alias Archon.Domain.{Task, TaskDef, Workflow}
-  alias Archon.Script
+  alias Archon.{Jq, Script}
 
   @enforce_keys [:now]
   defstruct [
@@ -132,7 +132,7 @@ defmodule Archon.Runtime.Step.Env do
       |> Keyword.put_new(:evaluate_script, &Script.evaluate/3)
       |> Keyword.put_new(:task_def_lookup, &Context.no_task_def/1)
       |> Keyword.put_new(:workflow_def_lookup, &Context.no_workflow_def/2)
-      |> Keyword.put_new(:evaluate_jq, &Context.no_jq/2)
+      |> Keyword.put_new(:evaluate_jq, &Jq.evaluate/2)
       |> Keyword.put_new(:system_tasks, SystemTasks.default())
 
     struct!(__MODULE__, opts)

@@ -748,7 +748,18 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "p7_jq_null_start", @jq},
     {:exchange, "p7_jq_null_get", @jq ++ @settled},
     {:exchange, "p7_jq_syntax_start", @jq},
-    {:exchange, "p7_jq_syntax_get", @jq ++ @settled},
+    # jq's syntax error reads differently from jackson-jq's (ADR 0026, decision 6).
+    {:exchange, "p7_jq_syntax_get",
+     @jq ++
+       @settled ++
+       [
+         ignore: [
+           ["reasonForIncompletion"],
+           ["output", "error"],
+           ["tasks", 0, "reasonForIncompletion"],
+           ["tasks", 0, "outputData", "error"]
+         ]
+       ]},
     {:exchange, "p7_jq_missing_start", @jq},
     {:exchange, "p7_jq_missing_get", @jq ++ @settled},
     {:exchange, "p7_jq_not_string_start", @jq},

@@ -13,7 +13,6 @@ defmodule Archon.Decider.SystemTasksTest do
   alias Archon.Decider.{Context, Mapper, Outcome, SystemTasks}
   alias Archon.Domain.{Task, TaskDef, Workflow, WorkflowDef, WorkflowTask}
   alias Archon.Runtime.Step.Env
-  alias Archon.Script
 
   describe "the system task table" do
     test "registers the system tasks Archon runs, keyed by the task's type" do
@@ -80,13 +79,13 @@ defmodule Archon.Decider.SystemTasksTest do
   end
 
   describe "the context's injected functions" do
-    test "default to finding nothing and to no jq evaluator" do
+    test "default to finding nothing and to the jq pool" do
       context = Context.new(now: 0)
 
       assert context.task_def_lookup.("archon_task_a") == {:error, :not_found}
       assert context.workflow_def_lookup.("archon_simple", nil) == {:error, :not_found}
       assert context.workflow_def_lookup.("archon_simple", 1) == {:error, :not_found}
-      assert {:error, %Script.Error{kind: :request}} = context.evaluate_jq.(".", %{})
+      assert context.evaluate_jq.(".a", %{"a" => 1}) == {:ok, [1]}
       assert context.max_workflow_variables_payload_kb == 256
     end
 

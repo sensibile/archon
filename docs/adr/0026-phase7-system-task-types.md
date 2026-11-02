@@ -323,7 +323,7 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   `queryExpression`이 없으면 `"Missing 'queryExpression' in input parameters"`로 `FAILED`. 성공은 출력 `result`(첫 결과 또는 `null`)와
   `resultList`(전체), `COMPLETED`. 오류는 엔진 메시지를 출력 `error`와 `reasonForIncompletion`에 넣고 `FAILED`다. 일은 예약 때
   (`start`) 한다. upstream `execute`는 `start`를 다시 부르지만, `start`가 늘 종료 상태로 끝나 결정 루프의 미종료 검사에 걸리지 않으므로
-  불리지 않는다. archon은 `execute`를 두지 않는다. `queryExpression`이 문자열이 아니면 결정 3 머리의 공통 규칙을 따른다
+  불리지 않는다. archon은 `execute`를 두지 않는다(조각 7e가 고침: behaviour가 요구해 둔다, 아래). `queryExpression`이 문자열이 아니면 결정 3 머리의 공통 규칙을 따른다
   (upstream은 예약 중 예외라 `"Error scheduling tasks: ..."` 종료로 보인다. 7a 캡처로 확인).
 - **시간 상한.** jackson-jq에는 상한이 없다. archon은 풀의 시간 상한(기본 4초)을 넘으면 `Script not evaluated within <N> seconds,
   interrupted.`와 같은 모양의 jq 문구로 `FAILED`다(의도적 차이).
@@ -333,6 +333,70 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
 - **타입 제약.** upstream `WorkflowTaskTypeConstraint`의 JSON_JQ_TRANSFORM 규칙(`queryExpression`이 입력이나 태스크 정의의
   `inputTemplate`에 있어야 함, 문구 `"inputParameters.queryExpression field is required for taskType: JSON_JQ_TRANSFORM taskName: <name>"`)을
   옮긴다. 태스크 정의 조회는 7a가 만든 연결(결정 2)을 쓴다(ADR 0014 결정 7이 미룬 부분).
+
+- **조각 7e에서 정한 것(2026-11-03).**
+  - **vendoring.** jq 1.8.2(태그 `jq-1.8.2`, 커밋 `34f7186b86743a083a589741b6cea95293524108`,
+    `https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-1.8.2.tar.gz`, SHA256
+    `71b8d6e8f5fe81f6c6d0d110e3892251f6ce76ed095abd315e26e6e1193af3af`, 1,959,950바이트)와 oniguruma 6.9.10(태그 `v6.9.10`, 커밋
+    `4ef89209a239c1aea328cf13c05a2807e5c146d1`, `https://github.com/kkos/oniguruma/releases/download/v6.9.10/onig-6.9.10.tar.gz`,
+    SHA256 `2a5cfc5ae259e4e97f86b68dfffc152cdaffe94e2060b770cb827238d769fc05`, 979,159바이트). 두 SHA256은 릴리스가 함께 낸 값과 같다.
+    라이브러리 빌드에 쓰는 파일만 고치지 않고 넣었다(jq 47개, oniguruma 28개, 파일별 SHA256은 `c_src/jq/VERSION`). oniguruma의
+    `src/`는 jq 1.8.2가 함께 내는 `vendor/oniguruma/src/`와 autotools 파일 말고 같다. configure 대신 Archon의 설정 헤더
+    (`c_src/archon_jq/include/jq_config.h`, oniguruma용 `config.h`)를 쓰고, `src/builtin.inc`는 jq의 Makefile처럼 빌드 때 만든다.
+    입력 수의 원래 표기를 지키는 `USE_DECNUM`은 jq 기본처럼 켠다. 지원 호스트는 little-endian LP64의 Linux(glibc)·macOS다.
+    고지는 루트 `NOTICE`.
+  - **메모리 상한(두 플랫폼).** 강제 포함 헤더 `archon_jq_alloc.h`가 vendoring한 소스(jq, decNumber, oniguruma)의 `malloc`·
+    `calloc`·`realloc`·`free`·`strdup`만 호스트의 계수 함수로 바꾼다. 계수 함수는 블록에 머리를 붙이지 않고 libc 할당자를 그대로
+    부른 뒤 `malloc_usable_size`(Linux)·`malloc_size`(macOS)로 센다. 그래서 libc가 할당한 블록을 jq가 풀거나 그 반대여도 같은
+    할당자의 블록이고, 어긋나는 것은 그 블록만큼의 계수뿐이다. 상한을 넘는 요청은 NULL을 돌려주지 않고 그 자리에서
+    `{"error":"limit","message":"memory limit exceeded","exit":true}`를 쓰고 프로세스를 끝낸다(jq·oniguruma가 NULL을 다루는 방식에
+    기대지 않는다). 워커는 `exit`가 붙은 답을 받으면 다음 요청 전에 프로세스를 바꾼다. Linux는 `RLIMIT_AS`(상한 + 512MiB)를
+    2차로 건다(sanitize 빌드 제외). 시험(`test/archon/jq_test.exs`): 16MiB 상한에서 `[range(0; 100000000)]`과 1MB 문자열의
+    정규식 매칭 스택(oniguruma 할당)이 상한에 걸리고, 같은 문자열의 `length`는 통과한다. macOS(로컬)와 Linux(로컬 Docker,
+    CI)에서 통과했다.
+  - **시간 상한.** 호스트가 `setitimer`로 상한(기본 4초)에 timeout 답(`exit` 포함)을 쓰고 끝낸다. 워커는 그 뒤 `grace`(기본
+    1초)까지 답이 없으면 OS 프로세스를 kill한다(ADR 0015 결정 2의 두 겹과 같은 구조). 문구는
+    `JQ query not evaluated within <N> seconds, interrupted.`다.
+  - **격리.** 시작할 때 환경을 비우고 `TZ=UTC`만 둔다(`$ENV`·`env`는 `{"TZ":"UTC"}`, macOS는 `clearenv`가 없어 `environ`을 빈 목록으로
+    바꾼다). `HOME`이 없으므로 jq가 `~/.jq`를 자동으로 가져오지 않는다. `import`·`include`는 `search` 메타데이터로 절대 경로를
+    줄 수 있어 검색 경로를 비우는 것만으로 막히지 않으므로, 쿼리를 컴파일하기 전에 jq 파서로 읽어 지시문이 있으면 거절한다
+    (`JQ query rejected: import and include are not supported`). 라이브러리 검색 경로는 빈 목록이다(`modulemeta`는 못 찾음,
+    `get_search_list`는 `[]`). 입력 콜백은 빈 입력이다(`[inputs]`는 `[]`, `input`은 오류). debug·stderr 콜백은 버리고, 호스트의
+    stderr도 `/dev/null`이다(sanitize 빌드는 보고를 위해 남김). `halt`·`halt_error`는 `halt and halt_error are not supported`
+    오류다. jq는 쿼리를 C 문자열로 읽으므로 NUL 문자가 든 쿼리는 뒤를 잘라 실행하지 않고 거절한다(`JQ query rejected: the query
+    contains a NUL character`). 메모리 상한보다 큰 요청은 받아 두지 않고 읽어 버린 뒤 `JQ query memory limit exceeded`로 답한다(파싱한
+    값은 그보다 크므로 어차피 상한을 넘는다). 결과는 16MiB, 결과 하나의 깊이 1,000을 넘으면 `JQ query result is too large`·`JQ query result is nested too deeply`다.
+  - **프로토콜과 값.** 요청 `{"op": "eval", "query", "input"}`, 응답 `{"ok": [결과...]}` 또는 `{"error": kind, "message"}`다. jq 값은
+    JSON 그대로이므로 `archon_js`의 타입 붙은 값 대신 평범한 JSON을 쓰고, 정수·실수 구분은 수 표기로 전한다. 수는 upstream
+    `extractBody`처럼 정수이고 `long` 범위면 정수, 아니면 실수다. 다만 jq가 입력이나 쿼리의 표기를 지닌 수(`USE_DECNUM`의
+    literal)는 그 표기가 정수일 때만 정수다(입력 `1.0`은 실수 `1.0`, jackson-jq의 `DoubleNode`와 같음). `NaN`·무한대는 upstream이
+    저장하는 문자열 `"NaN"`·`"Infinity"`·`"-Infinity"`다.
+  - **풀.** `Archon.Script.Pool`이 `:args`(실행 파일 인자), `:ops`(허용 op, 그 밖은 워커 없이 거절), `:decode`(응답 값 풀기)를 받고
+    `request/2`를 연다. `Archon.Jq.Pool`이 이것을 `priv/archon_jq`로 띄운다. 설정은 `config :archon, Archon.Jq.Pool`(`timeout` 4000,
+    `grace` 1000, `memory_limit` 64MiB, `max_output` 16MiB, `max_queue` 1000, `workers` 스케줄러 수, `executable`)이고,
+    `application.ex`가 스크립트 풀 다음에 띄운다. `Context.new`·`Step.Env.new`의 `evaluate_jq` 기본값이 `Archon.Jq.evaluate/2`다.
+    `WorkflowServer.env/2`는 `Step.Env.new`의 기본값을 받으므로 고치지 않았다. `Context.no_jq/2`는 지웠다.
+  - **문구.** 컴파일 오류와 실행 오류는 jq의 메시지다(컴파일 오류는 `jq: error: ` 머리와 끝의 `jq: N compile error` 줄을 뺀다).
+    값이 문자열이 아닌 `error(v)`는 `<v의 JSON> (not a string)`이다. 그 밖은 `JQ query <이유>`(상한), `JQ evaluator <이유>`(프로세스
+    비정상 종료), `JQ query rejected: <이유>`(요청 거절)다(`Archon.Jq.message/1`).
+  - **문자열이 아닌 `queryExpression`.** upstream `start`의 캐스트 예외는 `scheduleTask`의 `catch`에서
+    `TerminateWorkflowException("Error scheduling tasks: <이 배치의 태스크 ID 목록>, for workflow: <ID>")`가 된다. 그래서
+    `SystemTask.start/3`가 upstream이 던지는 자리에서 `{:error, reason}`을 돌려줄 수 있게 넓혔고(`reason`은 upstream이 로그로만 남기는
+    예외), `Step.Schedule.schedule/2`가 그 자리에서 멈춰(뒤의 동기 시스템 태스크는 시작하지 않고, 배치의 어떤 태스크도 큐에 넣지 않음) `{:terminate, termination, state}`를
+    돌려준다. 결정 루프, `DO_WHILE`의 다음 반복, retry, rerun(그 태스크 하나의 ID)이 이것으로 워크플로우를 끝낸다(`FAILED`, 남은
+    태스크 `CANCELED`). `p7_jq_not_string_get`과 같다. upstream의 retry·rerun은 그 예외가 요청 밖으로 나가지만, archon은 결정 루프와
+    같게 워크플로우를 끝낸다(픽스처 없음). upstream `scheduleTask`처럼 동기 시스템 태스크를 먼저 모두 시작하고 나머지를 큐에 넣거나
+    평가 대상으로 두도록 `schedule/2`의 순서를 바꿨으므로, 시작이 실패하면 그 배치의 어떤 태스크도 큐에 들어가지 않는다.
+    비동기 타입의 `start`가 `{:error, _}`를 돌려주면 `Step.Async`는 `start`가 없는 것처럼 다룬다(지금 그런 타입은 없다).
+  - **`execute`.** behaviour가 `execute/3`를 요구하므로 upstream처럼 `start`를 다시 부른다. `start` 뒤에는 태스크가 종료 상태이거나
+    워크플로우가 끝나 결정 루프가 부르지 않는다. 그래도 불리면 문자열이 아닌 `queryExpression`은 태스크를 `FAILED`로 끝낸다.
+  - **매퍼.** 태스크 정의는 컨텍스트의 것, 없으면 `task_def_lookup`(upstream의 `MetadataDAO#getTaskDef` 대체)이다. 격리 그룹은
+    upstream처럼 컨텍스트의 태스크 정의에서만 읽는다.
+  - **타입 제약.** upstream처럼 키만 본다(`containsKey`, 값이 `null`이어도 통과).
+  - **프로브 비교.** jackson-jq 0.0.13, Jackson 2.18.8, joni 2.1.27(Gradle 캐시, 서버 boot jar의 버전과 같음)에 upstream
+    `JsonJqTransform.start`·`extractBody`·`extractFirstValidMessage`를 옮긴 Java 프로브로 쿼리 143개를 비교했다. 113개는 결과가 같고
+    (입력 키 순서에 기대는 것을 뺀 104개가 `test/archon/jq_test.exs`의 기대값), 나머지는 아래 "의도적으로 다른 점"과 오류 문구 차이다.
+    7a 픽스처는 문법 오류 문구만 다르다(재생 단계 `p7_jq_syntax_get`의 해당 경로 `ignore`).
 
 ### 7. 비동기 타입: START_WORKFLOW(조각 7f), HTTP(조각 7g)
 
@@ -577,6 +641,14 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
 - **INLINE 평가기 풀 오류**(결정 5): upstream에 대응이 없다. 재시도 가능한 `FAILED`다.
 - **FORK_JOIN_DYNAMIC 오류 문구의 Java `toString`**(결정 4): 재현하지 않는다.
 - **JQ 엔진**(결정 6): jackson-jq 대신 jqlang. 시간 상한(기본 4초)이 있다. 프로브가 찾은 차이 중 맞추지 않은 것은 조각 7e가 여기에 더한다.
+  조각 7e가 더한 것(jackson-jq 0.0.13 프로브):
+  - jq 1.8.2에는 jackson-jq 0.0.13에 없는 함수·문법(`round`, `todate`, `getpath`, `label`, `$__loc__`, `(...)[]` 등)이 있어
+    upstream이 `Function ... does not exist`나 구문 오류로 실패하는 쿼리가 결과를 낸다. `$ENV`·`env`는 `{"TZ":"UTC"}`다.
+  - 수학 함수의 정수 결과(`floor`, `sqrt` 등)는 정수다(jackson-jq는 실수 `1.0`). 산술은 double이라 2^53을 넘는 정수 연산은 가장 가까운
+    double이다(jackson-jq는 `long`). 정수가 아닌 수의 `%`는 jq처럼 잘라서 계산한다(jackson-jq는 오류).
+  - 컴파일·실행 오류 문구는 jq의 것이다. `import`·`include`는 거절한다(jackson-jq는 구문 오류).
+  - 메모리(64MiB)·결과 크기(16MiB)·깊이(1,000) 상한이 있다.
+  - `long` 범위를 넘는 정수는 실수다(upstream은 결과 안의 것은 `BigInteger`로 두고 최상위의 것은 `asLong`으로 넘친다).
 - **HUMAN의 결정 큐**(결정 3): `humanTaskPreventsDeciderQueue`에 대응하는 것이 없다. 결과 상태는 같다.
 - **비밀 값 치환**(결정 1): 하지 않는다.
 
