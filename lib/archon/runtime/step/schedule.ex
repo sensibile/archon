@@ -171,16 +171,19 @@ defmodule Archon.Runtime.Step.Schedule do
 
     case start_all(state, sync, tasks) do
       {:ok, state} ->
-        state =
-          Enum.reduce(other, state, fn task, state ->
-            if system_task?(env, task), do: due(state, task), else: push(state, task)
-          end)
-
-        {state, sync != []}
+        {queue(state, other, env), sync != []}
 
       {:terminate, termination, state} ->
         {:terminate, termination, state}
     end
+  end
+
+  # addTaskToQueue for the tasks that did not start: worker tasks join their queues, asynchronous
+  # system tasks are marked for evaluation.
+  defp queue(state, tasks, env) do
+    Enum.reduce(tasks, state, fn task, state ->
+      if system_task?(env, task), do: due(state, task), else: push(state, task)
+    end)
   end
 
   defp start_all(state, sync, tasks) do
