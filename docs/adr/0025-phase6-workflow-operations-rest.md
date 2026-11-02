@@ -186,8 +186,7 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
       `"Parent workflow has been terminated ..."`), 자식의 종료 알림이 그 태스크에 사유를 쓰지 않는다(`Step.SubWorkflow.child_changed`).
       클라이언트가 직접 `CANCELED`로 갱신한 태스크는 이 예외가 아니다. upstream `cancelNonTerminalTasks`는 자식 종료가 태스크를 갱신한
       뒤 자기가 든 `CANCELED` 태스크를 다시 저장한다(`workflow_get_rerun_mid`). Phase 4의 모든 "부모가 자식을 취소" 경로에 적용된다.
-      사용자가 자식을 직접 끝내는 것과 부모 종료가 겹쳐 부모의 취소가 먼저 커밋되면 자식의 사유가 남지 않는다(upstream은 자식
-      갱신이 먼저면 남는다). 드문 경합의 사유 문구 차이로 받아들인다.
+      사용자가 자식을 직접 끝낸 뒤 부모가 끝나 그 태스크를 취소해도, 자식의 사유는 사용자 사유라서 알림이 그대로 반영된다.
     - **읽기 검증의 404.** 내려가다 만난 자식이 저장소에 없거나 그 태스크의 자식이 아니면(ADR 0024 결정 2) 404
       `"No such workflow found by id: <자식 ID>"`다. ID가 없으면 `null`이다(upstream `getWorkflowModel(null)`).
     - **교차 출처.** rerun은 필수 JSON body를 읽으므로 결정 3의 `refuse_cross_origin`에 넣지 않는다. 폼·`text/plain`은 Content-Type
