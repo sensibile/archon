@@ -7,9 +7,9 @@
 # and core/src/main/java/com/netflix/conductor/core/utils/DateTimeUtils.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the class-level constraint became a function returning error tuples;
-# the MetadataDAO lookup of a task definition is a validation option, and the HTTP and
-# KAFKA_PUBLISH rules are not ported yet (ADR 0014, ADR 0026); the script syntax check runs
-# through Archon.Script (ADR 0015).
+# the MetadataDAO lookup of a task definition is a validation option, and the KAFKA_PUBLISH rule
+# is not ported yet (ADR 0014, ADR 0026); the script syntax check runs through Archon.Script
+# (ADR 0015).
 
 defmodule Archon.Domain.TaskTypeConstraint do
   @moduledoc """
@@ -19,9 +19,9 @@ defmodule Archon.Domain.TaskTypeConstraint do
   it runs for every task wherever a `WorkflowTask` is validated. The violations are class-level:
   their path is the task's own path (`tasks[0]`), represented here by `""`.
 
-  Not ported yet (ADR 0014): `HTTP` and `KAFKA_PUBLISH`, which fall back to a `MetadataDAO`
-  lookup of the task definition. The lookup is wired (`task_definition/2`, ADR 0026 decision 2);
-  `JSON_JQ_TRANSFORM` reads it (slice 7e) and the other Phase 7 slices add their rules.
+  Not ported yet (ADR 0014): `KAFKA_PUBLISH`, which falls back to a `MetadataDAO` lookup of the
+  task definition. The lookup is wired (`task_definition/2`, ADR 0026 decision 2);
+  `JSON_JQ_TRANSFORM` (slice 7e) and `HTTP` (slice 7g) read it.
 
   `DECISION.caseExpression` and `SWITCH.expression` with the `javascript` evaluator (not
   `graaljs`, as upstream) are parsed without running (`Archon.Script.validate_syntax/1`, ADR
@@ -157,6 +157,26 @@ defmodule Archon.Domain.TaskTypeConstraint do
 
   # Either the task's inputParameters or its task definition's inputTemplate names a
   # queryExpression (the key only: a null value passes).
+  # isHttpTaskValid: http_request in the inputs or the definition's inputTemplate, or a top-level
+  # uri or method.
+  defp messages(%WorkflowTask{type: "HTTP"} = task, opts) do
+    inputs = task.input_parameters || %{}
+
+    template =
+      case task_definition(task, opts) do
+        %TaskDef{input_template: %{} = template} -> template
+        _none -> %{}
+      end
+
+    required(
+      not Map.has_key?(inputs, "http_request") and not Map.has_key?(inputs, "uri") and
+        not Map.has_key?(inputs, "method") and not Map.has_key?(template, "http_request"),
+      "inputParameters.http_request or inputParameters.uri",
+      "HTTP",
+      task
+    )
+  end
+
   defp messages(%WorkflowTask{type: "JSON_JQ_TRANSFORM"} = task, opts) do
     template =
       case task_definition(task, opts) do

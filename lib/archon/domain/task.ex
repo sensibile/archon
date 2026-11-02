@@ -204,7 +204,9 @@ defmodule Archon.Domain.Task do
 
   @doc """
   Encodes to upstream JSON with the derived getter keys. `now_ms` is the clock used for
-  `queueWaitTime` (see `queue_wait_time/2`).
+  `queueWaitTime` (see `queue_wait_time/2`). `reasonForIncompletion` is cut to 500 characters,
+  as upstream's `TaskModel#toTask` gives it to the `Task` setter: a task in memory keeps the whole
+  reason, which a failed workflow's reason quotes.
   """
   @spec to_json(t(), integer()) :: Codec.json_object()
   def to_json(%__MODULE__{} = task, now_ms \\ System.system_time(:millisecond)) do
@@ -213,6 +215,7 @@ defmodule Archon.Domain.Task do
     resolved = %{
       task
       | task_def_name: task_def_name(task),
+        reason_for_incompletion: truncate_reason(task.reason_for_incompletion),
         sub_workflow_id: sub_workflow_id(task),
         execution_metadata: task.execution_metadata || %ExecutionMetadata{},
         runtime_metadata: non_empty(task.runtime_metadata)

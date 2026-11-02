@@ -290,6 +290,46 @@ defmodule Archon.Domain.TaskTypeConstraintTest do
     end
   end
 
+  describe "WorkflowTaskTypeConstraintTest HTTP" do
+    @http_required "inputParameters.http_request or inputParameters.uri field is required " <>
+                     "for taskType: HTTP taskName: encode"
+
+    defp http(params), do: sample(type: "HTTP", input_parameters: params)
+    defp http_lookup(task_def), do: [task_def_lookup: fn _name -> {:ok, task_def} end]
+
+    test "testWorkflowTaskTypeHTTP" do
+      task = http(%{"http_request" => "http://www.netflix.com"})
+      assert messages(task, http_lookup(%TaskDef{})) == []
+    end
+
+    test "testWorkflowTaskTypeHTTPWithHttpParamMissing" do
+      assert messages(sample(type: "HTTP"), http_lookup(%TaskDef{})) == [@http_required]
+    end
+
+    test "testWorkflowTaskTypeHTTPWithTopLevelParams and testWorkflowTaskTypeHTTPWithTopLevelUriOnly" do
+      task = http(%{"uri" => "http://www.netflix.com", "method" => "GET"})
+      assert messages(task, http_lookup(%TaskDef{})) == []
+      assert messages(http(%{"uri" => "http://www.netflix.com"}), http_lookup(%TaskDef{})) == []
+      assert messages(http(%{"method" => "GET"}), http_lookup(%TaskDef{})) == []
+    end
+
+    test "testWorkflowTaskTypeHTTPWithHttpParamInTaskDef and ...AndWorkflowTask" do
+      task_def = %TaskDef{
+        name: "encode",
+        input_template: %{"http_request" => "http://www.netflix.com"}
+      }
+
+      assert messages(sample(type: "HTTP"), http_lookup(task_def)) == []
+
+      task = http(%{"http_request" => "http://www.netflix.com"})
+      assert messages(task, http_lookup(task_def)) == []
+    end
+
+    test "without a lookup, only the inputs count" do
+      assert messages(sample(type: "HTTP")) == [@http_required]
+    end
+  end
+
   describe "beyond the upstream tests" do
     test "SWITCH requires an evaluator, then an expression, and decision cases" do
       assert messages(sample(type: "SWITCH", decision_cases: nil)) == [

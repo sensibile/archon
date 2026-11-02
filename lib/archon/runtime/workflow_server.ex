@@ -82,7 +82,19 @@ defmodule Archon.Runtime.WorkflowServer do
       running workflow's process that got no message for `hibernate_after` ends normally
       instead of hibernating when its `:wake` timer, saved with a commit, is more than
       `evict_after` (and `activation_margin`) away and its outbox is empty. The next request activates it again and
-      `Archon.Runtime.Waker` does before the timer is due.
+      `Archon.Runtime.Waker` does before the timer is due. A process with an `HTTP` request in
+      flight is not ended this way (ADR 0026, decision 7).
+
+  ## HTTP
+
+  An `{:http_request, task_id, poll_count, request}` effect hands the request to
+  `Archon.Runtime.HttpTask` after the commit, and the process keeps the attempt (`task_id` to
+  `poll_count`) as in flight; `Step.Env.http_in_flight` gives the step their IDs. The result comes
+  back through `http_completed/4`, by workflow ID, so a process started since then takes it.
+  After each commit, a request whose task is no longer `SCHEDULED` with that `pollCount` (it
+  ended, was removed or started again) is cancelled, which frees its place in the executor; a
+  process that ends normally (its workflow ended or was removed) cancels the ones left. One that
+  fails does not: the process that replaces it takes their results.
 
   ## Removal
 
@@ -144,7 +156,7 @@ defmodule Archon.Runtime.WorkflowServer do
   alias Archon.Decider.SystemTasks
   alias Archon.Domain.{SubWorkflowParams, Task, TaskDef, TaskResult, Workflow, WorkflowDef}
   alias Archon.Runtime
-  alias Archon.Runtime.{Commit, Effects, Outbox}
+  alias Archon.Runtime.{Commit, Effects, HttpTask, Outbox}
   alias Archon.Runtime.Step
   alias Archon.Runtime.Step.{Env, Lifecycle, Schedule, Terminate}
 
@@ -161,7 +173,8 @@ defmodule Archon.Runtime.WorkflowServer do
     :outbox_delay,
     recovered_at: 0,
     kick?: false,
-    ack: []
+    ack: [],
+    http: %{}
   ]
 
   @type t :: %__MODULE__{
@@ -186,7 +199,8 @@ defmodule Archon.Runtime.WorkflowServer do
           outbox_delay: pos_integer() | nil,
           recovered_at: integer(),
           kick?: boolean(),
-          ack: [Archon.Runtime.Store.outbox_id()]
+          ack: [Archon.Runtime.Store.outbox_id()],
+          http: %{optional(String.t()) => non_neg_integer()}
         }
 
   ## Client
@@ -348,6 +362,15 @@ defmodule Archon.Runtime.WorkflowServer do
   def child_changed(parent_id, task_id, %Workflow{} = child),
     do: call(parent_id, :existing, {:child_changed, task_id, child})
 
+  @doc """
+  The result of the request of an `HTTP` task's attempt `poll_count`, from
+  `Archon.Runtime.HttpTask` (ADR 0026, decision 7).
+  """
+  @spec http_completed(String.t(), String.t(), non_neg_integer(), Step.Http.result()) ::
+          :ok | {:error, term()}
+  def http_completed(id, task_id, poll_count, result),
+    do: call(id, :existing, {:http_completed, task_id, poll_count, result})
+
   defp call(id, mode, request, retry? \\ true) do
     case activate(id, mode) do
       {:ok, pid} ->
@@ -462,6 +485,18 @@ defmodule Archon.Runtime.WorkflowServer do
   def handle_call(_event, _from, %__MODULE__{workflow: nil} = state),
     do: {:reply, {:error, :not_found}, state, idle_timeout()}
 
+  # The request of this attempt is no longer in flight, whatever the step makes of its result.
+  def handle_call({:http_completed, task_id, poll_count, _result} = event, _from, state) do
+    http =
+      case state.http do
+        %{^task_id => ^poll_count} -> Map.delete(state.http, task_id)
+        http -> http
+      end
+
+    {reply, state} = handle_event(event, %{state | http: http})
+    reply_and_settle(reply, state)
+  end
+
   def handle_call({:remove, archive?}, _from, state) do
     with :ok <- Lifecycle.removable(state.workflow, archive?),
          :ok <- outbox_empty(state) do
@@ -542,6 +577,37 @@ defmodule Archon.Runtime.WorkflowServer do
     noreply(state)
   end
 
+  # A process that ends normally (its workflow ended or was removed) ends the requests whose
+  # results nothing would take (ADR 0026, decision 7). One that fails leaves them to the process
+  # that replaces it.
+  @impl GenServer
+  def terminate(:normal, state) do
+    Enum.each(state.http, fn {task_id, _poll_count} -> HttpTask.cancel(state.id, task_id) end)
+  end
+
+  def terminate(_reason, _state), do: :ok
+
+  ## HTTP
+
+  # ADR 0026, decision 7: a request whose task is no longer that attempt (it ended, was removed
+  # or started again) is ended, which gives its place in the executor to the next.
+  defp cancel_unused_http(%__MODULE__{http: http} = state) when map_size(http) == 0, do: state
+
+  defp cancel_unused_http(%__MODULE__{workflow: workflow} = state) do
+    attempts =
+      for %Task{status: :scheduled} = task <- (workflow && workflow.tasks) || [],
+          into: %{},
+          do: {task.task_id, task.poll_count}
+
+    {keep, drop} =
+      Enum.split_with(state.http, fn {task_id, poll_count} ->
+        Map.get(attempts, task_id) == poll_count
+      end)
+
+    Enum.each(drop, fn {task_id, _poll_count} -> HttpTask.cancel(state.id, task_id) end)
+    %{state | http: Map.new(keep)}
+  end
+
   ## Removal
 
   # ADR 0025, decision 3: the work for other workflows is done before the workflow goes.
@@ -619,8 +685,12 @@ defmodule Archon.Runtime.WorkflowServer do
            hook(state, :env, event)
            env(state.workflow, event)
          end) do
-      {:ok, env} -> attempt(state, event, env, defer?, budget)
-      {:error, reason} -> {:error, {:env, reason}, state}
+      {:ok, env} ->
+        env = %{env | http_in_flight: MapSet.new(Map.keys(state.http))}
+        attempt(state, event, env, defer?, budget)
+
+      {:error, reason} ->
+        {:error, {:env, reason}, state}
     end
   end
 
@@ -641,6 +711,7 @@ defmodule Archon.Runtime.WorkflowServer do
 
         case commit_step(state, pre, commit, stored) do
           {:ok, state} ->
+            state = cancel_unused_http(state)
             post_step_result(reply, run_post(state, post, defer?, budget - 1))
 
           # ADR 0021, decision 5: another workflow took the last slot since the env was read;
@@ -861,6 +932,16 @@ defmodule Archon.Runtime.WorkflowServer do
     end)
   end
 
+  defp post_effect(state, {:http_request, task_id, poll_count, request} = effect) do
+    case guard(fn ->
+           hook(state, :effect, effect)
+           HttpTask.request(state.id, task_id, poll_count, request)
+         end) do
+      {:ok, :ok} -> {:ok, %{state | http: Map.put(state.http, task_id, poll_count)}}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
   defp post_effect(state, effect) do
     case run_effect(state, effect) do
       :ok ->
@@ -1044,8 +1125,10 @@ defmodule Archon.Runtime.WorkflowServer do
          runner: nil,
          kick?: false,
          ack: [],
+         http: http,
          timer: %{message: :wake, saved?: true, at: at}
-       }) do
+       })
+       when map_size(http) == 0 do
     case evict_after() do
       nil -> false
       after_ms -> at - Runtime.now() > max(after_ms, Runtime.setting(:activation_margin, 5_000))

@@ -33,6 +33,10 @@ end
 # `stack_limit`) and `config :archon, Archon.Jq.Pool` for archon_jq (ADR 0026, decision 6). See
 # each module for the defaults.
 
+# The HTTP task executor (ADR 0026, decision 7) takes `max_concurrency` (schedulers × 2),
+# `max_request_ms` (60 s, a request's total time) and `max_response_bytes` (10 MiB):
+# `config :archon, Archon.Runtime.HttpTask`. See the module for the defaults.
+
 # `evict_after` (ADR 0021, decision 6) is left to its default by backend: off with the memory
 # store, 60 s with the Postgres one.
 

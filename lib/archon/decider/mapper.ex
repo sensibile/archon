@@ -26,6 +26,7 @@ defmodule Archon.Decider.Mapper do
     DoWhile,
     ExclusiveJoin,
     ForkJoin,
+    Http,
     Human,
     Inline,
     Join,
@@ -74,7 +75,8 @@ defmodule Archon.Decider.Mapper do
     "EXCLUSIVE_JOIN" => ExclusiveJoin,
     "INLINE" => Inline,
     "LAMBDA" => Lambda,
-    "JSON_JQ_TRANSFORM" => JsonJqTransform
+    "JSON_JQ_TRANSFORM" => JsonJqTransform,
+    "HTTP" => Http
   }
 
   @doc "The mapper for a task type, `UserDefined` when none is registered."

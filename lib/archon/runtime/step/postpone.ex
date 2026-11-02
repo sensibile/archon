@@ -23,12 +23,13 @@ defmodule Archon.Runtime.Step.Postpone do
     * a `SCHEDULED` task: the poll timeout of its definition left since `scheduledTime`, plus a
       second; else the workflow's `timeoutSeconds` plus a second; else the offset.
 
-  `wake_at/2` adds the end of the delay of each `SCHEDULED` asynchronous system task and keeps
-  the result at least a second after `now`.
+  `wake_at/2` adds the end of the delay of each `SCHEDULED` asynchronous system task and the end
+  of the response timeout of each started `HTTP` task (ADR 0026, decision 7), and keeps the
+  result at least a second after `now`.
   """
 
   alias Archon.Domain.{Task, TaskDef, Workflow, WorkflowDef}
-  alias Archon.Runtime.Step.{Async, Env, Schedule}
+  alias Archon.Runtime.Step.{Async, Env, Http, Schedule}
 
   @doc "Upstream `ExecutorUtils#computePostpone`, in milliseconds from `env.now`."
   @spec compute(Workflow.t(), Env.t()) :: non_neg_integer()
@@ -103,7 +104,13 @@ defmodule Archon.Runtime.Step.Postpone do
           Schedule.delay_ms(task) > 0,
           do: Async.due_time(task) - now
 
-    now + max(earliest(delays, compute(workflow, env)), 1000)
+    # ADR 0026, decision 7: a started HTTP task is evaluated at the end of its response timeout.
+    deadlines =
+      for %Task{task_type: "HTTP", status: :scheduled, poll_count: count} = task <- tasks,
+          count > 0,
+          do: Http.deadline(task) - now
+
+    now + max(earliest(delays ++ deadlines, compute(workflow, env)), 1000)
   end
 
   defp earliest([], ms), do: ms

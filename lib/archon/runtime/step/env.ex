@@ -36,7 +36,8 @@ defmodule Archon.Runtime.Step.Env do
     * `offsets_reset` - for `:reset_callbacks`, the IDs of the tasks whose queue message was made
       due while the env was read (ADR 0025, decision 2: the one env value that is not only read).
     * `http_in_flight` - the IDs of the `HTTP` tasks whose request the workflow process has sent
-      and not had the result of (ADR 0026, decision 7). Empty until the `HTTP` slice fills it.
+      and not had the result of (ADR 0026, decision 7). `Archon.Runtime.WorkflowServer` fills it
+      from its own state; `Archon.Runtime.Step.Async` does not evaluate those tasks.
 
   The settings default to upstream's `ConductorProperties`:
 
