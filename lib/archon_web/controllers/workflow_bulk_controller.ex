@@ -209,6 +209,15 @@ defmodule ArchonWeb.WorkflowBulkController do
     end
   end
 
+  # A list over the limit is only counted by check/3, so it is not converted: only its first
+  # value that would fail to convert is looked for, the error Jackson would stop at.
+  defp cast_ids(json) when is_list(json) and length(json) > @max_ids do
+    case Enum.find_index(json, &(is_map(&1) or is_list(&1))) do
+      nil -> {:ok, json}
+      index -> Codec.cast(:string, Enum.at(json, index), [index])
+    end
+  end
+
   # accept-single-value-as-array: a value that is not an array is a list of one.
   defp cast_ids(json) when is_list(json), do: Codec.cast({:list, :string}, json, [])
   defp cast_ids(json), do: cast_ids([json])

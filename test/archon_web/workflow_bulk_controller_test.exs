@@ -89,6 +89,23 @@ defmodule ArchonWeb.WorkflowBulkControllerTest do
     end
   end
 
+  test "a list over the limit is not converted, but its first bad value still fails first" do
+    ids = Enum.map(1..1001, &"archon-bulk-missing-#{&1}")
+
+    for bad <- [%{}, []] do
+      list = List.replace_at(ids, 1000, bad) ++ [%{"x" => 1}]
+      {:error, errors} = Archon.Domain.Codec.cast({:list, :string}, list, [])
+      {:server_error, expected} = ArchonWeb.Request.codec_error(errors)
+
+      assert server_error(bulk(:put, "pause", Jason.encode!(list))) == expected
+      assert expected =~ "[1000]"
+    end
+
+    # every value converts: the count is checked
+    assert %{"validationErrors" => [_error]} =
+             json_response(bulk(:put, "pause", Jason.encode!([1, true, nil | ids])), 400)
+  end
+
   test "every action checks its own body and names its own handler and method" do
     for {method, path, upstream, params} <- @actions do
       handler = "#{@handler}#{upstream}(#{Enum.join([@ids | params], ",")})"
