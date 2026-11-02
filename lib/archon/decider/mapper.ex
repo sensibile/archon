@@ -27,7 +27,9 @@ defmodule Archon.Decider.Mapper do
     Dynamic,
     ForkJoin,
     ForkJoinDynamic,
+    Inline,
     Join,
+    Lambda,
     Simple,
     SubWorkflow,
     Switch,
@@ -60,7 +62,9 @@ defmodule Archon.Decider.Mapper do
     "SUB_WORKFLOW" => SubWorkflow,
     "WAIT" => Wait,
     "DYNAMIC" => Dynamic,
-    "FORK_JOIN_DYNAMIC" => ForkJoinDynamic
+    "FORK_JOIN_DYNAMIC" => ForkJoinDynamic,
+    "INLINE" => Inline,
+    "LAMBDA" => Lambda
   }
 
   @doc "The mapper for a task type, `UserDefined` when none is registered."
