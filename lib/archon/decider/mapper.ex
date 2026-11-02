@@ -27,7 +27,9 @@ defmodule Archon.Decider.Mapper do
     ExclusiveJoin,
     ForkJoin,
     Human,
+    Inline,
     Join,
+    Lambda,
     Noop,
     SetVariable,
     Simple,
@@ -66,7 +68,9 @@ defmodule Archon.Decider.Mapper do
     "SET_VARIABLE" => SetVariable,
     "NOOP" => Noop,
     "HUMAN" => Human,
-    "EXCLUSIVE_JOIN" => ExclusiveJoin
+    "EXCLUSIVE_JOIN" => ExclusiveJoin,
+    "INLINE" => Inline,
+    "LAMBDA" => Lambda
   }
 
   @doc "The mapper for a task type, `UserDefined` when none is registered."

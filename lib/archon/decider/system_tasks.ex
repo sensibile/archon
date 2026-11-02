@@ -87,7 +87,9 @@ defmodule Archon.Decider.SystemTasks do
       "SET_VARIABLE" => %Spec{module: SystemTask.SetVariable},
       "NOOP" => %Spec{module: SystemTask.Noop},
       "HUMAN" => %Spec{module: SystemTask.Human},
-      "EXCLUSIVE_JOIN" => %Spec{module: SystemTask.ExclusiveJoin}
+      "EXCLUSIVE_JOIN" => %Spec{module: SystemTask.ExclusiveJoin},
+      "INLINE" => %Spec{module: SystemTask.Inline},
+      "LAMBDA" => %Spec{module: SystemTask.Lambda}
     }
   end
 

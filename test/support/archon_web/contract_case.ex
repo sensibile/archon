@@ -34,6 +34,10 @@ defmodule ArchonWeb.ContractCase do
     * `expect: {:archon, status, conditions}` - Archon answers `status` with a body that meets
       `conditions` (as `until:` has them) instead of the fixture's response, for a deliberate
       difference where upstream fails (ADR 0026, decision 3). No ID is bound from it.
+    * `expect: :started` - Archon starts the workflow (200 with its ID as text) where upstream's
+      start answered the fixture's error: upstream throws out of the start's first decide, and
+      Archon fails the task instead (an `INLINE` input that is not a string; ADR 0026,
+      decision 5). No ID is bound from it.
     * `ignore: [path]` - leave out these paths (lists of keys and list indexes) of both bodies,
       for a message Archon cannot reproduce (Jackson's parse errors) or a value upstream's timing
       decides.
@@ -112,6 +116,7 @@ defmodule ArchonWeb.ContractCase do
   @type exchange_opts :: [
           expect:
             :no_route
+            | :started
             | {:archon, pos_integer(), [{[String.t() | non_neg_integer()], condition()}]},
           ignore: [[String.t() | non_neg_integer()]],
           only: :expected_names | :bound_ids,
@@ -170,6 +175,17 @@ defmodule ArchonWeb.ContractCase do
   @fork_join_dynamic [types: ["FORK_JOIN_DYNAMIC"]]
   @inline [types: ["INLINE"]]
   @lambda [types: ["LAMBDA"]]
+  # The script engine's own message (ADR 0015) and a start upstream throws out of (ADR 0026,
+  # decision 5).
+  @engine_message [
+    ignore: [
+      ["reasonForIncompletion"],
+      ["output", "error"],
+      ["tasks", 0, "reasonForIncompletion"],
+      ["tasks", 0, "outputData", "error"]
+    ]
+  ]
+  @started [expect: :started]
   @jq [types: ["JSON_JQ_TRANSFORM"]]
   @start_workflow [types: ["START_WORKFLOW", "NOOP"]]
   @http [types: ["HTTP"]]
@@ -714,15 +730,15 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "p7_inline_unknown_start", @inline},
     {:exchange, "p7_inline_unknown_get", @inline ++ @settled},
     {:exchange, "p7_inline_script_error_start", @inline},
-    {:exchange, "p7_inline_script_error_get", @inline ++ @settled},
-    {:exchange, "p7_inline_evaluator_not_string_start", @inline},
-    {:exchange, "p7_inline_expression_not_string_start", @inline},
+    {:exchange, "p7_inline_script_error_get", @inline ++ @settled ++ @engine_message},
+    {:exchange, "p7_inline_evaluator_not_string_start", @inline ++ @started},
+    {:exchange, "p7_inline_expression_not_string_start", @inline ++ @started},
     # LAMBDA
     {:exchange, "p7_lambda_register", @lambda},
     {:exchange, "p7_lambda_start", @lambda},
     {:exchange, "p7_lambda_get", @lambda ++ @settled},
     {:exchange, "p7_lambda_error_start", @lambda},
-    {:exchange, "p7_lambda_error_get", @lambda ++ @settled},
+    {:exchange, "p7_lambda_error_get", @lambda ++ @settled ++ @engine_message},
     {:exchange, "p7_lambda_empty_start", @lambda},
     {:exchange, "p7_lambda_empty_get", @lambda ++ @settled},
     # JSON_JQ_TRANSFORM
@@ -1089,6 +1105,10 @@ defmodule ArchonWeb.ContractCase do
 
         state
 
+      :started ->
+        assert_started(name, actual)
+        state
+
       nil ->
         actual = only(actual, expected["body"], Keyword.get(opts, :only), state)
 
@@ -1150,6 +1170,15 @@ defmodule ArchonWeb.ContractCase do
            "#{name}: #{inspect(actual.body)}"
 
     assert is_binary(instance)
+  end
+
+  defp assert_started(name, actual) do
+    assert match?(
+             %{status: 200, content_type: "text/plain" <> _, body: id} when is_binary(id),
+             actual
+           ) and
+             Regex.match?(~r/\A#{Contract.uuid_regex().source}\z/, actual.body),
+           "#{name}: not a start: #{inspect(actual)}"
   end
 
   defp assert_same(name, expected, actual, state, opts) do
