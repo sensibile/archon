@@ -29,6 +29,7 @@ defmodule Archon.Decider.Mapper do
     Human,
     Inline,
     Join,
+    JsonJqTransform,
     Lambda,
     Noop,
     SetVariable,
@@ -70,7 +71,8 @@ defmodule Archon.Decider.Mapper do
     "HUMAN" => Human,
     "EXCLUSIVE_JOIN" => ExclusiveJoin,
     "INLINE" => Inline,
-    "LAMBDA" => Lambda
+    "LAMBDA" => Lambda,
+    "JSON_JQ_TRANSFORM" => JsonJqTransform
   }
 
   @doc "The mapper for a task type, `UserDefined` when none is registered."

@@ -14,7 +14,7 @@ defmodule Archon.Application do
         do: [Archon.Runtime.Supervisor, ArchonWeb.Endpoint],
         else: []
 
-    children = [Archon.Script.Pool | runtime]
+    children = [Archon.Script.Pool, Archon.Jq.Pool | runtime]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

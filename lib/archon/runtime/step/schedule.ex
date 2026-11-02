@@ -17,7 +17,7 @@ defmodule Archon.Runtime.Step.Schedule do
   worker tasks.
   """
 
-  alias Archon.Decider.{SystemTask, SystemTasks}
+  alias Archon.Decider.{Parameters, SystemTask, SystemTasks, Termination}
   alias Archon.Domain.{Task, Workflow, WorkflowDef}
   alias Archon.Runtime.Step.{Env, State}
 
@@ -140,8 +140,15 @@ defmodule Archon.Runtime.Step.Schedule do
   worker tasks to their queues. Asynchronous system tasks
   without a delay are marked for evaluation (ADR 0018, decision 6). Returns whether a
   synchronous system task started.
+
+  A `start` that fails (upstream's throws, `Archon.Decider.SystemTask.start/3`) stops there, as
+  upstream's `scheduleTask` does: the tasks after it neither start nor join their queues, and
+  the answer is upstream's `TerminateWorkflowException`,
+  `Error scheduling tasks: [<task IDs>], for workflow: <ID>`, for the caller to terminate the
+  workflow with.
   """
-  @spec schedule(State.t(), [Task.t()]) :: {State.t(), boolean()}
+  @spec schedule(State.t(), [Task.t()]) ::
+          {State.t(), boolean()} | {:terminate, Termination.t(), State.t()}
   def schedule(state, []), do: {state, false}
 
   def schedule(%State{wf: wf, now: now, env: env} = state, tasks) do
@@ -159,38 +166,54 @@ defmodule Archon.Runtime.Step.Schedule do
 
     state = State.create_tasks(state, tasks)
 
-    Enum.reduce(tasks, {state, false}, fn task, {state, started?} ->
+    Enum.reduce_while(tasks, {state, false}, fn task, {state, started?} ->
       cond do
-        sync_system_task?(env, task) ->
-          {start_sync(state, task), true}
-
-        system_task?(env, task) ->
-          {if(delay_ms(task) == 0, do: State.due(state, [task.task_id]), else: state), started?}
-
-        true ->
-          {push(state, task), started?}
+        sync_system_task?(env, task) -> start_scheduled(state, task, tasks)
+        system_task?(env, task) -> {:cont, {due(state, task), started?}}
+        true -> {:cont, {push(state, task), started?}}
       end
     end)
   end
 
+  defp start_scheduled(state, task, tasks) do
+    case start_task(state, task.task_id) do
+      {:ok, state} -> {:cont, {state, true}}
+      {:error, _reason} -> {:halt, {:terminate, scheduling_error(tasks, state.wf), state}}
+    end
+  end
+
+  defp due(state, task),
+    do: if(delay_ms(task) == 0, do: State.due(state, [task.task_id]), else: state)
+
+  # The TerminateWorkflowException of scheduleTask, with Java's List#toString of the task IDs.
+  defp scheduling_error(tasks, %Workflow{workflow_id: id}) do
+    ids = Enum.map_join(tasks, ", ", &Parameters.java_string(&1.task_id))
+    Termination.new("Error scheduling tasks: [#{ids}], for workflow: #{id}")
+  end
+
   @doc """
   `WorkflowSystemTask#start` of a synchronous system task in the step (if its type has one),
-  then `updateTask`.
+  then `updateTask`. A `start` that fails leaves the task as it was.
   """
   @spec start_sync(State.t(), Task.t()) :: State.t()
-  def start_sync(%State{env: env} = state, %Task{task_id: id}) do
+  def start_sync(%State{} = state, %Task{task_id: id}) do
+    case start_task(state, id) do
+      {:ok, state} -> state
+      {:error, _reason} -> state
+    end
+  end
+
+  defp start_task(%State{env: env} = state, id) do
     case State.task(state, id) do
       nil ->
-        state
+        {:ok, state}
 
       task ->
-        state =
-          case SystemTask.start(state.wf, task, Env.context(env)) do
-            nil -> state
-            result -> apply_result(state, result)
-          end
-
-        State.save_current(state, id)
+        case SystemTask.start(state.wf, task, Env.context(env)) do
+          nil -> {:ok, State.save_current(state, id)}
+          {:error, reason} -> {:error, reason}
+          result -> {:ok, state |> apply_result(result) |> State.save_current(id)}
+        end
     end
   end
 

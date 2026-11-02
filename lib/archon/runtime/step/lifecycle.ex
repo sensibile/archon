@@ -48,7 +48,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
   alias Archon.Decider.{Parameters, SystemTasks}
   alias Archon.Domain.{Task, Workflow, WorkflowDef, WorkflowTask}
-  alias Archon.Runtime.Step.{Decide, Env, Schedule, State, SubWorkflow}
+  alias Archon.Runtime.Step.{Decide, Env, Schedule, State, SubWorkflow, Terminate}
 
   @type reply :: :ok | {:error, {:conflict | :not_found | :invalid_state | :invalid, String.t()}}
 
@@ -201,8 +201,11 @@ defmodule Archon.Runtime.Step.Lifecycle do
     {state, _new} = Schedule.dedup_and_add(state, rescheduled)
     state = State.save_tasks(state, state.wf.tasks)
     rescheduled = Enum.map(rescheduled, &(State.task(state, &1.task_id) || &1))
-    {state, _started?} = Schedule.schedule(state, rescheduled)
-    state
+
+    case Schedule.schedule(state, rescheduled) do
+      {:terminate, termination, state} -> Terminate.by_decider(state, termination)
+      {state, _started?} -> state
+    end
   end
 
   # taskToBeRescheduled
