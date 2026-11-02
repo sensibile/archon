@@ -122,8 +122,8 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   `terminationStatus`, INLINE `evaluatorType`·`expression`, JSON_JQ_TRANSFORM `queryExpression`). 표현식이 수 같은 값을 내면
   `ClassCastException`이 태스크 실패 경로가 아니라 결정·예약 밖으로 새어 나간다. 이 ADR의 실패 문구 서술은 문자열 입력에만 해당한다.
   HTTP 입력의 `Input` 변환(`HttpTask.start`의 `convertValue`)도 `try` 밖이다. 비동기라 upstream `AsyncSystemTaskExecutor`가 예외를
-  로그만 남기고 삼켜, 태스크는 `SCHEDULED`로 남았다가 `responseTimeoutSeconds` 뒤 `TIMED_OUT`이 된다(캡처는 짧은
-  `responseTimeoutSeconds`를 가진 태스크 정의로 한다).
+  로그만 남기고 삼켜, 태스크는 `SCHEDULED`로 남았다가 응답 시간 상한(직접 정의한 HTTP는 1시간, 결정 7) 뒤 `TIMED_OUT`이 된다.
+  이 경우는 캡처하지 않고 7g가 StepReplay 시험으로 정한다.
   문자열이 아닌 경우의 결과(워크플로우 상태, 오류 응답)는 7a가 캡처하고, 해당 조각이 그 결과에 맞추거나 맞출 수 없으면 의도적
   차이로 적는다.
 
@@ -276,7 +276,9 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     `workflowTask.asyncComplete`를 넣는다. 그래서 사용자가 `inputParameters.asyncComplete`에 준 표현식은 덮이고, 정의 객체도 바뀐다
     (DYNAMIC과 같은 정의 변경 문제. 7a 캡처의 `workflowDefinition`으로 확인해 결정 4와 같이 처리). 입력은 `getTaskInputV2`(태스크 정의).
     `retryCount`, `callbackAfterSeconds` = `startDelay`, 정의가 있으면 빈도 한도·`isolationGroupId`·`executionNameSpace`를 옮긴다. 태스크
-    정의는 필요 없다(없으면 재시도 0).
+    정의는 필요 없다(없으면 재시도 0). upstream `HTTPTaskMapper`는 `responseTimeoutSeconds`를 정하지 않으므로(정하는 매퍼는
+    SIMPLE·DYNAMIC뿐) 직접 정의한 HTTP의 진행 중 마감과 복구 `TIMED_OUT`은 정의와 상관없이 1시간이다. DYNAMIC으로 만든 HTTP는
+    태스크 정의의 값이다. archon HTTP 매퍼도 이 필드를 옮기지 않는다.
   - 요청은 입력 `http_request`, 없으면 입력 전체다. 필드 `uri`, `method`, `headers`(값은 문자열로, `null` 건너뜀), `body`, `accept`(문자열
     또는 목록, 기본 `application/json`), `contentType`(기본 `application/json`), `connectionTimeOut`·`readTimeOut`(기본 3000ms).
     `vipAddress`·`appName`은 upstream 기본 제공자처럼 쓰지 않는다. `uri` 없음 `"Missing HTTP URI.  See documentation for HttpTask for
@@ -316,7 +318,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   결정 7과 같음). 다른 조각은 스크립트·픽스처·픽스처 등록을 고치지 않는다. 빠진 것은 기록해 두고 7h가 더해 다시 캡처한다.
 - 시나리오는 정의 등록 → 시작 → 끝난 워크플로우 GET의 모양이다. 타입마다 성공 하나와 upstream이 실패·종료로 가는 경우 하나
   이상을 넣는다. 특히:
-  - 문자열이 아닌 입력(결정 3 머리): TERMINATE `terminationStatus`, INLINE `evaluatorType`·`expression`, JSON_JQ_TRANSFORM `queryExpression`, 모양이 틀린 HTTP 입력(`headers`가 맵 아님 등)
+  - 문자열이 아닌 입력(결정 3 머리): TERMINATE `terminationStatus`, INLINE `evaluatorType`·`expression`, JSON_JQ_TRANSFORM `queryExpression`
   - TERMINATE의 세 상태와 `workflowOutput`의 맵·맵 아닌 값, 진행 중 형제 태스크의 `CANCELED`, 실패 워크플로우
   - SET_VARIABLE의 덮어쓰기와 크기 초과(`FAILED_WITH_TERMINAL_ERROR`)
   - HUMAN을 `POST /api/tasks`로 끝내기, EXCLUSIVE_JOIN의 `defaultExclusiveJoinTask`와 실패
