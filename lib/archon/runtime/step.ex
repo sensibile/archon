@@ -78,8 +78,15 @@ defmodule Archon.Runtime.Step do
   defp handle({:start, %Workflow{}}, %State{stored: %Workflow{}} = state),
     do: {{:error, :conflict}, state}
 
+  # The first decide runs on the workflow object whose variables are its definition's
+  # (`State`'s `shared_variables?`).
   defp handle({:start, %Workflow{} = workflow}, state) do
-    state = state |> State.create(new_workflow(workflow, state.now)) |> Decide.settle()
+    state =
+      state
+      |> State.create(new_workflow(workflow, state.now))
+      |> Map.put(:shared_variables?, true)
+      |> Decide.settle()
+
     {{:ok, workflow.workflow_id}, state}
   end
 
