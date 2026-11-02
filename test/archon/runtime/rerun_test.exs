@@ -240,6 +240,26 @@ defmodule Archon.Runtime.RerunTest do
       assert %Task{status: :canceled, reason_for_incompletion: nil} = task(parent, "st")
     end
 
+    test "a task a client canceled still takes its child's later reason" do
+      parent = start("rerun_parent")
+      child = child_of(parent)
+      st = task(parent, "st")
+
+      WorkflowServer.update(%TaskResult{
+        workflow_instance_id: parent,
+        task_id: st.task_id,
+        status: :canceled
+      })
+
+      assert %Task{status: :canceled} = task(parent, "st")
+      assert Runtime.terminate_workflow(child, "client-stop") == :ok
+      assert eventually(fn -> Runtime.store().pending_outbox(child) == [] end)
+
+      assert eventually(fn ->
+               (task(parent, "st").reason_for_incompletion || "") =~ "failure reason: client-stop"
+             end)
+    end
+
     test "a child terminated on its own still cancels its task with the reason" do
       parent = start("rerun_parent")
       child = child_of(parent)

@@ -210,14 +210,14 @@ defmodule Archon.Runtime.Step.SubWorkflow do
   task, if it is still one of the workflow's tasks (the generation fence) and the child is the
   one it is attached to now (upstream reads the child by the task's `subWorkflowId`), takes
   the child's status, output and reason once the child is terminal. A `CANCELED` task whose
-  child was `TERMINATED` (the parent ended and canceled it) stays as it is, as upstream's
+  child was `TERMINATED` because the ended parent canceled it stays as it is, as upstream's
   `cancelNonTerminalTasks` writes it last. `nil` when nothing changes.
   """
   @spec child_changed(State.t(), String.t(), Workflow.t()) :: Task.t() | nil
   def child_changed(state, task_id, %Workflow{workflow_id: child_id} = child) do
     with %Task{task_type: "SUB_WORKFLOW"} = task <- State.task(state, task_id),
          ^child_id <- Task.sub_workflow_id(task),
-         false <- canceled_by_parent?(task, child),
+         false <- canceled_by_parent?(state, task, child),
          {true, task} <- SubWorkflowTask.execute(task, child) do
       task
     else
@@ -225,11 +225,21 @@ defmodule Archon.Runtime.Step.SubWorkflow do
     end
   end
 
-  # The parent ended and canceled the task, which terminated the child: upstream
-  # cancelNonTerminalTasks saves its CANCELED task after the child's termination updated it, so
-  # the child's notice leaves no trace (ADR 0025, decision 2, slice 6f).
-  defp canceled_by_parent?(%Task{status: :canceled}, %Workflow{status: :terminated}), do: true
-  defp canceled_by_parent?(_task, _child), do: false
+  # The parent ended and canceled the task, which terminated the child (Terminate.cancel_child's
+  # reason): upstream cancelNonTerminalTasks saves its CANCELED task after the child's termination
+  # updated it, so the child's notice leaves no trace (ADR 0025, decision 2, slice 6f). A task
+  # canceled otherwise (a client's update) still takes the notice.
+  defp canceled_by_parent?(
+         %State{wf: wf},
+         %Task{status: :canceled},
+         %Workflow{
+           status: :terminated,
+           reason_for_incompletion: "Parent workflow has been terminated" <> _
+         }
+       ),
+       do: Workflow.terminal?(wf.status)
+
+  defp canceled_by_parent?(_state, _task, _child), do: false
 
   @doc """
   The stored child when it may be the child the start asks for: upstream

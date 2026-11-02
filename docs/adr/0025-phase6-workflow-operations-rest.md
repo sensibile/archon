@@ -157,7 +157,7 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
     - **아래의 outbox를 기다린 뒤 위로.** upstream은 재귀 안에서 아래 워크플로우의 rerun, 그 부모 되살림, 그 결정(중간이 두 번째
       시도의 `FAILED`로 다시 끝나고 첫 자식을 끝냄)을 모두 동기로 마친 뒤 위 워크플로우를 쓴다. archon에서는 그 알림·되살림이
       아래 워크플로우의 outbox로 가므로, `Lifecycle.rerun`은 경우 3 메시지를 보내기 전에 바로 아래 워크플로우의 outbox가 빌
-      때까지 100ms(`rerun_retry_ms`)마다 본다. 마감(`rerun_timeout`, 10초)이 지나면 로그를 남기고 진행한다. 그러지 않으면 중간의
+      때까지 100ms(`rerun_retry_ms`)마다 본다(읽기 실패도 다시 본다). 마감(`rerun_timeout`, 10초)이 지나면 로그를 남기고 진행한다. 그러지 않으면 중간의
       `FAILED` 알림이 최상위의 경우 3 뒤에 닿아 최상위가 바로 `FAILED`가 된다. 최상위의 SUB_WORKFLOW 태스크는 upstream처럼 다음
       평가(`:wake`)에서 자식의 `FAILED`를 읽는다. 위 3의 "응답 때 경로의 워크플로우는 모두 `RUNNING`"은 이 경우 중간이 다시
       `FAILED`라서 성립하지 않는다(upstream과 같음).
@@ -182,8 +182,9 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
     - **비동기 시스템 태스크의 지연.** 경우 1의 대상과 `finalizeRerun`의 비동기 시스템 태스크(JOIN·WAIT·SUB_WORKFLOW 형제)는 콜백
       지연이 없을 때만 바로 평가하고, 있으면 지연이 끝난 `:wake`에 평가한다(upstream `addTaskToQueue`의 지연).
       rerun 도중 위 워크플로우가 지워졌으면 그 ID로 404다.
-    - **부모가 취소한 자식의 알림.** 끝나는 부모가 SUB_WORKFLOW 태스크를 `CANCELED`로 하고 자식을 끝내면, 자식의 종료 알림이 그
-      태스크에 사유를 쓰지 않는다(`Step.SubWorkflow.child_changed`). upstream `cancelNonTerminalTasks`는 자식 종료가 태스크를 갱신한
+    - **부모가 취소한 자식의 알림.** 끝나는 부모가 SUB_WORKFLOW 태스크를 `CANCELED`로 하고 자식을 끝내면(자식의 사유가
+      `"Parent workflow has been terminated ..."`), 자식의 종료 알림이 그 태스크에 사유를 쓰지 않는다(`Step.SubWorkflow.child_changed`).
+      클라이언트가 직접 `CANCELED`로 갱신한 태스크는 이 예외가 아니다. upstream `cancelNonTerminalTasks`는 자식 종료가 태스크를 갱신한
       뒤 자기가 든 `CANCELED` 태스크를 다시 저장한다(`workflow_get_rerun_mid`). Phase 4의 모든 "부모가 자식을 취소" 경로에 적용된다.
       사용자가 자식을 직접 끝내는 것과 부모 종료가 겹쳐 부모의 취소가 먼저 커밋되면 자식의 사유가 남지 않는다(upstream은 자식
       갱신이 먼저면 남는다). 드문 경합의 사유 문구 차이로 받아들인다.

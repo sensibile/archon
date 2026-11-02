@@ -295,17 +295,17 @@ defmodule Archon.Runtime.Lifecycle do
 
   defp not_found_as(result, _id), do: result
 
-  # A store that cannot tell does not hold the rerun up: it goes on, as past the deadline.
+  # A store that cannot tell is asked again until the deadline, after which the rerun goes on.
   defp outbox_empty?(id) do
     Runtime.store().pending_outbox(id) == []
   rescue
     exception ->
-      Logger.warning("rerun goes on above #{id}: #{Exception.message(exception)}")
-      true
+      Logger.warning("rerun could not read the outbox of #{id}: #{Exception.message(exception)}")
+      false
   catch
     :exit, reason ->
-      Logger.warning("rerun goes on above #{id}: #{inspect(reason)}")
-      true
+      Logger.warning("rerun could not read the outbox of #{id}: #{inspect(reason)}")
+      false
   end
 
   # Upstream reruns the workflows below synchronously, their notices and revivals of the parent
