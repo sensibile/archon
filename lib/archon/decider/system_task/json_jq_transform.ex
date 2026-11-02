@@ -25,8 +25,9 @@ defmodule Archon.Decider.SystemTask.JsonJqTransform do
       fails the scheduling of the task (`Archon.Runtime.Step.Schedule`), so `start/3` answers
       `{:error, reason}`.
 
-  `execute/3` runs the query again, as upstream's `execute` calls `start`. It is not reached:
-  `start` always leaves the task terminal, so the decide loop never executes it.
+  `execute/3` runs the query again, as upstream's `execute` calls `start`. The decide loop does
+  not reach it after a `start` (the task is then terminal, or the workflow terminated); should
+  it, a `queryExpression` that is not a string fails the task there instead of leaving it.
   """
 
   @behaviour Archon.Decider.SystemTask
@@ -56,8 +57,11 @@ defmodule Archon.Decider.SystemTask.JsonJqTransform do
   @impl true
   def execute(%Workflow{} = workflow, %Task{} = task, %Context{} = context) do
     case start(workflow, task, context) do
-      %SystemTask.Result{} = result -> result
-      {:error, _reason} -> SystemTask.unchanged(task)
+      %SystemTask.Result{} = result ->
+        result
+
+      {:error, reason} ->
+        SystemTask.changed(%{task | status: :failed, reason_for_incompletion: reason})
     end
   end
 

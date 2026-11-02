@@ -645,15 +645,32 @@ defmodule Archon.Runtime.Step.Lifecycle do
           due_now(state, task)
 
         Schedule.sync_system_task?(env, task) ->
-          state = Schedule.start_sync(state, task)
-          started = State.task(state, task.task_id)
-          if started.status == :scheduled, do: Schedule.push(state, started), else: state
+          start_rerun(state, task)
 
         true ->
           Schedule.push(state, task)
       end
 
-    finalize_rerun(state, task)
+    case state do
+      # A start that fails ends the workflow, as it does in the decide loop (ADR 0026,
+      # decision 6).
+      {:terminate, termination, state} ->
+        state |> finalize_rerun(task) |> Terminate.by_decider(termination)
+
+      state ->
+        finalize_rerun(state, task)
+    end
+  end
+
+  defp start_rerun(state, task) do
+    case Schedule.start_sync(state, task) do
+      {:ok, state} ->
+        started = State.task(state, task.task_id)
+        if started.status == :scheduled, do: Schedule.push(state, started), else: state
+
+      {:terminate, termination, state} ->
+        {:terminate, termination, state}
+    end
   end
 
   # addTaskToQueue for an asynchronous system task: evaluated at once without a callback delay,

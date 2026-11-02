@@ -18,7 +18,7 @@ defmodule Archon.Runtime.Step.ScheduleErrorTest do
   alias Archon.Decider.{SystemTask, SystemTasks}
   alias Archon.Domain.{Task, TaskDef, Workflow, WorkflowDef, WorkflowTask}
   alias Archon.Runtime.Step
-  alias Archon.Runtime.Step.Env
+  alias Archon.Runtime.Step.{Env, Schedule, State}
 
   # Starts as upstream's start would throw when its input asks for it on this iteration or
   # retry; otherwise fails or completes the task as its input says.
@@ -149,5 +149,53 @@ defmodule Archon.Runtime.Step.ScheduleErrorTest do
 
     assert retried.reason_for_incompletion ==
              "Error scheduling tasks: [#{copy.task_id}], for workflow: wf"
+  end
+
+  test "the synchronous starts come first: a failed one leaves no task queued or due" do
+    workflow = %Workflow{workflow_id: "wf", status: :running, owner_app: ""}
+    state = State.new(workflow, env())
+
+    tasks = [
+      %Task{
+        task_id: "worker",
+        task_type: "SIMPLE",
+        reference_task_name: "worker",
+        status: :scheduled
+      },
+      %Task{task_id: "wait", task_type: "WAIT", reference_task_name: "wait", status: :scheduled},
+      %Task{
+        task_id: "start",
+        task_type: "ARCHON_START",
+        reference_task_name: "start",
+        status: :in_progress,
+        input_data: %{"throw_on_iteration" => 0}
+      }
+    ]
+
+    assert {:terminate, termination, state} = Schedule.schedule(state, tasks)
+
+    assert termination.reason ==
+             "Error scheduling tasks: [worker, wait, start], for workflow: wf"
+
+    assert state.post == []
+    assert state.due == MapSet.new()
+  end
+
+  test "a rerun whose synchronous task fails to start terminates the workflow" do
+    stored = start([task("ARCHON_START", "start", input_parameters: %{"fail" => true})])
+    assert stored.status == :failed
+    [%Task{status: :failed, task_id: id}] = stored.tasks
+
+    request = %{
+      task_id: id,
+      task_input: %{"throw_on_iteration" => 0},
+      workflow_input: nil,
+      correlation_id: nil
+    }
+
+    rerun = run(stored, {:rerun, request})
+    assert rerun.status == :failed
+    assert [%Task{task_id: ^id, status: :canceled}] = rerun.tasks
+    assert rerun.reason_for_incompletion == "Error scheduling tasks: [#{id}], for workflow: wf"
   end
 end

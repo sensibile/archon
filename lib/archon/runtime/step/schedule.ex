@@ -141,9 +141,10 @@ defmodule Archon.Runtime.Step.Schedule do
   without a delay are marked for evaluation (ADR 0018, decision 6). Returns whether a
   synchronous system task started.
 
-  A `start` that fails (upstream's throws, `Archon.Decider.SystemTask.start/3`) stops there, as
-  upstream's `scheduleTask` does: the tasks after it neither start nor join their queues, and
-  the answer is upstream's `TerminateWorkflowException`,
+  As upstream's `scheduleTask`, the synchronous system tasks start first and the other tasks
+  join their queues (or are marked for evaluation) after. A `start` that fails (upstream's
+  throws, `Archon.Decider.SystemTask.start/3`) stops there: the system tasks after it do not
+  start, no task joins a queue, and the answer is upstream's `TerminateWorkflowException`,
   `Error scheduling tasks: [<task IDs>], for workflow: <ID>`, for the caller to terminate the
   workflow with.
   """
@@ -166,20 +167,29 @@ defmodule Archon.Runtime.Step.Schedule do
 
     state = State.create_tasks(state, tasks)
 
-    Enum.reduce_while(tasks, {state, false}, fn task, {state, started?} ->
-      cond do
-        sync_system_task?(env, task) -> start_scheduled(state, task, tasks)
-        system_task?(env, task) -> {:cont, {due(state, task), started?}}
-        true -> {:cont, {push(state, task), started?}}
-      end
-    end)
+    {sync, other} = Enum.split_with(tasks, &sync_system_task?(env, &1))
+
+    case start_all(state, sync, tasks) do
+      {:ok, state} ->
+        state =
+          Enum.reduce(other, state, fn task, state ->
+            if system_task?(env, task), do: due(state, task), else: push(state, task)
+          end)
+
+        {state, sync != []}
+
+      {:terminate, termination, state} ->
+        {:terminate, termination, state}
+    end
   end
 
-  defp start_scheduled(state, task, tasks) do
-    case start_task(state, task.task_id) do
-      {:ok, state} -> {:cont, {state, true}}
-      {:error, _reason} -> {:halt, {:terminate, scheduling_error(tasks, state.wf), state}}
-    end
+  defp start_all(state, sync, tasks) do
+    Enum.reduce_while(sync, {:ok, state}, fn task, {:ok, state} ->
+      case start_task(state, task.task_id) do
+        {:ok, state} -> {:cont, {:ok, state}}
+        {:error, _reason} -> {:halt, {:terminate, scheduling_error(tasks, state.wf), state}}
+      end
+    end)
   end
 
   defp due(state, task),
@@ -193,13 +203,15 @@ defmodule Archon.Runtime.Step.Schedule do
 
   @doc """
   `WorkflowSystemTask#start` of a synchronous system task in the step (if its type has one),
-  then `updateTask`. A `start` that fails leaves the task as it was.
+  then `updateTask`. A `start` that fails answers the termination `schedule/2` would, for this
+  task alone.
   """
-  @spec start_sync(State.t(), Task.t()) :: State.t()
-  def start_sync(%State{} = state, %Task{task_id: id}) do
+  @spec start_sync(State.t(), Task.t()) ::
+          {:ok, State.t()} | {:terminate, Termination.t(), State.t()}
+  def start_sync(%State{} = state, %Task{task_id: id} = task) do
     case start_task(state, id) do
-      {:ok, state} -> state
-      {:error, _reason} -> state
+      {:ok, state} -> {:ok, state}
+      {:error, _reason} -> {:terminate, scheduling_error([task], state.wf), state}
     end
   end
 

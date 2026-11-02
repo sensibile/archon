@@ -163,13 +163,29 @@ static const char TIMEOUT_ANSWER[] =
 static const char MEMORY_ANSWER[] =
     "{\"error\":\"limit\",\"message\":\"memory limit exceeded\",\"exit\":true}";
 
+_Static_assert(sizeof(TIMEOUT_ANSWER) <= 128 && sizeof(MEMORY_ANSWER) <= 128,
+               "the exit answers fit answer_and_exit's frame");
+
 /* Set while a request is being answered: an abort then answers it before exiting. */
 static volatile sig_atomic_t answering;
 
 static void answer_and_exit(const char *answer, size_t len)
 {
-    if (answering)
-        write_frame(answer, len);
+    /* One answer only: the timer cannot interrupt this one with its own. */
+    sigset_t alarm;
+    sigemptyset(&alarm);
+    sigaddset(&alarm, SIGALRM);
+    sigprocmask(SIG_BLOCK, &alarm, NULL);
+    if (answering) {
+        /* Header and body in one write, so nothing can come between them. */
+        char frame[4 + 128];
+        frame[0] = (char)(len >> 24);
+        frame[1] = (char)(len >> 16);
+        frame[2] = (char)(len >> 8);
+        frame[3] = (char)len;
+        memcpy(frame + 4, answer, len);
+        write_full(STDOUT_FILENO, frame, 4 + len);
+    }
     _exit(0);
 }
 
@@ -596,7 +612,8 @@ static void run_query(const char *query, jv input, Buf *out)
     } else {
         jv_free(value);
         buf_puts(out, "{\"ok\":");
-        if (put_value(out, results, 0) < 0) {
+        /* The list of results does not count: each result may nest MAX_DEPTH levels. */
+        if (put_value(out, results, -1) < 0) {
             out->len = 0;
             put_fixed_error(out, "limit", "result is nested too deeply");
         } else {

@@ -323,7 +323,7 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   `queryExpression`이 없으면 `"Missing 'queryExpression' in input parameters"`로 `FAILED`. 성공은 출력 `result`(첫 결과 또는 `null`)와
   `resultList`(전체), `COMPLETED`. 오류는 엔진 메시지를 출력 `error`와 `reasonForIncompletion`에 넣고 `FAILED`다. 일은 예약 때
   (`start`) 한다. upstream `execute`는 `start`를 다시 부르지만, `start`가 늘 종료 상태로 끝나 결정 루프의 미종료 검사에 걸리지 않으므로
-  불리지 않는다. archon은 `execute`를 두지 않는다. `queryExpression`이 문자열이 아니면 결정 3 머리의 공통 규칙을 따른다
+  불리지 않는다. archon은 `execute`를 두지 않는다(조각 7e가 고침: behaviour가 요구해 둔다, 아래). `queryExpression`이 문자열이 아니면 결정 3 머리의 공통 규칙을 따른다
   (upstream은 예약 중 예외라 `"Error scheduling tasks: ..."` 종료로 보인다. 7a 캡처로 확인).
 - **시간 상한.** jackson-jq에는 상한이 없다. archon은 풀의 시간 상한(기본 4초)을 넘으면 `Script not evaluated within <N> seconds,
   interrupted.`와 같은 모양의 jq 문구로 `FAILED`다(의도적 차이).
@@ -363,7 +363,7 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     (`JQ query rejected: import and include are not supported`). 라이브러리 검색 경로는 빈 목록이다(`modulemeta`는 못 찾음,
     `get_search_list`는 `[]`). 입력 콜백은 빈 입력이다(`[inputs]`는 `[]`, `input`은 오류). debug·stderr 콜백은 버리고, 호스트의
     stderr도 `/dev/null`이다(sanitize 빌드는 보고를 위해 남김). `halt`·`halt_error`는 `halt and halt_error are not supported`
-    오류다. 결과는 16MiB·깊이 1,000을 넘으면 `JQ query result is too large`·`JQ query result is nested too deeply`다.
+    오류다. 결과는 16MiB, 결과 하나의 깊이 1,000을 넘으면 `JQ query result is too large`·`JQ query result is nested too deeply`다.
   - **프로토콜과 값.** 요청 `{"op": "eval", "query", "input"}`, 응답 `{"ok": [결과...]}` 또는 `{"error": kind, "message"}`다. jq 값은
     JSON 그대로이므로 `archon_js`의 타입 붙은 값 대신 평범한 JSON을 쓰고, 정수·실수 구분은 수 표기로 전한다. 수는 upstream
     `extractBody`처럼 정수이고 `long` 범위면 정수, 아니면 실수다. 다만 jq가 입력이나 쿼리의 표기를 지닌 수(`USE_DECNUM`의
@@ -381,11 +381,13 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     `TerminateWorkflowException("Error scheduling tasks: <이 배치의 태스크 ID 목록>, for workflow: <ID>")`가 된다. 그래서
     `SystemTask.start/3`가 upstream이 던지는 자리에서 `{:error, reason}`을 돌려줄 수 있게 넓혔고(`reason`은 upstream이 로그로만 남기는
     예외), `Step.Schedule.schedule/2`가 그 자리에서 멈춰(뒤의 태스크는 시작도 큐 추가도 하지 않음) `{:terminate, termination, state}`를
-    돌려준다. 결정 루프, `DO_WHILE`의 다음 반복, retry가 이것으로 워크플로우를 끝낸다(`FAILED`, 남은 태스크 `CANCELED`).
-    `p7_jq_not_string_get`과 같다. rerun이 동기 시스템 태스크를 시작할 때는 태스크를 그대로 둔다. upstream의 retry는 `scheduleTask`의
-    예외가 retry 요청 밖으로 나가지만, archon은 결정 루프와 같게 워크플로우를 끝낸다(픽스처 없음).
-  - **`execute`.** behaviour가 `execute/3`를 요구하므로 upstream처럼 `start`를 다시 부른다. `start`가 늘 종료 상태로 끝나 결정
-    루프가 부르지 않는다.
+    돌려준다. 결정 루프, `DO_WHILE`의 다음 반복, retry, rerun(그 태스크 하나의 ID)이 이것으로 워크플로우를 끝낸다(`FAILED`, 남은
+    태스크 `CANCELED`). `p7_jq_not_string_get`과 같다. upstream의 retry·rerun은 그 예외가 요청 밖으로 나가지만, archon은 결정 루프와
+    같게 워크플로우를 끝낸다(픽스처 없음). upstream `scheduleTask`처럼 동기 시스템 태스크를 먼저 모두 시작하고 나머지를 큐에 넣거나
+    평가 대상으로 두도록 `schedule/2`의 순서를 바꿨으므로, 시작이 실패하면 그 배치의 어떤 태스크도 큐에 들어가지 않는다.
+    비동기 타입의 `start`가 `{:error, _}`를 돌려주면 `Step.Async`는 `start`가 없는 것처럼 다룬다(지금 그런 타입은 없다).
+  - **`execute`.** behaviour가 `execute/3`를 요구하므로 upstream처럼 `start`를 다시 부른다. `start` 뒤에는 태스크가 종료 상태이거나
+    워크플로우가 끝나 결정 루프가 부르지 않는다. 그래도 불리면 문자열이 아닌 `queryExpression`은 태스크를 `FAILED`로 끝낸다.
   - **매퍼.** 태스크 정의는 컨텍스트의 것, 없으면 `task_def_lookup`(upstream의 `MetadataDAO#getTaskDef` 대체)이다. 격리 그룹은
     upstream처럼 컨텍스트의 태스크 정의에서만 읽는다.
   - **타입 제약.** upstream처럼 키만 본다(`containsKey`, 값이 `null`이어도 통과).
@@ -609,6 +611,7 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
     double이다(jackson-jq는 `long`). 정수가 아닌 수의 `%`는 jq처럼 잘라서 계산한다(jackson-jq는 오류).
   - 컴파일·실행 오류 문구는 jq의 것이다. `import`·`include`는 거절한다(jackson-jq는 구문 오류).
   - 메모리(64MiB)·결과 크기(16MiB)·깊이(1,000) 상한이 있다.
+  - `long` 범위를 넘는 정수는 실수다(upstream은 결과 안의 것은 `BigInteger`로 두고 최상위의 것은 `asLong`으로 넘친다).
 - **HUMAN의 결정 큐**(결정 3): `humanTaskPreventsDeciderQueue`에 대응하는 것이 없다. 결과 상태는 같다.
 - **비밀 값 치환**(결정 1): 하지 않는다.
 

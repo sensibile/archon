@@ -195,15 +195,17 @@ defmodule Archon.Decider.JsonJqTransformTest do
       end
     end
 
-    test "execute runs the query again, as upstream's execute calls start" do
+    test "execute runs the query again, as upstream's execute calls start; a start error fails" do
       task = %Task{task_type: "JSON_JQ_TRANSFORM", input_data: %{"queryExpression" => "1"}}
       %SystemTask.Result{task: done} = JsonJqTransform.execute(%Workflow{}, task, context())
       assert done.output_data == %{"result" => 1, "resultList" => [1]}
 
       task = %{task | input_data: %{"queryExpression" => 1}}
 
-      assert %SystemTask.Result{changed?: false, task: ^task} =
+      assert %SystemTask.Result{changed?: true, task: %Task{status: :failed} = failed} =
                JsonJqTransform.execute(%Workflow{}, task, context())
+
+      assert failed.reason_for_incompletion == "queryExpression is not a string"
     end
   end
 

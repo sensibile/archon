@@ -290,9 +290,9 @@ defmodule Archon.JqTest do
       assert {:ok, [[0, 1]]} = eval(pool, "[range(0; 2)]")
 
       assert {:error, %Error{kind: :limit, reason: "result is nested too deeply"}} =
-               run("reduce range(0; 1000) as $i (0; [.])")
+               run("reduce range(0; 1001) as $i (0; [.])")
 
-      assert {:ok, [_nested]} = run("reduce range(0; 999) as $i (0; [.])")
+      assert {:ok, [_nested]} = run("reduce range(0; 1000) as $i (0; [.])")
     end
 
     test "an evaluator that answers and exits is replaced before the next request" do
