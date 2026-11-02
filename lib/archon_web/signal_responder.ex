@@ -117,7 +117,8 @@ defmodule ArchonWeb.SignalResponder do
   # Runs the reads of `fun` in a process of their own until `at` at most: upstream's timers fire
   # while a read is stuck (a slow database), so a read still running then is killed and `late`
   # answers. A read that raises or exits fails the request as it would in the request's process.
-  # The reader is not linked, and runs at most one store read past a request that went away.
+  # The reader is not linked, and runs at most one store read past a request that went away. A
+  # reader killed during a Postgres query makes DBConnection drop that connection and reconnect.
   defp within(at, fun, late) do
     caller = self()
     ref = make_ref()
@@ -132,10 +133,14 @@ defmodule ArchonWeb.SignalResponder do
         exit(reason)
     after
       max(at - now(), 0) ->
-        Process.demonitor(monitor, [:flush])
         Process.exit(pid, :kill)
 
-        # The answer may have arrived in between.
+        # Whatever the reader sent arrives before its DOWN, so nothing is left in the mailbox of
+        # the connection process, which serves the next request of a kept-alive connection.
+        receive do
+          {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+        end
+
         receive do
           {^ref, _result} -> late
         after
