@@ -17,8 +17,9 @@ defmodule Archon.Runtime.SubWorkflows do
   @moduledoc """
   Runs the effects between workflows (ADR 0018, decisions 5 and 8 (a); ADR 0021, decision 4).
 
-    * `start_child/1` - `{:start_sub_workflow, task_id, start}`, in the parent's process: starts
-      the child with `Archon.Runtime.start_workflow_idempotent/1`. Returns the
+    * `start_child/1` - `{:start_sub_workflow, task_id, start}` (and `{:start_workflow, task_id,
+      start}` of a `START_WORKFLOW` task, fed back as `{:workflow_started, ...}`, ADR 0026
+      decision 7), in the parent's process: starts the child with `Archon.Runtime.start_workflow_idempotent/1`. Returns the
       `t:Archon.Runtime.Step.Event.sub_workflow_result/0` that `Archon.Runtime.WorkflowServer`
       feeds back as `{:sub_workflow_started, task_id, result}` in the same message: `{:ok, child}`
       (the stored child, new or existing), `{:error, :transient, message}` (the task stays
@@ -53,7 +54,10 @@ defmodule Archon.Runtime.SubWorkflows do
   alias Archon.Runtime.Step.{Effect, Event, SubWorkflow}
   alias Archon.Runtime.WorkflowServer
 
-  @doc "Starts the child of a `SUB_WORKFLOW` task (upstream `startWorkflowIdempotent`)."
+  @doc """
+  Starts the child of a `SUB_WORKFLOW` task, or the workflow of a `START_WORKFLOW` task (upstream
+  `startWorkflowIdempotent`).
+  """
   @spec start_child(Effect.start()) :: Event.sub_workflow_result()
   def start_child(%{workflow_id: id, parent_workflow_id: id} = start) when is_binary(id) do
     # A task whose subWorkflowId names its own workflow (stored before ADR 0024): the process

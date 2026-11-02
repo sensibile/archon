@@ -24,7 +24,8 @@ defmodule Archon.Runtime do
       definitions and builds the workflow here, then the workflow's process creates it and runs
       its first decide before answering.
     * `start_workflow_idempotent/1` - upstream `startWorkflowIdempotent` (a `SUB_WORKFLOW`
-      child): the process creates the workflow, answers, and decides after the answer.
+      child, or the workflow of a `START_WORKFLOW` task, ADR 0026 decision 7): the process
+      creates the workflow, answers, and decides after the answer.
     * `get_workflow/2` - reads the store; no process is involved.
     * `terminate_workflow/2` - upstream `terminateWorkflow(String, String)`.
     * `correlated_workflows/4` and `running_workflow_ids/4` - upstream `getWorkflowInstances`

@@ -9,40 +9,61 @@
 # (getEvaluationOffset) at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the workflow process evaluates its asynchronous system tasks when an
 # event calls for it instead of polling a system task queue (ADR 0018, decision 6), and a
-# SUB_WORKFLOW reads its child only when the child belongs to it (ADR 0024, decision 2).
+# SUB_WORKFLOW reads its child only when the child belongs to it (ADR 0024, decision 2); a start
+# that is an effect comes back as an event checked against the attempt, and the recovery starts
+# a start-idempotent task again at once (ADR 0026, decision 7).
 
 defmodule Archon.Runtime.Step.Async do
   @moduledoc """
-  Upstream `AsyncSystemTaskExecutor#execute` for the asynchronous system tasks (`JOIN`, `WAIT`,
-  `SUB_WORKFLOW`), run by the workflow's own process (ADR 0018, decision 6).
+  Upstream `AsyncSystemTaskExecutor#execute` for the asynchronous system tasks (`async?` in
+  `Archon.Decider.SystemTasks`), run by the workflow's own process (ADR 0018, decision 6).
 
   `pass/2` evaluates the tasks an event calls for: the ones marked due (just scheduled without a
   delay), the `JOIN`s waiting on a task a save made terminal, and on `:wake` every pending one
   whose delay is over. Each evaluation counts in `pollCount`. A task that finishes (or an
   `isAsyncComplete` task that is no longer `SCHEDULED`) asks for a decide; one that goes on keeps
   its evaluation offset in `callbackAfterSeconds`.
+
+  Starting a `SCHEDULED` task saves its `pollCount` and `startTime` first (ADR 0026, decision 7).
+  A type whose start is work outside the process has a starter module here (`SUB_WORKFLOW`:
+  `Archon.Runtime.Step.SubWorkflow`, `START_WORKFLOW`: `Archon.Runtime.Step.StartWorkflow`) with
+  `start(state, task) :: {:started, state} | {:failed, task}`: `:started` posts the effect, which
+  runs after the commit, and its result comes back as an event. The event's handler takes the task
+  from `attempt/3` (still `SCHEDULED`, the same `pollCount` when the event has one; else the
+  result is dropped) and ends with `finish/2`. Any other type's start is
+  `Archon.Decider.SystemTask.start/3`.
+
+  The start of a type whose `start_idempotent?` is set may run again: such a task left
+  `SCHEDULED` past its response timeout is started again instead of being `TIMED_OUT` (upstream
+  `isStartIdempotent`), and the recovery (`pass(state, :recover)`) starts one that was started
+  but has no result again at once.
   """
 
   alias Archon.Decider.{SystemTask, SystemTasks}
   alias Archon.Decider.SystemTask.SubWorkflow, as: SubWorkflowTask
   alias Archon.Domain.{Task, Workflow, WorkflowTask}
-  alias Archon.Runtime.Step.{Env, Schedule, State, SubWorkflow, Tasks}
+  alias Archon.Runtime.Step.{Env, Schedule, StartWorkflow, State, SubWorkflow, Tasks}
 
   # TaskDef.ONE_HOUR
   @one_hour 3600
 
+  # The types whose start is an effect (see the moduledoc).
+  @starters %{"SUB_WORKFLOW" => SubWorkflow, "START_WORKFLOW" => StartWorkflow}
+
   @doc """
   Evaluates the asynchronous system tasks the step calls for. `:wake` adds every pending one
-  that is due. Returns whether one asks for a decide.
+  that is due; `:recover` also adds every start-idempotent task that was started and is still
+  `SCHEDULED`. Returns whether one asks for a decide.
   """
-  @spec pass(State.t(), :events | :wake) :: {State.t(), boolean()}
+  @spec pass(State.t(), :events | :wake | :recover) :: {State.t(), boolean()}
   def pass(%State{wf: wf} = state, mode) do
     ids =
       for task <- wf.tasks,
           Schedule.async?(state.env, task),
           not Task.terminal?(task.status),
           MapSet.member?(state.due, task.task_id) or triggered?(state, task) or
-            (mode == :wake and due?(state, task)),
+            (mode in [:wake, :recover] and due?(state, task)) or
+            (mode == :recover and restart?(state, task)),
           do: task.task_id
 
     state = %{state | due: MapSet.new(), terminated_refs: MapSet.new()}
@@ -79,6 +100,14 @@ defmodule Archon.Runtime.Step.Async do
     do: Env.child(env, task, Task.sub_workflow_id(task)) != :error
 
   defp due?(%State{now: now}, task), do: due_time(task) <= now
+
+  # Started (its pollCount counted the start) without a result that ended or kept it: a
+  # start-idempotent type starts again (ADR 0026, decision 7).
+  defp restart?(%State{env: env}, %Task{status: :scheduled, poll_count: count} = task)
+       when count > 0,
+       do: SystemTasks.start_idempotent?(env.system_tasks, task.task_type)
+
+  defp restart?(_state, _task), do: false
 
   @doc """
   When a task's queue delay is over, as upstream's queue would show it again: its last save (or
@@ -136,7 +165,8 @@ defmodule Archon.Runtime.Step.Async do
       Tasks.exceeds_in_progress_limit?(task, env) ->
         {state, false}
 
-      exceeded_response_timeout?(task, now) and task.task_type != "SUB_WORKFLOW" ->
+      exceeded_response_timeout?(task, now) and
+          not SystemTasks.start_idempotent?(env.system_tasks, task.task_type) ->
         reason =
           "Task did not complete within its responseTimeout of #{response_timeout(task)}s"
 
@@ -166,21 +196,44 @@ defmodule Archon.Runtime.Step.Async do
     end
   end
 
-  # WorkflowSystemTask#start. SUB_WORKFLOW's result comes back as {:sub_workflow_started, ...};
-  # another type's start, if it has one, is its Archon.Decider.SystemTask.start/3.
-  defp start(state, %Task{task_type: "SUB_WORKFLOW"} = task, _async_complete?) do
-    case SubWorkflow.start(state, task) do
-      {:started, state} -> {state, false}
-      {:failed, task} -> dispose(state, task, true)
+  # WorkflowSystemTask#start. A starter's result comes back as an event; another type's start,
+  # if it has one, is its Archon.Decider.SystemTask.start/3.
+  defp start(%State{env: env} = state, task, async_complete?) do
+    case Map.fetch(@starters, task.task_type) do
+      {:ok, starter} ->
+        case starter.start(state, task) do
+          {:started, state} -> {state, false}
+          {:failed, task} -> dispose(state, task, async_complete?)
+        end
+
+      :error ->
+        case SystemTask.start(state.wf, task, Env.context(env)) do
+          nil ->
+            dispose(state, task, async_complete?)
+
+          result ->
+            state |> Schedule.apply_result(result) |> dispose(result.task, async_complete?)
+        end
     end
   end
 
-  defp start(%State{env: env} = state, task, async_complete?) do
-    case SystemTask.start(state.wf, task, Env.context(env)) do
-      nil -> dispose(state, task, async_complete?)
-      result -> state |> Schedule.apply_result(result) |> dispose(result.task, async_complete?)
+  @doc """
+  The task a started task's result is for: the task `task_id` while it is still `SCHEDULED`
+  and, when the event carries one, has the same `pollCount`; `nil` when the result is to be
+  dropped (the task ended, was removed or is another attempt).
+  """
+  @spec attempt(State.t(), String.t(), non_neg_integer() | nil) :: Task.t() | nil
+  def attempt(%State{} = state, task_id, poll_count) do
+    case State.task(state, task_id) do
+      %Task{status: :scheduled} = task when poll_count in [nil, task.poll_count] -> task
+      _gone -> nil
     end
   end
+
+  @doc "`dispose/3` of a task a started task's result changed (see `attempt/3`)."
+  @spec finish(State.t(), Task.t()) :: {State.t(), boolean()}
+  def finish(%State{env: env} = state, %Task{} = task),
+    do: dispose(state, task, SystemTasks.async_complete?(env.system_tasks, task))
 
   defp execute(%State{env: env} = state, %Task{task_type: "SUB_WORKFLOW"} = task) do
     child =
