@@ -371,6 +371,29 @@ defmodule Archon.Runtime.HttpTaskTest do
       refute_receive {:not_found, "gone"}, 300
     end
 
+    test "a request the client does not end is ended a second after the total limit", %{url: url} do
+      config = Application.get_env(:archon, HttpTask, [])
+
+      Application.put_env(
+        :archon,
+        HttpTask,
+        Keyword.merge(config, client: __MODULE__.Stuck, max_request_ms: 100, max_concurrency: 1)
+      )
+
+      restart_executor()
+      :ok = HttpTask.request("wf-1", "a", 1, request(url <> "/json"))
+      :ok = HttpTask.request("wf-1", "b", 1, request(url <> "/json"))
+
+      assert_receive {:delivered, "wf-1", "a", 1,
+                      {:error, {:io, "Request did not complete within its total time limit"}}},
+                     3000
+
+      # The place went to the next request.
+      assert %{running: [{"wf-1", "b"}]} = HttpTask.info()
+      :ok = HttpTask.cancel("wf-1", "b")
+      assert HttpTask.info() == %{running: [], waiting: []}
+    end
+
     test "a request ends at the total limit, never past the task's deadline", %{url: url} do
       :ok =
         HttpTask.request("wf-1", "a", 1, request(url <> "/drip", deadline: Runtime.now() + 300))
@@ -379,6 +402,12 @@ defmodule Archon.Runtime.HttpTaskTest do
                       {:error, {:io, "Request did not complete within its total time limit"}}},
                      2000
     end
+  end
+
+  defmodule Stuck do
+    @moduledoc false
+    # A client that never ends, whatever its limits.
+    def run(_request, _limits), do: Process.sleep(:infinity)
   end
 
   @doc false

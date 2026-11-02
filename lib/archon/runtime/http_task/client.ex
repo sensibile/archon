@@ -93,13 +93,22 @@ defmodule Archon.Runtime.HttpTask.Client do
   defp exchange(request, limits, ends) do
     with {:ok, target} <- target(request.uri),
          {:ok, conn} <- connect(target, request, ends) do
-      try do
-        send_request(conn, target, request, limits, ends)
-      after
-        Mint.HTTP.close(conn)
-      end
+      result = send_request(conn, target, request, limits, ends)
+      close(conn, result)
+      result
     end
   end
+
+  # A request ended early drops what the target did not take (no linger: a close would otherwise
+  # wait for the send queue); one that is done closes as usual.
+  defp close(conn, {:error, _reason}) do
+    socket = Mint.HTTP.get_socket(conn)
+    opts = [linger: {true, 0}]
+    _ = if is_port(socket), do: :inet.setopts(socket, opts), else: :ssl.setopts(socket, opts)
+    Mint.HTTP.close(conn)
+  end
+
+  defp close(conn, _done), do: Mint.HTTP.close(conn)
 
   defp target(uri) do
     case URI.new(uri) do
@@ -126,13 +135,11 @@ defmodule Archon.Runtime.HttpTask.Client do
     opts = [
       mode: :passive,
       protocols: [:http1],
-      # A send to a target that does not read ends at the total limit too, and closing drops what
-      # it did not take (no linger: a close would otherwise wait for the send queue).
+      # A send to a target that does not read ends at the total limit too.
       transport_opts: [
         timeout: wait(request.connect_timeout, ends),
         send_timeout: max(wait(0, ends), 1),
-        send_timeout_close: true,
-        linger: {true, 0}
+        send_timeout_close: true
       ]
     ]
 

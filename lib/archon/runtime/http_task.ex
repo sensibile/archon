@@ -27,10 +27,13 @@ defmodule Archon.Runtime.HttpTask do
     * `max_response_bytes` - the largest response body, read or decompressed: 10 MiB.
     * `deliver` - `{module, function, args}` called with `(workflow_id, task_id, poll_count,
       result)`, `Archon.Runtime.WorkflowServer.http_completed/4` by default (for tests).
+    * `client` - the module whose `run/2` sends a request, `Archon.Runtime.HttpTask.Client` by
+      default (for tests).
 
-  `Archon.Runtime.HttpTask.Supervisor` starts it with its task supervisor; either one ending
-  restarts both, so the counts never miss a running request. The requests running then end,
-  and their tasks time out.
+  `Archon.Runtime.HttpTask.Supervisor` starts it between the task supervisor of the deliveries
+  and that of the requests (`:rest_for_one`): the executor ending ends the requests running,
+  whose tasks then time out, so its counts never miss one; the requests' supervisor ending is
+  seen as each request's end. A delivery under way outlives both.
   """
 
   use GenServer
@@ -42,6 +45,10 @@ defmodule Archon.Runtime.HttpTask do
   alias Archon.Runtime.Step.Http
 
   @tasks Archon.Runtime.HttpTask.Tasks
+  @deliveries Archon.Runtime.HttpTask.Deliveries
+
+  # The executor answers at once; a timeout means it is stuck, and the effect fails.
+  @call_ms 30_000
 
   # How long after its total time limit the executor ends a request the client did not.
   @grace_ms 1_000
@@ -63,7 +70,12 @@ defmodule Archon.Runtime.HttpTask do
   """
   @spec request(String.t(), String.t(), non_neg_integer(), Http.request()) :: :ok
   def request(workflow_id, task_id, poll_count, request),
-    do: GenServer.call(__MODULE__, {:request, {workflow_id, task_id}, poll_count, request})
+    do:
+      GenServer.call(
+        __MODULE__,
+        {:request, {workflow_id, task_id}, poll_count, request},
+        @call_ms
+      )
 
   @doc "Drops the request of the task: unsent if it waits, ended if it runs."
   @spec cancel(String.t(), String.t()) :: :ok
@@ -74,9 +86,6 @@ defmodule Archon.Runtime.HttpTask do
   # For tests: the keys of the running and the waiting requests.
   @spec info() :: %{running: [key()], waiting: [key()]}
   def info, do: GenServer.call(__MODULE__, :info)
-
-  @impl GenServer
-  def handle_cast({:cancel, key}, state), do: {:noreply, state |> drop(key) |> next()}
 
   @impl GenServer
   def init(_opts) do
@@ -101,6 +110,9 @@ defmodule Archon.Runtime.HttpTask do
 
   def handle_call(:info, _from, state),
     do: {:reply, %{running: Map.keys(state.running), waiting: Map.keys(state.waiting)}, state}
+
+  @impl GenServer
+  def handle_cast({:cancel, key}, state), do: {:noreply, state |> drop(key) |> next()}
 
   @impl GenServer
   def handle_info({ref, result}, %__MODULE__{refs: refs} = state) when is_map_key(refs, ref) do
@@ -188,7 +200,9 @@ defmodule Archon.Runtime.HttpTask do
         max_body: setting(:max_response_bytes, 10 * 1024 * 1024)
       }
 
-      task = Task.Supervisor.async_nolink(@tasks, Client, :run, [request, limits])
+      task =
+        Task.Supervisor.async_nolink(@tasks, setting(:client, Client), :run, [request, limits])
+
       Process.send_after(self(), {:expire, job.key, job.id}, limits.total_ms + @grace_ms)
 
       %{
@@ -209,7 +223,7 @@ defmodule Archon.Runtime.HttpTask do
 
     args = args ++ [workflow_id, task_id, poll_count, result]
 
-    Task.Supervisor.start_child(@tasks, fn ->
+    Task.Supervisor.start_child(@deliveries, fn ->
       deliver_until(module, function, args, request.deadline, @retry_ms)
     end)
   end
@@ -241,8 +255,8 @@ end
 
 defmodule Archon.Runtime.HttpTask.Supervisor do
   @moduledoc """
-  The `HTTP` task executor (`Archon.Runtime.HttpTask`) and the task supervisor of its requests
-  and deliveries, restarted together (`:one_for_all`).
+  The `HTTP` task executor (`Archon.Runtime.HttpTask`) between the task supervisors of its
+  deliveries and its requests (`:rest_for_one`, see `Archon.Runtime.HttpTask`).
   """
 
   use Supervisor
@@ -253,8 +267,12 @@ defmodule Archon.Runtime.HttpTask.Supervisor do
   @impl Supervisor
   def init(_opts) do
     Supervisor.init(
-      [{Task.Supervisor, name: Archon.Runtime.HttpTask.Tasks}, Archon.Runtime.HttpTask],
-      strategy: :one_for_all
+      [
+        {Task.Supervisor, name: Archon.Runtime.HttpTask.Deliveries},
+        Archon.Runtime.HttpTask,
+        {Task.Supervisor, name: Archon.Runtime.HttpTask.Tasks}
+      ],
+      strategy: :rest_for_one
     )
   end
 end
