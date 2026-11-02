@@ -29,6 +29,9 @@ defmodule Archon.Runtime.Step.State do
   #   * `pull` - the earliest `:wake` asked by an event that did not decide.
   #   * `limits` - the concurrent execution limits the commit asks the store to check
   #     (ADR 0021, decision 5).
+  #   * `shared_variables?` - the workflow's `variables` are still its definition's map, as in
+  #     upstream's `startWorkflow` until its first decide returns (`createWorkflowModel` sets the
+  #     definition's map, which a `SET_VARIABLE` then changes in both; ADR 0026, decision 3).
 
   alias Archon.Domain.{Task, TaskDef, Workflow}
   alias Archon.Runtime.Commit
@@ -50,6 +53,7 @@ defmodule Archon.Runtime.Step.State do
     post: [],
     iterations: 0,
     halted?: false,
+    shared_variables?: false,
     changed?: false,
     decided?: false,
     due: MapSet.new(),
@@ -72,6 +76,7 @@ defmodule Archon.Runtime.Step.State do
           post: [Effect.t()],
           iterations: non_neg_integer(),
           halted?: boolean(),
+          shared_variables?: boolean(),
           changed?: boolean(),
           decided?: boolean(),
           due: MapSet.t(String.t() | nil),

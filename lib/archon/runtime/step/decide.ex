@@ -38,7 +38,8 @@ defmodule Archon.Runtime.Step.Decide do
   again while one of them finished (ADR 0018, decisions 2 and 6).
   """
   @spec settle(State.t()) :: State.t()
-  def settle(state), do: state |> decide() |> evaluate_async()
+  def settle(state),
+    do: state |> decide() |> Map.put(:shared_variables?, false) |> evaluate_async()
 
   defp evaluate_async(%State{halted?: true} = state), do: state
 

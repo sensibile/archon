@@ -25,14 +25,19 @@ defmodule Archon.Decider.Mapper do
     Decision,
     DoWhile,
     Dynamic,
+    ExclusiveJoin,
     ForkJoin,
     ForkJoinDynamic,
+    Human,
     Inline,
     Join,
     Lambda,
+    Noop,
+    SetVariable,
     Simple,
     SubWorkflow,
     Switch,
+    Terminate,
     UserDefined,
     Wait
   }
@@ -63,6 +68,11 @@ defmodule Archon.Decider.Mapper do
     "WAIT" => Wait,
     "DYNAMIC" => Dynamic,
     "FORK_JOIN_DYNAMIC" => ForkJoinDynamic,
+    "TERMINATE" => Terminate,
+    "SET_VARIABLE" => SetVariable,
+    "NOOP" => Noop,
+    "HUMAN" => Human,
+    "EXCLUSIVE_JOIN" => ExclusiveJoin,
     "INLINE" => Inline,
     "LAMBDA" => Lambda
   }

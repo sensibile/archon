@@ -18,7 +18,7 @@ defmodule Archon.Runtime.Step.Schedule do
   """
 
   alias Archon.Decider.{SystemTask, SystemTasks}
-  alias Archon.Domain.{Task, Workflow}
+  alias Archon.Domain.{Task, Workflow, WorkflowDef}
   alias Archon.Runtime.Step.{Env, State}
 
   @doc "A registered system task type."
@@ -197,18 +197,28 @@ defmodule Archon.Runtime.Step.Schedule do
   @doc """
   Puts what a system task's `start` or `execute` answered into the step: the task, kept whatever
   `changed?` says, and a changed workflow, which is saved at once as upstream's `SetVariable`
-  saves it (ADR 0026, decision 2). Saving the task is the caller's.
+  saves it (ADR 0026, decision 2). While the workflow's variables are still its definition's
+  (`shared_variables?`, the first decide of a start), its definition takes the new variables
+  too, as upstream's shared map shows in the stored `workflowDefinition` (ADR 0026, decision 3).
+  Saving the task is the caller's.
   """
   @spec apply_result(State.t(), SystemTask.Result.t()) :: State.t()
   def apply_result(%State{} = state, %SystemTask.Result{task: task, workflow: nil}),
     do: State.put_task(state, task)
 
   def apply_result(%State{wf: wf} = state, %SystemTask.Result{task: task, workflow: workflow}) do
+    workflow = if state.shared_variables?, do: share_variables(workflow), else: workflow
+
     state
     |> State.put_workflow(%{workflow | tasks: wf.tasks})
     |> State.put_task(task)
     |> State.save_workflow()
   end
+
+  defp share_variables(%Workflow{workflow_definition: %WorkflowDef{} = definition} = workflow),
+    do: %{workflow | workflow_definition: %{definition | variables: workflow.variables}}
+
+  defp share_variables(%Workflow{} = workflow), do: workflow
 
   defp start_time(task, env, now) do
     if system_task?(env, task) and not Task.terminal?(task.status) and task.start_time == 0,
