@@ -42,3 +42,4 @@ Archon의 합의된 기술·운영 결정을 누적합니다. 파일 이름은 `
 | [0023](0023-phase5-rest.md) | Phase 5 REST 설계 (MVP 엔드포인트) | 승인 |
 | [0024](0024-worker-input-trust-and-auth.md) | worker 입력의 신뢰 경계와 MVP 인증 | 승인 |
 | [0025](0025-phase6-workflow-operations-rest.md) | Phase 6 워크플로우 운영 REST 설계 | 제안 |
+| [0026](0026-phase7-system-task-types.md) | Phase 7 MVP 밖 시스템 태스크 타입 설계 | 제안 |
