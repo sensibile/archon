@@ -241,7 +241,12 @@ defmodule ArchonWeb.WorkflowBulkControllerTest do
         outbox: [{:retry_sub_workflow, "archon-missing-" <> Runtime.new_id()}]
       })
 
-    conn = bulk(:delete, "remove?archiveWorkflow=false", Jason.encode!([pending, other]))
+    started = System.monotonic_time(:millisecond)
+    list = [pending, other, pending, pending]
+    conn = bulk(:delete, "remove?archiveWorkflow=false", Jason.encode!(list))
+
+    # the repeated pending ID did not wait again
+    assert System.monotonic_time(:millisecond) - started < 500
 
     assert json_response(conn, 200) == %{
              "bulkSuccessfulResults" => [other],

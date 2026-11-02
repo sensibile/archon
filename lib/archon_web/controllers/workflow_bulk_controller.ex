@@ -163,8 +163,10 @@ defmodule ArchonWeb.WorkflowBulkController do
     do: bulk(conn, ids, [operation])
 
   defp bulk(conn, ids, operations) do
-    {successes, response} =
-      Enum.reduce(ids, {[], %BulkResponse{}}, fn id, acc ->
+    operations = Enum.with_index(operations)
+
+    {successes, response, _pending} =
+      Enum.reduce(ids, {[], %BulkResponse{}, MapSet.new()}, fn id, acc ->
         Enum.reduce(operations, acc, &apply_one(&1, id, &2))
       end)
 
@@ -179,10 +181,24 @@ defmodule ArchonWeb.WorkflowBulkController do
   # A null ID is not found upstream; its failure is never written (bulk/3).
   defp apply_one(_operation, nil, acc), do: acc
 
-  defp apply_one(operation, id, {successes, response}) do
-    case run(operation, id) do
-      :ok -> {[id | successes], response}
-      {:error, reason} -> {successes, BulkResponse.failure(response, id, message(id, reason))}
+  # A removal that already waited out its outbox for this ID in this request (ADR 0025,
+  # decision 3) fails the same way again without another wait, so repeating an ID does not
+  # multiply the request's time.
+  defp apply_one({operation, index}, id, {successes, response, pending}) do
+    result =
+      if MapSet.member?(pending, {index, id}),
+        do: {:error, :outbox_pending},
+        else: run(operation, id)
+
+    case result do
+      :ok ->
+        {[id | successes], response, pending}
+
+      {:error, reason} ->
+        pending =
+          if reason == :outbox_pending, do: MapSet.put(pending, {index, id}), else: pending
+
+        {successes, BulkResponse.failure(response, id, message(id, reason)), pending}
     end
   end
 
