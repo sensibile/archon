@@ -33,6 +33,13 @@ defmodule Archon.Runtime.DynamicTest do
     {"name": "p7c_join", "taskReferenceName": "join", "type": "JOIN"}]}
   """
 
+  @jq_fork ~S"""
+  {"name": "p7c_jq_fork", "version": 1, "tasks": [
+    {"name": "p7c_fjd", "taskReferenceName": "fjd", "type": "FORK_JOIN_DYNAMIC",
+     "inputParameters": {"forkTaskType": "JSON_JQ_TRANSFORM", "forkTaskInputs": "${workflow.input.inputs}"}},
+    {"name": "p7c_join", "taskReferenceName": "join", "type": "JOIN"}]}
+  """
+
   @child ~S"""
   {"name": "p7c_child", "version": 3, "tasks": [
     {"name": "p7c_worker", "taskReferenceName": "w", "type": "SIMPLE"}]}
@@ -62,7 +69,7 @@ defmodule Archon.Runtime.DynamicTest do
     # The DYNAMIC workflow task's own definition, which its tasks take: one retry.
     :ok = Runtime.metadata().update_task_def(%TaskDef{name: "p7c_dyn", retry_count: 1})
 
-    for json <- [@fork, @sub_fork, @child, @dynamic, @loop] do
+    for json <- [@fork, @jq_fork, @sub_fork, @child, @dynamic, @loop] do
       {:ok, definition} = json |> Jason.decode!() |> WorkflowDef.from_json()
       :ok = Runtime.metadata().update_workflow_def(definition)
     end
@@ -197,6 +204,20 @@ defmodule Archon.Runtime.DynamicTest do
       [rerun_branch] = scheduled(id, 1)
       assert rerun_branch.task_id != branch.task_id
       assert rerun_branch.domain == nil
+    end
+
+    test "a rerun from the FORK whose new branch fails to start fails the workflow" do
+      id = start("p7c_jq_fork", %{"inputs" => [%{"queryExpression" => "."}]})
+      await_status(id, :completed)
+      fork = task(id, "fjd")
+
+      assert rerun(id,
+               re_run_from_task_id: fork.task_id,
+               workflow_input: %{"inputs" => [%{"queryExpression" => 5}]}
+             ) == :ok
+
+      wf = await_status(id, :failed)
+      assert wf.reason_for_incompletion =~ ~r/^Error scheduling tasks: /
     end
 
     test "a rerun from the FORK whose mapper terminates fails the workflow" do

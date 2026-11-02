@@ -632,8 +632,9 @@ defmodule Archon.Runtime.Step.Lifecycle do
   # Case 1 for the FORK of a FORK_JOIN_DYNAMIC, as finalizeRerun's first branch: the FORK goes
   # with the tasks after it and getTasksToBeScheduled makes the fork again, branches included
   # (the decide's getNextTask(FORK) would only schedule the JOIN). Upstream writes the FORK as
-  # SCHEDULED first and resets it, which deleting it makes moot. A termination of the mapper
-  # terminates the workflow, as a decide's would; upstream throws it out of the rerun.
+  # SCHEDULED first and resets it, which deleting it makes moot. A termination of the mapper or of
+  # the scheduling (a start that fails) terminates the workflow, as a decide's would; upstream
+  # throws it out of the rerun.
   defp rerun_from(
          %State{env: env} = state,
          %Task{task_type: "FORK", workflow_task: %WorkflowTask{type: "FORK_JOIN_DYNAMIC"} = wt} =
@@ -647,11 +648,14 @@ defmodule Archon.Runtime.Step.Lifecycle do
       {:ok, tasks} ->
         # finalizeRerun schedules them without setTaskDomains.
         {state, new} = Schedule.dedup_and_add(state, tasks)
-        {state, _started?} = Schedule.schedule(state, new)
-        state |> push_parents(true) |> Decide.settle()
+
+        case Schedule.schedule(state, new) do
+          {:terminate, termination, state} -> terminate_rerun(state, termination)
+          {state, _started?} -> state |> push_parents(true) |> Decide.settle()
+        end
 
       {:terminate, termination} ->
-        state |> push_parents(true) |> Terminate.by_decider(termination)
+        terminate_rerun(state, termination)
     end
   end
 
@@ -710,6 +714,10 @@ defmodule Archon.Runtime.Step.Lifecycle do
        do: %{rerun | scheduled_time: before.scheduled_time + 1}
 
   defp rerun_scheduled_time(rerun, _before), do: rerun
+
+  # A rerun that ends in a termination: the workflow ends as a decide's termination ends it.
+  defp terminate_rerun(state, termination),
+    do: state |> push_parents(true) |> Terminate.by_decider(termination)
 
   # addTaskToQueue for an asynchronous system task: evaluated at once without a callback delay,
   # else when the delay is over (the next :wake), as repair_canceled does.

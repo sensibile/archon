@@ -288,7 +288,8 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     `forkTaskWorkflow` 가지가 이 경로를 탄다.
   - **rerun.** FORK_JOIN_DYNAMIC이 만든 FORK 태스크의 rerun은 upstream `finalizeRerun`의 첫 분기다. 뒤 태스크와 FORK 자신을 지우고
     `Decider.tasks_to_be_scheduled/5`로 FORK·가지·JOIN을 새로 만들어 예약한 뒤 부모를 깨우고 결정한다(`p7_fjd_rerun_fork_get`). 매퍼가
-    종료를 돌려주면 워크플로우를 종료한다. upstream은 그 예외가 rerun 요청 밖으로 새므로 의도적 차이다. 한 가지의 rerun은 기존
+    종료를 돌려주거나 새 태스크의 예약(동기 시스템 태스크의 `start` 실패, 조각 7e의 `"Error scheduling tasks: ..."`)이 종료하면
+    워크플로우를 종료한다. upstream은 그 예외가 rerun 요청 밖으로 새므로 의도적 차이다. 한 가지의 rerun은 기존
     경로(seq로 뒤 태스크 삭제, `finalizeRerun`)가 이미 캡처와 같다. 다른 가지의 첫 시도가 `SCHEDULED`가 되고 JOIN은 그대로다
     (`p7_fjd_rerun_branch_get`).
   - 7a가 결정 2에 남긴 "rerun 대상이 동기 시스템 태스크면 upstream은 상태를 바꾸지 않는다"는 다시 확인해 보니 차이가 아니다.
