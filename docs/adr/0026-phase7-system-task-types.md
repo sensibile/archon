@@ -246,7 +246,8 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     죽고 복구가 같은 결정을 되풀이하므로, 매퍼·태스크가 던지는 대신 태스크를 실패시키는 기존 방식(ADR 0014, WAIT의 `duration`)을
     따른다. 상태는 upstream `Inline`의 `catch` 규칙(`TerminateWorkflowException`이 아니면 `FAILED`)을 따랐고, 같은 캐스트를 `try`
     안에서 하는 LAMBDA의 upstream 결과(`FAILED`, 같은 문구)와 같다. `<클래스>`는 Jackson이 준 값의 클래스로 서버에서 확인했다
-    (`Integer`, `Long`, `BigInteger`, `Double`, `Boolean`, `java.util.LinkedHashMap`, `java.util.ArrayList`). `evaluatorType`을 먼저 본다.
+    (`Integer`, `Long`, `BigInteger`, `Double`, `Boolean`, `java.util.LinkedHashMap`, `java.util.ArrayList`). `evaluatorType`을 먼저 보고,
+    기본값 `javascript`는 `null`일 때만이다(`false`도 캐스트 오류).
     재생은 이 두 단계에 단계 옵션 `expect: :started`(Archon이 시작해 ID를 답함, 바인딩 없음)를 쓴다. 7h가 "upstream과 의도적으로
     다른 점"에 옮긴다.
   - **평가 오류의 상태.** `Archon.Script.Error`의 `:syntax`·`:runtime`(upstream `handlePolyglotException`의
@@ -257,7 +258,8 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     `Unknown evaluator 'python' in INLINE task.`로 `FAILED_WITH_TERMINAL_ERROR`다(결정 1·ADR 0015 결정 5의 범위 밖).
   - **빈 값.** `evaluatorType`이 없거나 `null`이면 `javascript`, 빈 문자열·공백이면 빈 값 오류(Java `isBlank`, 줄바꿈 없는 공백은
     빈 값이 아님). 모르는 평가기는 빈 `expression`보다 먼저 본다(서버 확인). LAMBDA의 빈 식은 출력 `error` 없이 `FAILED`다.
-  - **매퍼.** 태스크 정의가 없으면 입력 계산에 `task_def_lookup`을 쓴다(upstream `metadataDAO.getTaskDef`). 격리 그룹은 INLINE만,
+  - **매퍼.** 태스크 정의가 없으면 입력 계산에 호출자가 채운 `task_defs`(`UserDefined`와 같음), 그다음 `task_def_lookup`을 쓴다
+    (upstream `metadataDAO.getTaskDef`). 격리 그룹은 INLINE만,
     `TaskMapperContext`의 정의에서만 읽는다. 등록된 평가기 목록은 `Archon.Decider.Evaluator.registered?/1`이 답한다.
   - **엔진 문구.** 스크립트 오류 본문은 ADR 0015의 의도적 차이 그대로다(`Cannot read property` 대 `cannot read property`). 재생은
     `p7_inline_script_error_get`·`p7_lambda_error_get`의 메시지 네 곳을 `ignore`하고, StepReplay 시험은 그 대소문자만 바꿔 비교한다.

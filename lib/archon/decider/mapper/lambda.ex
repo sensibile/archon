@@ -6,7 +6,8 @@
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/mapper/LambdaTaskMapper.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: returns a value through the Archon.Decider.Mapper behaviour; reads the
-# clock from the Decider context and a missing task definition through its task_def_lookup.
+# clock from the Decider context and a missing task definition from its task_defs or
+# task_def_lookup.
 
 defmodule Archon.Decider.Mapper.Lambda do
   @moduledoc """

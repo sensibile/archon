@@ -103,6 +103,15 @@ defmodule Archon.Decider.ScriptTasksTest do
 
       assert {:ok, [task]} = map(script_task("INLINE"))
       assert task.input_data == %{"expression" => "1", "a" => 2}
+
+      # The definitions the caller filled come first, as UserDefined reads them.
+      not_read = fn _name -> flunk("the store is read") end
+      task_defs = %{"inline_task" => template}
+
+      assert {:ok, [task]} =
+               map(script_task("INLINE"), task_defs: task_defs, task_def_lookup: not_read)
+
+      assert task.input_data == %{"expression" => "1", "a" => 2, "t" => "template"}
     end
 
     test "LAMBDA: one IN_PROGRESS task, no isolation group" do
@@ -288,6 +297,7 @@ defmodule Archon.Decider.ScriptTasksTest do
             {100_000_000_000_000_000_000, "java.math.BigInteger"},
             {1.5, "java.lang.Double"},
             {true, "java.lang.Boolean"},
+            {false, "java.lang.Boolean"},
             {%{"x" => 1}, "java.util.LinkedHashMap"},
             {[1], "java.util.ArrayList"}
           ] do
@@ -428,7 +438,6 @@ defmodule Archon.Decider.ScriptTasksTest do
       {"if ($.a == 1){return {testvalue: true}} else {return {testvalue: false}}",
        %{"testvalue" => true}},
       {"return 1/0;", "Infinity"},
-      {"", :blank},
       {"return;", nil},
       {"return arguments.length;", 0},
       {"return this === undefined ? 'strict' : typeof this;", "object"},
@@ -458,7 +467,7 @@ defmodule Archon.Decider.ScriptTasksTest do
     end
 
     test "LAMBDA" do
-      for {script, expected} <- @lambda_cases, expected != :blank do
+      for {script, expected} <- @lambda_cases do
         assert %{task: task} = lambda(Map.put(@input, "scriptExpression", script))
 
         assert {script, task.status, task.output_data} ==

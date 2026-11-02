@@ -39,7 +39,13 @@ defmodule Archon.Decider.SystemTask.Inline do
 
   @impl true
   def execute(_workflow, %Task{input_data: input} = task, %Context{} = context) do
-    evaluator_type = Map.get(input, "evaluatorType") || "javascript"
+    # Only null takes the default: false is cast like any other value that is not a string.
+    evaluator_type =
+      case Map.get(input, "evaluatorType") do
+        nil -> "javascript"
+        value -> value
+      end
+
     expression = Map.get(input, "expression")
 
     with :ok <- string(evaluator_type),
@@ -105,6 +111,9 @@ defmodule Archon.Decider.SystemTask.Inline do
 
       {:error, %Script.Error{} = error} ->
         {:error, :failed, Exception.message(error)}
+
+      :unregistered ->
+        terminal("Unknown evaluator '#{evaluator_type}' in INLINE task.")
     end
   end
 
@@ -113,7 +122,7 @@ defmodule Archon.Decider.SystemTask.Inline do
   @doc false
   # The message of upstream's ClassCastException when it casts this JSON value to a String: the
   # class is the one Jackson gives the untyped value (checked against the upstream server).
-  @spec string_cast_message(term()) :: String.t()
+  @spec string_cast_message(boolean() | number() | list() | map()) :: String.t()
   def string_cast_message(value) do
     class = java_class(value)
 

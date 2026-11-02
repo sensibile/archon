@@ -6,7 +6,8 @@
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/mapper/InlineTaskMapper.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: returns a value through the Archon.Decider.Mapper behaviour; reads the
-# clock from the Decider context and a missing task definition through its task_def_lookup.
+# clock from the Decider context and a missing task definition from its task_defs or
+# task_def_lookup.
 
 defmodule Archon.Decider.Mapper.Inline do
   @moduledoc """
@@ -37,15 +38,19 @@ defmodule Archon.Decider.Mapper.Inline do
      ]}
   end
 
-  # Optional.ofNullable(getTaskDefinition()).orElseGet(() -> metadataDAO.getTaskDef(name))
+  # Optional.ofNullable(getTaskDefinition()).orElseGet(() -> metadataDAO.getTaskDef(name)): the
+  # definitions the caller filled first, as `UserDefined` reads them, then the store.
   @doc false
   @spec task_definition(WorkflowTask.t(), Context.t()) :: TaskDef.t() | nil
   def task_definition(_wt, %Context{task_definition: %TaskDef{} = task_def}), do: task_def
 
   def task_definition(%WorkflowTask{name: name}, %Context{decider: decider})
       when is_binary(name) do
-    case decider.task_def_lookup.(name) do
-      {:ok, %TaskDef{} = task_def} -> task_def
+    with nil <- Map.get(decider.task_defs, name),
+         {:ok, %TaskDef{} = task_def} <- decider.task_def_lookup.(name) do
+      task_def
+    else
+      %TaskDef{} = task_def -> task_def
       {:error, :not_found} -> nil
     end
   end

@@ -47,21 +47,23 @@ defmodule Archon.Decider.ScriptTaskReplayTest do
     end
   end
 
-  test "an INLINE input that is not a string fails the task instead of the start" do
-    start = Contract.fixture("p7_inline_evaluator_not_string_start")
-    expected = Contract.fixture("p7_inline_javascript_get")["response"]["body"]
-    {:ok, definition} = WorkflowDef.from_json(expected["workflowDefinition"])
+  for fixture <- ["p7_inline_evaluator_not_string_start", "p7_inline_expression_not_string_start"] do
+    test "#{fixture}: an input that is not a string fails the task instead of the start" do
+      start = Contract.fixture(unquote(fixture))
+      expected = Contract.fixture("p7_inline_javascript_get")["response"]["body"]
+      {:ok, definition} = WorkflowDef.from_json(expected["workflowDefinition"])
 
-    workflow =
-      start(definition, [workflow_id: "not-string", input: start["request"]["body"]], clock())
+      workflow =
+        start(definition, [workflow_id: "not-string", input: start["request"]["body"]], clock())
 
-    # Upstream's start answers this 500 and leaves no workflow (ADR 0026, decision 5).
-    message = start["response"]["body"]["message"]
-    assert workflow.status == :failed
-    assert [task] = workflow.tasks
-    assert task.status == :failed
-    assert task.reason_for_incompletion == message
-    assert task.output_data == %{"error" => message}
+      # Upstream's start answers this 500 and leaves no workflow (ADR 0026, decision 5).
+      message = start["response"]["body"]["message"]
+      assert workflow.status == :failed
+      assert [task] = workflow.tasks
+      assert task.status == :failed
+      assert task.reason_for_incompletion == message
+      assert task.output_data == %{"error" => message}
+    end
   end
 
   test "a LAMBDA reads the result of an INLINE before it, in the same decide" do
