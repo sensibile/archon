@@ -1,7 +1,7 @@
 defmodule ArchonWeb.ContractCaseTest do
   @moduledoc """
   The replay helper itself (ADR 0023 decision 6, ADR 0025 decision 7): scenario coverage, the ID
-  mapping, the step options and the skipping of Phase 6 actions not implemented yet.
+  mapping, and the step options.
   """
 
   use ArchonWeb.ContractCase, async: true
@@ -30,58 +30,6 @@ defmodule ArchonWeb.ContractCaseTest do
   test "the Phase 6 steps come last" do
     first = Enum.find_index(scenario(), &(&1 == {:exchange, "metadata_register_ops_taskdefs"}))
     assert {:exchange, "workflow_get_options"} == Enum.at(scenario(), first - 1)
-  end
-
-  describe "skip?/1" do
-    # A step that reaches an action still not implemented, the first of these in slice order
-    # (ADR 0025, decision 8); slice 6h removes the skipping.
-    @unimplemented_steps [
-      {"workflow_rerun", ArchonWeb.WorkflowLifecycleController, :rerun},
-      {"workflow_bulk_pause", ArchonWeb.WorkflowBulkController, :pause}
-    ]
-
-    defp unimplemented_step do
-      Enum.find(@unimplemented_steps, fn {_name, controller, action} ->
-        action in controller.unimplemented()
-      end)
-    end
-
-    test "a step reaching an action its controller has not implemented is skipped" do
-      if step = unimplemented_step() do
-        {name, _controller, _action} = step
-        assert skip?({:exchange, name})
-      end
-
-      refute :pause in ArchonWeb.WorkflowLifecycleController.unimplemented()
-      refute skip?({:exchange, "workflow_pause"})
-      refute skip?({:exchange, "workflow_get_paused"})
-      refute skip?({:exchange, "route_unsupported_workflow_decide", expect: :no_route})
-    end
-
-    test "a step requiring an action not implemented yet is skipped, waits too" do
-      if step = unimplemented_step() do
-        {_name, controller, action} = step
-        requires = [requires: [{controller, action}]]
-        assert skip?({:exchange, "workflow_get_paused", requires})
-        assert skip?({:wait_status, "workflow_start_life", "PAUSED", requires})
-      end
-
-      implemented = [requires: [{ArchonWeb.WorkflowLifecycleController, :pause}]]
-      refute skip?({:exchange, "workflow_get_paused", implemented})
-      refute skip?({:wait_status, "workflow_start_life", "RUNNING"})
-      refute skip?({:exchange, "health", requires: [{ArchonWeb.HealthController, :check}]})
-    end
-
-    test "every requirement names a Phase 6 action of the router" do
-      routes = MapSet.new(ArchonWeb.Router.__routes__(), &{&1.plug, &1.plug_opts})
-
-      for step <- scenario(),
-          opts = List.last(Tuple.to_list(step)),
-          is_list(opts),
-          action <- Keyword.get(opts, :requires, []) do
-        assert action in routes, inspect(step)
-      end
-    end
   end
 
   test "until: repeats the request until the conditions hold" do

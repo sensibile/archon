@@ -11,15 +11,20 @@ defmodule Archon.Domain.ContractRoundTripTest do
   alias Archon.Domain.{
     BulkResponse,
     ErrorResponse,
+    RerunWorkflowRequest,
+    SearchResult,
+    SignalResponse,
     Task,
     TaskDef,
     TaskResult,
     Workflow,
-    WorkflowDef
+    WorkflowDef,
+    WorkflowDefSummary
   }
 
   # Which domain model each fixture body decodes to. Every fixture is listed so that a newly
   # captured one cannot be skipped silently; [] means the exchange carries no domain object.
+  # {:list, model} is a list body, {:map, model} a map whose values are lists of the model.
   @models %{
     "metadata_get_taskdef" => [response: TaskDef],
     "metadata_get_workflow" => [response: WorkflowDef],
@@ -154,9 +159,8 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "workflow_start_request_inline_other_name" => [],
     "workflow_start_options" => [],
     "workflow_get_options" => [response: Workflow],
-    # Phase 6 (ADR 0025, decision 7). Bodies of the models the later slices add
-    # (SearchResult, WorkflowDefSummary, SignalResponse, RerunWorkflowRequest) are [] until
-    # slice 6h classifies them.
+    # Phase 6 (ADR 0025, decision 7), the models of slices 6b, 6c, 6e and 6f classified by 6h.
+    # Lists of IDs or names and execute requests (a StartWorkflowRequest, as above) are [].
     "metadata_register_ops_taskdefs" => [request: {:list, TaskDef}],
     "metadata_register_workflow_ops" => [request: WorkflowDef],
     "metadata_register_workflow_ops_v2" => [request: WorkflowDef],
@@ -173,11 +177,11 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "metadata_list_workflows" => [response: {:list, WorkflowDef}],
     "metadata_list_workflows_classifier" => [response: {:list, WorkflowDef}],
     "metadata_list_workflows_classifier_agent" => [response: {:list, WorkflowDef}],
-    "metadata_workflow_names_and_versions" => [],
+    "metadata_workflow_names_and_versions" => [response: {:map, WorkflowDefSummary}],
     "metadata_workflow_names" => [],
     "metadata_workflow_latest_versions" => [response: {:list, WorkflowDef}],
-    "metadata_workflow_versions" => [],
-    "metadata_workflow_versions_missing" => [],
+    "metadata_workflow_versions" => [response: {:list, WorkflowDefSummary}],
+    "metadata_workflow_versions_missing" => [response: {:list, WorkflowDefSummary}],
     "metadata_validate_workflow" => [request: WorkflowDef],
     "metadata_validate_workflow_invalid" => [response: ErrorResponse],
     "metadata_get_workflow_not_validated" => [response: ErrorResponse],
@@ -188,7 +192,7 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "workflow_resume_not_found" => [response: ErrorResponse],
     "workflow_retry_not_found" => [response: ErrorResponse],
     "workflow_restart_not_found" => [response: ErrorResponse],
-    "workflow_rerun_not_found" => [response: ErrorResponse],
+    "workflow_rerun_not_found" => [request: RerunWorkflowRequest, response: ErrorResponse],
     "workflow_skiptask_not_found" => [response: ErrorResponse],
     "workflow_resetcallbacks_not_found" => [response: ErrorResponse],
     "workflow_remove_not_found" => [response: ErrorResponse],
@@ -196,34 +200,34 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "workflow_pause_completed" => [response: ErrorResponse],
     "workflow_resume_completed" => [response: ErrorResponse],
     "workflow_retry_completed" => [response: ErrorResponse],
-    "workflow_rerun_task_not_found" => [response: ErrorResponse],
+    "workflow_rerun_task_not_found" => [request: RerunWorkflowRequest, response: ErrorResponse],
     "workflow_skiptask_completed" => [response: ErrorResponse],
     "workflow_resetcallbacks_completed" => [response: ErrorResponse],
     "workflow_terminate_remove_completed" => [response: ErrorResponse],
     "workflow_resume_running" => [],
     "workflow_retry_running" => [response: ErrorResponse],
     "workflow_restart_running" => [response: ErrorResponse],
-    "workflow_rerun_running" => [response: ErrorResponse],
+    "workflow_rerun_running" => [request: RerunWorkflowRequest, response: ErrorResponse],
     "workflow_skiptask_unknown_ref" => [response: ErrorResponse],
     "workflow_skiptask_existing_ref" => [response: ErrorResponse],
     "workflow_remove_running" => [response: ErrorResponse],
     "workflow_get_running_not_removed" => [response: Workflow],
-    "workflow_tasks" => [],
-    "workflow_tasks_status" => [],
-    "workflow_tasks_status_list" => [],
-    "workflow_tasks_status_comma" => [],
-    "workflow_tasks_status_none" => [],
-    "workflow_tasks_page" => [],
+    "workflow_tasks" => [response: SearchResult],
+    "workflow_tasks_status" => [response: SearchResult],
+    "workflow_tasks_status_list" => [response: SearchResult],
+    "workflow_tasks_status_comma" => [response: SearchResult],
+    "workflow_tasks_status_none" => [response: SearchResult],
+    "workflow_tasks_page" => [response: SearchResult],
     "workflow_tasks_count_negative" => [response: ErrorResponse],
     "workflow_tasks_start_negative" => [response: ErrorResponse],
-    "workflow_tasks_start_past_end" => [],
+    "workflow_tasks_start_past_end" => [response: SearchResult],
     "workflow_tasks_not_found" => [response: ErrorResponse],
     "workflow_correlated" => [response: {:list, Workflow}],
     "workflow_correlated_closed" => [response: {:list, Workflow}],
     "workflow_correlated_closed_tasks" => [response: {:list, Workflow}],
-    "workflow_correlated_post" => [],
-    "workflow_correlated_post_closed" => [],
-    "workflow_correlated_post_empty" => [],
+    "workflow_correlated_post" => [response: {:map, Workflow}],
+    "workflow_correlated_post_closed" => [response: {:map, Workflow}],
+    "workflow_correlated_post_empty" => [response: {:map, Workflow}],
     "workflow_running" => [],
     "workflow_running_other_version" => [],
     "workflow_running_time" => [],
@@ -243,23 +247,23 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "route_later_workflow_bulk_search" => [],
     "route_later_task_log" => [],
     "workflow_execute_not_found" => [response: ErrorResponse],
-    "workflow_execute" => [],
-    "workflow_execute_blocking_workflow" => [],
-    "workflow_execute_blocking_task" => [],
-    "workflow_execute_blocking_task_input" => [],
-    "workflow_execute_latest" => [],
+    "workflow_execute" => [response: SignalResponse],
+    "workflow_execute_blocking_workflow" => [response: SignalResponse],
+    "workflow_execute_blocking_task" => [response: SignalResponse],
+    "workflow_execute_blocking_task_input" => [response: SignalResponse],
+    "workflow_execute_latest" => [response: SignalResponse],
     "workflow_execute_completed_blocking_task" => [response: ErrorResponse],
-    "workflow_execute_wait_until_task" => [],
-    "workflow_execute_timeout" => [],
+    "workflow_execute_wait_until_task" => [response: SignalResponse],
+    "workflow_execute_timeout" => [response: SignalResponse],
     "workflow_execute_timeout_blocking_task" => [response: ErrorResponse],
-    "workflow_execute_inline" => [],
+    "workflow_execute_inline" => [response: SignalResponse],
     "workflow_start_signal" => [],
     "workflow_get_signal" => [response: Workflow],
-    "task_signal_sync" => [],
-    "task_signal_sync_blocking_workflow" => [],
-    "task_signal_sync_blocking_task" => [],
-    "task_signal_sync_blocking_task_input" => [],
-    "task_signal_sync_timeout" => [],
+    "task_signal_sync" => [response: SignalResponse],
+    "task_signal_sync_blocking_workflow" => [response: SignalResponse],
+    "task_signal_sync_blocking_task" => [response: SignalResponse],
+    "task_signal_sync_blocking_task_input" => [response: SignalResponse],
+    "task_signal_sync_timeout" => [response: SignalResponse],
     "task_signal_sync_no_wait" => [response: ErrorResponse],
     "task_signal_no_wait" => [],
     "workflow_get_signal_no_wait" => [response: Workflow],
@@ -268,7 +272,7 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "workflow_start_signal_parent" => [],
     "workflow_get_signal_parent" => [response: Workflow],
     "workflow_get_signal_child" => [response: Workflow],
-    "task_signal_sync_child" => [],
+    "task_signal_sync_child" => [response: SignalResponse],
     "workflow_start_ref" => [],
     "task_ref_update" => [],
     "workflow_get_ref_updated" => [response: Workflow],
@@ -297,7 +301,7 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "workflow_skiptask" => [],
     "workflow_get_skipped" => [response: Workflow],
     "workflow_skiptask_again" => [response: ErrorResponse],
-    "workflow_tasks_skipped" => [],
+    "workflow_tasks_skipped" => [response: SearchResult],
     "task_update_skip_a" => [request: TaskResult],
     "workflow_get_skip_completed" => [response: Workflow],
     "workflow_start_callback" => [],
@@ -326,20 +330,20 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "task_update_rerun_a" => [request: TaskResult],
     "workflow_get_rerun_b" => [response: Workflow],
     "task_update_rerun_b" => [request: TaskResult],
-    "workflow_rerun_from_task" => [],
+    "workflow_rerun_from_task" => [request: RerunWorkflowRequest],
     "workflow_get_rerun_from_task" => [response: Workflow],
     "workflow_terminate_rerun" => [],
-    "workflow_rerun" => [],
+    "workflow_rerun" => [request: RerunWorkflowRequest],
     "workflow_get_rerun_whole" => [response: Workflow],
     "workflow_start_parent" => [],
     "workflow_get_parent" => [response: Workflow],
     "workflow_get_parent_child" => [response: Workflow],
     "task_update_parent_child" => [request: TaskResult],
-    "workflow_rerun_sub_workflow" => [],
+    "workflow_rerun_sub_workflow" => [request: RerunWorkflowRequest],
     "workflow_get_rerun_sub_workflow" => [response: Workflow],
     "workflow_get_rerun_new_child" => [response: Workflow],
     "task_update_rerun_new_child" => [request: TaskResult],
-    "workflow_rerun_child_task" => [],
+    "workflow_rerun_child_task" => [request: RerunWorkflowRequest],
     "workflow_get_rerun_child_parent" => [response: Workflow],
     "workflow_get_rerun_child" => [response: Workflow],
     "workflow_start_top" => [],
@@ -352,7 +356,7 @@ defmodule Archon.Domain.ContractRoundTripTest do
     "task_update_child_second" => [request: TaskResult],
     "workflow_get_mid_failed" => [response: Workflow],
     "workflow_get_top_failed" => [response: Workflow],
-    "workflow_rerun_retried_child" => [],
+    "workflow_rerun_retried_child" => [request: RerunWorkflowRequest],
     "workflow_get_rerun_top" => [response: Workflow],
     "workflow_get_rerun_mid" => [response: Workflow],
     "workflow_get_rerun_child_first" => [response: Workflow],
@@ -420,7 +424,7 @@ defmodule Archon.Domain.ContractRoundTripTest do
   end
 
   for {name, sides} <- @models, {side, model} <- sides do
-    schema_module = with {:list, module} <- model, do: module
+    schema_module = with {kind, module} when kind in [:list, :map] <- model, do: module
 
     describe "#{name} #{side}" do
       setup do
@@ -468,9 +472,13 @@ defmodule Archon.Domain.ContractRoundTripTest do
   defp element(body, index), do: Enum.at(body, index)
 
   defp items({:list, _module}, body) when is_list(body), do: Enum.with_index(body)
+
+  defp items({:map, _module}, body) when is_map(body),
+    do: for({key, list} <- body, {item, index} <- Enum.with_index(list), do: {item, {key, index}})
+
   defp items(_module, body), do: [{body, nil}]
 
-  defp module({:list, module}), do: module
+  defp module({kind, module}) when kind in [:list, :map], do: module
   defp module(module), do: module
 
   # Encodes through the real JSON text, as a REST response would.

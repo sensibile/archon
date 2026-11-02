@@ -32,21 +32,12 @@ defmodule ArchonWeb.WorkflowLifecycleController do
   alias Archon.Domain.RerunWorkflowRequest
   alias Archon.Runtime.Lifecycle
 
-  # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
-  Module.register_attribute(__MODULE__, :unimplemented, persist: true)
-
-  @unimplemented []
-
   @rerun_handler "public java.lang.String " <>
                    "com.netflix.conductor.rest.controllers.WorkflowResource.rerun(" <>
                    "java.lang.String," <>
                    "com.netflix.conductor.common.metadata.workflow.RerunWorkflowRequest)"
 
   plug :refuse_cross_origin when action in [:retry, :restart, :reset_callbacks]
-
-  @doc "The actions not implemented yet."
-  @spec unimplemented() :: [atom()]
-  def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
 
   @doc "`PUT /api/workflow/{workflowId}/pause` (`pauseWorkflow`): 200 without a body."
   @spec pause(Plug.Conn.t(), map()) :: Plug.Conn.t()

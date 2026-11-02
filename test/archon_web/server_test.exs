@@ -6,8 +6,9 @@ defmodule ArchonWeb.ServerTest do
   @moduledoc """
   Smoke test over real HTTP (ADR 0023, slice 5f): Bandit started the way Phoenix starts it for
   `server: true` (`Bandit.PhoenixAdapter.child_specs/2`), on the address `config/runtime.exs`
-  reads (ADR 0024, decision 4), and a few routes asked through a socket. The other web tests
-  call the endpoint through `Phoenix.ConnTest` without one.
+  reads (ADR 0024, decision 4), and a few routes asked through a socket, one Phase 6 lifecycle
+  among them (ADR 0025, slice 6h). The other web tests call the endpoint through
+  `Phoenix.ConnTest` without one.
   """
 
   use ExUnit.Case, async: false
@@ -71,6 +72,32 @@ defmodule ArchonWeb.ServerTest do
     assert Codec.enum_name(workflow.status) == "TERMINATED"
   end
 
+  # The origin check reads the host and port the server took from the Host header (ADR 0025,
+  # decision 3), which only a real request sets.
+  test "a workflow pauses, resumes and is terminated and removed", %{base: base} do
+    assert {200, "text/plain;charset=UTF-8", id} =
+             request(:post, base <> "/api/workflow/archon_simple", "{}")
+
+    assert {200, nil, ""} = request(:put, base <> "/api/workflow/#{id}/pause", "")
+    assert {:ok, %{status: :paused}} = Archon.Runtime.get_workflow(id, false)
+    assert {200, nil, ""} = request(:put, base <> "/api/workflow/#{id}/resume", "")
+
+    same_origin = [{~c"origin", String.to_charlist(base)}]
+
+    assert {204, nil, ""} =
+             request(:post, base <> "/api/workflow/#{id}/resetcallbacks", "", same_origin)
+
+    other_origin = [{~c"origin", ~c"http://archon.example"}]
+
+    assert {403, "application/json", body} =
+             request(:post, base <> "/api/workflow/#{id}/resetcallbacks", "", other_origin)
+
+    assert %{"message" => "Cross-origin request refused"} = JSON.decode!(body)
+
+    assert {200, nil, ""} = request(:delete, base <> "/api/workflow/#{id}/terminate-remove")
+    assert Archon.Runtime.get_workflow(id, false) == {:error, :not_found}
+  end
+
   test "errors keep upstream's shape", %{base: base} do
     assert {404, "application/json", body} = request(:get, base <> "/api/nope/")
 
@@ -84,11 +111,20 @@ defmodule ArchonWeb.ServerTest do
              JSON.decode!(body)
   end
 
-  defp request(method, url, body \\ nil, content_type \\ ~c"application/json") do
+  defp request(method, url, body \\ nil, content_type_or_headers \\ ~c"application/json")
+
+  defp request(method, url, body, headers)
+       when is_list(headers) and headers != [] and is_tuple(hd(headers)),
+       do: send_request(method, url, body, ~c"application/json", headers)
+
+  defp request(method, url, body, content_type),
+    do: send_request(method, url, body, content_type, [])
+
+  defp send_request(method, url, body, content_type, headers) do
     request =
       if body,
-        do: {String.to_charlist(url), [], content_type, body},
-        else: {String.to_charlist(url), []}
+        do: {String.to_charlist(url), headers, content_type, body},
+        else: {String.to_charlist(url), headers}
 
     {:ok, {{_version, status, _reason}, headers, body}} =
       :httpc.request(method, request, [autoredirect: false], body_format: :binary)

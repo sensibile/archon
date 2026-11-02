@@ -38,15 +38,35 @@ JSON 필드, 상태 코드, 오류 body로 제공한다([ADR 0023](docs/adr/0023
 | Workflow | `POST /api/workflow`, `POST /api/workflow/{name}`, `GET /api/workflow/{workflowId}`, `GET /api/workflow/{workflowId}/status`, `DELETE /api/workflow/{workflowId}` |
 | Task | `GET /api/tasks/poll/{tasktype}`, `GET /api/tasks/poll/batch/{tasktype}`, `POST /api/tasks`, `POST /api/tasks/update-v2`, `GET /api/tasks/{taskId}` |
 
-upstream과 의도적으로 다른 점(전체 목록은 ADR 0023 "upstream과 의도적으로 다른 점"):
+Phase 6은 워크플로우 운영 경로 33개를 같은 방식으로 더했다([ADR 0025](docs/adr/0025-phase6-workflow-operations-rest.md)).
 
-- MVP 밖의 경로는 Later 경로를 포함해 모두 upstream이 없는 경로에 주는 404 body로 답한다. 있는 경로에 다른 메서드로
+| 영역 | 경로 |
+|---|---|
+| 생명주기 | `PUT /api/workflow/{workflowId}/pause`, `.../resume`, `POST .../retry`, `.../restart`, `.../rerun`, `PUT .../skiptask/{taskReferenceName}`, `POST .../resetcallbacks` |
+| 정리 | `DELETE /api/workflow/{workflowId}/remove`, `.../terminate-remove` |
+| 조회 | `GET /api/workflow/{workflowId}/tasks`, `GET /api/workflow/{name}/correlated/{correlationId}`, `POST /api/workflow/{name}/correlated`, `GET /api/workflow/running/{name}` |
+| 동기 실행 | `POST /api/workflow/execute/{name}/{version}` |
+| ref 갱신·signal | `POST /api/tasks/{workflowId}/{taskRefName}/{status}`, `.../sync`, `POST /api/tasks/{workflowId}/{status}/signal`, `.../signal/sync` |
+| Metadata | `GET /api/metadata/workflow`, `.../names-and-versions`, `.../names`, `.../latest-versions`, `.../{name}/versions`, `DELETE /api/metadata/workflow/{name}/{version}`, `DELETE /api/metadata/taskdefs/{tasktype}`, `POST /api/metadata/workflow/validate` |
+| Bulk | `PUT /api/workflow/bulk/pause`, `.../resume`, `POST .../restart`, `.../retry`, `.../terminate`, `DELETE .../remove`, `.../terminate-remove` |
+
+upstream과 의도적으로 다른 점(전체 목록은 ADR 0023과 ADR 0025의 "upstream과 의도적으로 다른 점"):
+
+- 구현하지 않은 경로는 Later 경로를 포함해 모두 upstream이 없는 경로에 주는 404 body로 답한다. 있는 경로에 다른 메서드로
   보내도 upstream의 405가 아니라 404이고, `OPTIONS`도 404다.
 - 인라인, 외부 참조, 이름 없는 JSON 스키마를 강제하는 정의는 400으로 거절한다. Archon에는 아직 스키마 검증기가 없다.
   이름 참조는 upstream처럼 받는다.
 - 태스크 갱신의 worker `subWorkflowId`는 반영하지 않는다([ADR 0024](docs/adr/0024-worker-input-trust-and-auth.md)).
 - Jackson 파싱 오류와 예상하지 못한 500의 문구는 Archon 문구다. 8 MB를 넘는 요청 body는 413이다.
   `GET /api/metadata/taskdefs`는 이름순이다.
+- remove와 terminate-remove는 그 워크플로우가 다른 워크플로우에 남긴 일(자식 종료, 부모 알림)이 전달된 뒤에만 지운다. 10초 안에
+  끝나지 않으면 아무것도 지우지 않고 500 `retryable` 참으로 답한다. bulk remove·terminate-remove는 ID마다 이 대기를 한다.
+- body를 읽지 않는 retry·restart·resetcallbacks는 브라우저가 교차 출처로 표시한 요청(`Sec-Fetch-Site`, 없으면 `Origin`과
+  `Host`)을 403으로 거절한다. SDK·curl처럼 그 헤더를 보내지 않는 클라이언트는 upstream과 같다.
+- `resumeSubworkflowTasks` retry가 실행 중인 자식에 닿으면 404다(upstream은 그 자식을 재시도한다). skiptask는 쿼리로
+  `taskInput`·`taskOutput`을 채우는 Spring 바인딩을 옮기지 않는다. remove는 보관본을 남기지 않는다(upstream 기본 서버와 같은 응답).
+- correlated, `running/{name}`, `latest-versions` 목록은 정해진 순서다. `validate`는 Archon이 거절하는 스키마 정의를 등록 전에
+  400으로 알려 준다. bulk의 소수 ID는 부동소수 글자로 바뀐다. task 실행 로그(`/api/tasks/{taskId}/log`)는 Later다.
 
 **인증 없음.** upstream OSS처럼 MVP REST에는 인증·인가가 없다([ADR 0024](docs/adr/0024-worker-input-trust-and-auth.md) 결정 4).
 기본으로 `127.0.0.1:8080`에서 듣고, `ARCHON_HTTP_IP`와 `PORT`로 다른 주소를 연다. 다른 인터페이스에서 듣는 것은 배포의
@@ -57,7 +77,7 @@ mix run --no-halt                      # 127.0.0.1:8080, 메모리 백엔드
 ARCHON_HTTP_IP=0.0.0.0 PORT=8081 mix run --no-halt
 ```
 
-아직 구현하지 않은 것(Later): 생명주기 경로(pause, resume, retry, restart), 검색, 이벤트, 나머지 metadata·admin 경로,
+아직 구현하지 않은 것(Later): 검색과 `bulk/search`, task 실행 로그, 이벤트, 외부 payload 저장소, 큐 관리·admin 경로,
 JSON 스키마 검증과 `/api/schema`, 인증, 여러 노드 실행. upstream 내부 구조(sweeper, Java 설정)에 기대는 경로는
 Unsupported다. ADR 0001을 본다.
 
