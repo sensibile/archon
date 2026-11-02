@@ -68,13 +68,18 @@ defmodule Archon.Decider.SystemTask.SetVariable do
 
   def json_size(value) when is_binary(value), do: string_size(value)
 
-  def json_size(list) when is_list(list),
-    do: 2 + Enum.sum_by(list, &json_size/1) + max(length(list) - 1, 0)
+  def json_size(list) when is_list(list), do: 2 + items_size(list, 0) + max(length(list) - 1, 0)
 
-  def json_size(map) when is_map(map) do
-    pairs = Enum.sum_by(map, fn {key, value} -> string_size(key) + 1 + json_size(value) end)
-    2 + pairs + max(map_size(map) - 1, 0)
-  end
+  def json_size(map) when is_map(map),
+    do: 2 + pairs_size(Map.to_list(map), 0) + max(map_size(map) - 1, 0)
+
+  defp items_size([], size), do: size
+  defp items_size([value | rest], size), do: items_size(rest, size + json_size(value))
+
+  defp pairs_size([], size), do: size
+
+  defp pairs_size([{key, value} | rest], size),
+    do: pairs_size(rest, size + string_size(key) + 1 + json_size(value))
 
   defp string_size(string), do: 2 + escaped_size(string, 0)
 
