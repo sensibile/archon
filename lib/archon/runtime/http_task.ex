@@ -30,10 +30,10 @@ defmodule Archon.Runtime.HttpTask do
     * `client` - the module whose `run/2` sends a request, `Archon.Runtime.HttpTask.Client` by
       default (for tests).
 
-  `Archon.Runtime.HttpTask.Supervisor` starts it between the task supervisor of the deliveries
-  and that of the requests (`:rest_for_one`): the executor ending ends the requests running,
-  whose tasks then time out, so its counts never miss one; the requests' supervisor ending is
-  seen as each request's end. A delivery under way outlives both.
+  `Archon.Runtime.HttpTask.Supervisor` starts it with the task supervisor of its requests, which
+  start first and are restarted together (`:one_for_all`): the requests running end with the
+  executor, whose tasks then time out, so its counts never miss one. The deliveries have their own
+  task supervisor, started before them, so a delivery under way outlives both.
   """
 
   use GenServer
@@ -255,8 +255,8 @@ end
 
 defmodule Archon.Runtime.HttpTask.Supervisor do
   @moduledoc """
-  The `HTTP` task executor (`Archon.Runtime.HttpTask`) between the task supervisors of its
-  deliveries and its requests (`:rest_for_one`, see `Archon.Runtime.HttpTask`).
+  The `HTTP` task executor (`Archon.Runtime.HttpTask`) with the task supervisor of its requests
+  (`:one_for_all`), after the task supervisor of its deliveries (see `Archon.Runtime.HttpTask`).
   """
 
   use Supervisor
@@ -266,12 +266,19 @@ defmodule Archon.Runtime.HttpTask.Supervisor do
 
   @impl Supervisor
   def init(_opts) do
+    requests = %{
+      id: :requests,
+      type: :supervisor,
+      start:
+        {Supervisor, :start_link,
+         [
+           [{Task.Supervisor, name: Archon.Runtime.HttpTask.Tasks}, Archon.Runtime.HttpTask],
+           [strategy: :one_for_all]
+         ]}
+    }
+
     Supervisor.init(
-      [
-        {Task.Supervisor, name: Archon.Runtime.HttpTask.Deliveries},
-        Archon.Runtime.HttpTask,
-        {Task.Supervisor, name: Archon.Runtime.HttpTask.Tasks}
-      ],
+      [{Task.Supervisor, name: Archon.Runtime.HttpTask.Deliveries}, requests],
       strategy: :rest_for_one
     )
   end

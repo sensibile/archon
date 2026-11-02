@@ -434,8 +434,10 @@ defmodule Archon.Runtime.HttpTaskTest do
     restart_executor()
   end
 
+  # The executor with the requests' supervisor, as a crash of either restarts them (manually, so
+  # the restarts do not count toward the supervisor's restart intensity).
   defp restart_executor do
-    :ok = Supervisor.terminate_child(HttpTask.Supervisor, HttpTask)
-    {:ok, _pid} = Supervisor.restart_child(HttpTask.Supervisor, HttpTask)
+    :ok = Supervisor.terminate_child(HttpTask.Supervisor, :requests)
+    {:ok, _pid} = Supervisor.restart_child(HttpTask.Supervisor, :requests)
   end
 end

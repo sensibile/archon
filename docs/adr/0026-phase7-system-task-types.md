@@ -551,8 +551,9 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     `content-type`·`date`)와 같다. 리다이렉트는 `RedirectExec`처럼 따라간다(`301`·`302`·`303`·`307`·`308`과 `location`, `303`과 `POST`의
     `301`·`302`는 body 없는 `GET`, 50번까지, 이미 간 곳이면 `Circular redirect to '<uri>'`). 리다이렉트 픽스처는 7a 캡처에 없다(7h가
     더해 다시 캡처할 후보).
-  - **실행기**(`Archon.Runtime.HttpTask`, 앱 감독 트리의 `Archon.Runtime.HttpTask.Supervisor`가 전달용 Task 감독자 뒤, 요청용 Task
-    감독자 앞에 `:rest_for_one`으로 띄운다. 실행기가 끝나면 진행 중 요청도 끝나 수가 어긋나지 않고, 진행 중 전달은 살아남는다): 요청은 `Task.Supervisor.async_nolink`로 보내고, 결과는 별도 감독 Task가 워크플로우 ID로
+  - **실행기**(`Archon.Runtime.HttpTask`, 앱 감독 트리의 `Archon.Runtime.HttpTask.Supervisor`가 요청용 Task 감독자와 함께
+    `:one_for_all`로, 그 앞에 전달용 Task 감독자를 띄운다. 실행기가 끝나면 진행 중 요청도 끝나 수가 어긋나지 않고, 진행 중 전달은
+    살아남는다): 요청은 `Task.Supervisor.async_nolink`로 보내고, 결과는 별도 감독 Task가 워크플로우 ID로
     `WorkflowServer.http_completed/4`에 전한다(바쁜 워크플로우 프로세스가 실행기를 막지 않게). 요청은 워크플로우·태스크로 식별하고
     같은 태스크의 새 요청은 옛 요청을 먼저 끝낸다. 요청을 넘기는 것은 호출(`GenServer.call`)이라, 재시작 중인 실행기는 효과 실패로
     보인다. 전달이 실패하면(저장소 오류, 바쁜 프로세스의 호출 시간 초과) 태스크 마감까지 간격을 두 배로 늘리며(100ms~5초) 다시

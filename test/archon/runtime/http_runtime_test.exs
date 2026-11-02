@@ -107,6 +107,11 @@ defmodule Archon.Runtime.HttpRuntimeTest do
     on_exit(fn -> Application.put_env(:archon, Archon.Runtime, saved) end)
   end
 
+  # Ends the process without its normal end (no terminate/2 with :normal), as a crash does, but
+  # without counting toward the workflow supervisor's restart intensity.
+  defp stop_abnormally(pid),
+    do: :ok = DynamicSupervisor.terminate_child(Archon.Runtime.WorkflowSupervisor, pid)
+
   defp idle_executor, do: eventually(fn -> HttpTask.info() == %{running: [], waiting: []} end)
 
   test "a workflow's HTTP task completes with the response", %{url: url} do
@@ -137,7 +142,7 @@ defmodule Archon.Runtime.HttpRuntimeTest do
     id = start_http(url, "/sleep/300")
     assert_receive {:target, "/sleep/300"}, 2000
     pid = WorkflowServer.whereis(id)
-    Process.exit(pid, :kill)
+    stop_abnormally(pid)
     await_down(id)
 
     eventually(fn -> status(id) == :completed end)
@@ -191,7 +196,7 @@ defmodule Archon.Runtime.HttpRuntimeTest do
   test "a process activated after a crash cancels the request the old one sent", %{url: url} do
     id = start_http(url, "/hang")
     assert_receive {:target, "/hang"}, 2000
-    Process.exit(WorkflowServer.whereis(id), :kill)
+    stop_abnormally(WorkflowServer.whereis(id))
     await_down(id)
 
     assert :ok = Runtime.terminate_workflow(id, "stop")
