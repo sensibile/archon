@@ -38,6 +38,7 @@ defmodule ArchonWeb.SignalController do
     Workflow
   }
 
+  alias Archon.Metadata
   alias Archon.Runtime
   alias Archon.Runtime.Tasks
   alias ArchonWeb.SignalResponder
@@ -256,7 +257,7 @@ defmodule ArchonWeb.SignalController do
   defp java_class(_value), do: "java.math.BigInteger"
 
   defp validate(conn, request) do
-    case StartWorkflowRequest.validate(request) do
+    case StartWorkflowRequest.validate(request, Metadata.validation_opts()) do
       :ok ->
         :ok
 

@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_lambda",
+    "body": {
+      "script": "return {r: $.a + 1};",
+      "a": 1
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "1cd37899-40ba-4fad-8e7b-145546df775f"
+  }
+}

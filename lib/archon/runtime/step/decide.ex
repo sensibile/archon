@@ -76,13 +76,21 @@ defmodule Archon.Runtime.Step.Decide do
           state |> State.put_workflow(outcome.workflow) |> end_execution(outcome.terminate_task)
 
         {:ok, %Outcome{} = outcome} ->
-          state |> State.put_workflow(outcome.workflow) |> apply_outcome(outcome)
+          state
+          |> State.put_workflow(outcome.workflow)
+          |> save_definition(outcome)
+          |> apply_outcome(outcome)
 
         {:terminate, termination, outcome} ->
           state |> State.put_workflow(outcome.workflow) |> Terminate.by_decider(termination)
       end
     end
   end
+
+  # A definition a mapper changed is saved at once, as later iterations of the loop may save
+  # nothing (ADR 0026, decision 4).
+  defp save_definition(state, %Outcome{changed_workflow_tasks: []}), do: state
+  defp save_definition(state, %Outcome{}), do: State.save_workflow(state)
 
   # Saves the workflow and asks to be woken at once (upstream pushes it to the decider queue).
   defp halt(%State{now: now} = state),
@@ -152,11 +160,10 @@ defmodule Archon.Runtime.Step.Decide do
     end
   end
 
-  defp execute(%State{now: now} = state, task) do
-    case SystemTask.execute(state.wf, task, now) do
-      {true, task} -> {:ok, State.put_task(state, task), true}
-      {false, _task} -> {:ok, state, false}
-    end
+  # The task is kept whatever `changed?` says; a changed workflow is saved (ADR 0026, decision 2).
+  defp execute(%State{env: env} = state, task) do
+    result = SystemTask.execute(state.wf, task, Env.context(env))
+    {:ok, Schedule.apply_result(state, result), result.changed?}
   end
 
   # WorkflowExecutorOps#scheduleNextIteration: domains, scheduleTask, then the tasks join the

@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "DELETE",
-    "path": "/api/workflow/c5b33dfa-c42e-4f16-a186-8ea31355fa14/remove",
+    "path": "/api/workflow/2f7b49e0-c5b4-47e6-a061-d3fd4d06cce8/remove",
     "body": null
   },
   "response": {
@@ -9,7 +9,7 @@
     "content_type": "application/json",
     "body": {
       "status": 400,
-      "message": "Cannot archive workflow: c5b33dfa-c42e-4f16-a186-8ea31355fa14 with status: RUNNING",
+      "message": "Cannot archive workflow: 2f7b49e0-c5b4-47e6-a061-d3fd4d06cce8 with status: RUNNING",
       "instance": "<redacted-hostname>",
       "retryable": false
     }

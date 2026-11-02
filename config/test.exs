@@ -40,3 +40,7 @@ config :archon, ArchonWeb.Endpoint, server: false
 
 # No request log lines in the test output.
 config :phoenix, :logger, false
+
+# Archon.HttpStub answers a 2xx code Spring's HttpStatus does not know (ADR 0026, decision 8);
+# Plug needs a reason phrase for it.
+config :plug, :statuses, %{299 => "Archon Unlisted"}

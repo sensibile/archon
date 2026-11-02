@@ -1,0 +1,222 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/c3939b02-ebad-448f-a40d-1df3d1c93038",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "ownerApp": "",
+      "createTime": 1793629065014,
+      "updateTime": 1793629065157,
+      "status": "COMPLETED",
+      "endTime": 1793629065157,
+      "workflowId": "c3939b02-ebad-448f-a40d-1df3d1c93038",
+      "tasks": [
+        {
+          "taskType": "START_WORKFLOW",
+          "status": "COMPLETED",
+          "inputData": {
+            "startWorkflow": {
+              "name": "archon_p7_noop",
+              "version": 1,
+              "input": {
+                "a": 2
+              },
+              "correlationId": "archon-p7"
+            }
+          },
+          "referenceTaskName": "start_ref",
+          "retryCount": 0,
+          "seq": 1,
+          "pollCount": 1,
+          "taskDefName": "archon_p7_start_workflow",
+          "scheduledTime": 1793629065015,
+          "startTime": 1793629065095,
+          "endTime": 1793629065157,
+          "updateTime": 1793629065095,
+          "startDelayInSeconds": 0,
+          "retried": false,
+          "executed": false,
+          "callbackFromWorker": true,
+          "responseTimeoutSeconds": 0,
+          "workflowInstanceId": "c3939b02-ebad-448f-a40d-1df3d1c93038",
+          "workflowType": "archon_p7_start_workflow",
+          "taskId": "c26cc9bb-15f9-4cc5-aaa6-b78aebbdcb6e",
+          "callbackAfterSeconds": 0,
+          "outputData": {
+            "workflowId": "b748e0bf-889b-4744-a02f-7f68badb0a6a"
+          },
+          "workflowTask": {
+            "name": "archon_p7_start_workflow",
+            "taskReferenceName": "start_ref",
+            "inputParameters": {
+              "startWorkflow": "${workflow.input.request}"
+            },
+            "type": "START_WORKFLOW",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_start_workflow",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          },
+          "rateLimitPerFrequency": 0,
+          "rateLimitFrequencyInSeconds": 0,
+          "workflowPriority": 0,
+          "iteration": 0,
+          "subworkflowChanged": false,
+          "firstStartTime": 0,
+          "executionMetadata": {
+            "additionalContext": {},
+            "additionalContextMap": {},
+            "empty": true
+          },
+          "taskDefinition": {
+            "createTime": 0,
+            "updateTime": 0,
+            "name": "archon_p7_start_workflow",
+            "retryCount": 0,
+            "timeoutSeconds": 0,
+            "inputKeys": [],
+            "outputKeys": [],
+            "runtimeMetadata": [],
+            "timeoutPolicy": "TIME_OUT_WF",
+            "retryLogic": "FIXED",
+            "retryDelaySeconds": 60,
+            "responseTimeoutSeconds": 0,
+            "inputTemplate": {},
+            "rateLimitPerFrequency": 0,
+            "rateLimitFrequencyInSeconds": 1,
+            "backoffScaleFactor": 1,
+            "maxRetryDelaySeconds": 0,
+            "backoffJitterMs": 0,
+            "totalTimeoutSeconds": 0,
+            "taskStatusListenerEnabled": true,
+            "enforceSchema": false
+          },
+          "queueWaitTime": 80,
+          "loopOverTask": false
+        }
+      ],
+      "input": {
+        "request": {
+          "name": "archon_p7_noop",
+          "version": 1,
+          "input": {
+            "a": 2
+          },
+          "correlationId": "archon-p7"
+        }
+      },
+      "output": {
+        "workflowId": "b748e0bf-889b-4744-a02f-7f68badb0a6a"
+      },
+      "taskToDomain": {},
+      "failedReferenceTaskNames": [],
+      "workflowDefinition": {
+        "createTime": 1793629064984,
+        "updateTime": 0,
+        "name": "archon_p7_start_workflow",
+        "version": 1,
+        "tasks": [
+          {
+            "name": "archon_p7_start_workflow",
+            "taskReferenceName": "start_ref",
+            "inputParameters": {
+              "startWorkflow": "${workflow.input.request}"
+            },
+            "type": "START_WORKFLOW",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_start_workflow",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          }
+        ],
+        "inputParameters": [],
+        "outputParameters": {},
+        "schemaVersion": 2,
+        "restartable": true,
+        "workflowStatusListenerEnabled": false,
+        "timeoutPolicy": "ALERT_ONLY",
+        "timeoutSeconds": 0,
+        "variables": {},
+        "inputTemplate": {},
+        "enforceSchema": true,
+        "metadata": {},
+        "maskedFields": []
+      },
+      "priority": 0,
+      "variables": {},
+      "lastRetriedTime": 0,
+      "failedTaskNames": [],
+      "history": [],
+      "rateLimited": false,
+      "startTime": 1793629065014,
+      "workflowName": "archon_p7_start_workflow",
+      "workflowVersion": 1
+    }
+  }
+}

@@ -54,7 +54,7 @@ defmodule ArchonWeb.WorkflowController do
   end
 
   defp validate(conn, request) do
-    case StartWorkflowRequest.validate(request) do
+    case StartWorkflowRequest.validate(request, Metadata.validation_opts()) do
       :ok ->
         :ok
 

@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "PUT",
-    "path": "/api/workflow/a455111c-a176-4b3d-bd19-acb866aa8347/resume",
+    "path": "/api/workflow/22eb0d9e-7c8b-4bc3-b9e1-216854acd077/resume",
     "body": null
   },
   "response": {

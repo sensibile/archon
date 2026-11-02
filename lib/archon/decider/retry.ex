@@ -29,13 +29,10 @@ defmodule Archon.Decider.Retry do
   `backoffJitterMs` of jitter is added to `callback_after_ms` only.
   """
 
-  alias Archon.Decider.{Context, Parameters, Termination}
+  alias Archon.Decider.{Context, Parameters, SystemTasks, Termination}
   alias Archon.Domain.{Task, TaskDef, Workflow, WorkflowDef, WorkflowTask}
 
   @int_max 2_147_483_647
-
-  # TaskType.isBuiltIn
-  @built_in ~w(DECISION SWITCH FORK JOIN EXCLUSIVE_JOIN DO_WHILE)
 
   @type result ::
           {:retry, Task.t(), Task.t()}
@@ -65,7 +62,7 @@ defmodule Archon.Decider.Retry do
   end
 
   defp exhausted?(task_def, workflow_task, task) do
-    not Task.retriable?(task.status) or task.task_type in @built_in or
+    not Task.retriable?(task.status) or SystemTasks.built_in?(task.task_type) or
       expected_retries(task_def, workflow_task) <= task.retry_count
   end
 

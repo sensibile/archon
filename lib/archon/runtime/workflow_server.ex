@@ -1174,13 +1174,28 @@ defmodule Archon.Runtime.WorkflowServer do
   @spec env(Workflow.t() | nil, Step.Event.t()) :: Env.t()
   def env(workflow, event) do
     env =
-      Env.new([now: Runtime.now(), new_id: &Runtime.new_id/0] ++ Runtime.setting(:settings, []))
+      Env.new(
+        [
+          now: Runtime.now(),
+          new_id: &Runtime.new_id/0,
+          task_def_lookup: &task_def_lookup/1,
+          workflow_def_lookup: &workflow_def_lookup/2
+        ] ++ Runtime.setting(:settings, [])
+      )
 
     case subject(workflow, event) do
       nil -> env
       subject -> fill(env, subject, event)
     end
   end
+
+  # The Decider's metadata reads for names only a task's input gives (ADR 0026, decision 2).
+  defp task_def_lookup(name), do: Runtime.metadata().get_task_def(name)
+
+  defp workflow_def_lookup(name, nil), do: Runtime.metadata().get_latest_workflow_def(name)
+
+  defp workflow_def_lookup(name, version),
+    do: Runtime.metadata().get_workflow_def(name, version)
 
   defp subject(_workflow, {start, %Workflow{} = workflow})
        when start in [:start, :start_idempotent],

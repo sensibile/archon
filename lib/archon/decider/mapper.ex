@@ -13,9 +13,11 @@ defmodule Archon.Decider.Mapper do
   @moduledoc """
   Turns one `WorkflowTask` into the tasks to schedule (upstream `TaskMapper`).
 
-  `module_for/1` picks the mapper by `WorkflowTask.type`. Types without a mapper go to
+  The mapper table (ADR 0026, decision 2) is keyed by `WorkflowTask.type`; the tasks a mapper
+  makes are looked up by their own `taskType` in the system task table
+  (`Archon.Decider.SystemTasks`). `module_for/1` picks the mapper. Types without a mapper go to
   `Archon.Decider.Mapper.UserDefined`, as upstream falls back to `USER_DEFINED`
-  (ADR 0014, decision 5).
+  (ADR 0014, decision 5). Phase 7 slices add their own lines.
   """
 
   alias Archon.Decider.Mapper.{
@@ -35,6 +37,17 @@ defmodule Archon.Decider.Mapper do
 
   @callback map(WorkflowTask.t(), Context.t()) :: {:ok, [Task.t()]} | {:terminate, String.t()}
 
+  @doc """
+  Whether the mapper changes its workflow task the way upstream's changes the definition object
+  in place (`DYNAMIC` sets its name and task definition, `HTTP` its `asyncComplete` input),
+  which then shows in the workflow's stored definition (ADR 0026, decisions 4 and 7). Such a
+  mapper puts the changed workflow task in the `workflow_task` of the tasks it returns, and
+  `Archon.Decider` writes it back into `Outcome.workflow`'s definition
+  (`Outcome.changed_workflow_tasks`). Optional; `false` without it.
+  """
+  @callback changes_definition?() :: boolean()
+  @optional_callbacks changes_definition?: 0
+
   @mappers %{
     "SIMPLE" => Simple,
     "SWITCH" => Switch,
@@ -49,4 +62,15 @@ defmodule Archon.Decider.Mapper do
   @doc "The mapper for a task type, `UserDefined` when none is registered."
   @spec module_for(String.t() | nil) :: module()
   def module_for(type), do: Map.get(@mappers, type, UserDefined)
+
+  @doc "Whether the mapper of a workflow task type changes the definition (`c:changes_definition?/0`)."
+  @spec changes_definition?(String.t() | nil) :: boolean()
+  def changes_definition?(type) do
+    module = Code.ensure_loaded!(module_for(type))
+    function_exported?(module, :changes_definition?, 0) and module.changes_definition?()
+  end
+
+  @doc "Whether a workflow task type has a mapper of its own (is not mapped as `UserDefined`)."
+  @spec mapped?(String.t() | nil) :: boolean()
+  def mapped?(type), do: is_map_key(@mappers, type)
 end

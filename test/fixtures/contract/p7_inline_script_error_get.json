@@ -1,0 +1,222 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/31dea89d-79da-46f2-b1d8-059c9a5bcff2",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "ownerApp": "",
+      "createTime": 1793629063897,
+      "updateTime": 1793629063915,
+      "status": "FAILED",
+      "endTime": 1793629063915,
+      "workflowId": "31dea89d-79da-46f2-b1d8-059c9a5bcff2",
+      "tasks": [
+        {
+          "taskType": "INLINE",
+          "status": "FAILED_WITH_TERMINAL_ERROR",
+          "inputData": {
+            "a": 1,
+            "evaluatorType": "javascript",
+            "expression": "$.a.b.c"
+          },
+          "referenceTaskName": "inline_ref",
+          "retryCount": 0,
+          "seq": 1,
+          "pollCount": 0,
+          "taskDefName": "archon_p7_inline",
+          "scheduledTime": 1793629063898,
+          "startTime": 1793629063898,
+          "endTime": 1793629063914,
+          "updateTime": 1793629063898,
+          "startDelayInSeconds": 0,
+          "retried": false,
+          "executed": false,
+          "callbackFromWorker": true,
+          "responseTimeoutSeconds": 0,
+          "workflowInstanceId": "31dea89d-79da-46f2-b1d8-059c9a5bcff2",
+          "workflowType": "archon_p7_inline",
+          "taskId": "af124acc-9005-4581-88fe-088a673f7cdc",
+          "reasonForIncompletion": "Error evaluating the script `TypeError: Cannot read property 'c' of undefined` at line 1",
+          "callbackAfterSeconds": 0,
+          "outputData": {
+            "error": "Error evaluating the script `TypeError: Cannot read property 'c' of undefined` at line 1"
+          },
+          "workflowTask": {
+            "name": "archon_p7_inline",
+            "taskReferenceName": "inline_ref",
+            "inputParameters": {
+              "evaluatorType": "${workflow.input.evaluator}",
+              "expression": "${workflow.input.expression}",
+              "a": "${workflow.input.a}"
+            },
+            "type": "INLINE",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_inline",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          },
+          "rateLimitPerFrequency": 0,
+          "rateLimitFrequencyInSeconds": 0,
+          "workflowPriority": 0,
+          "iteration": 0,
+          "subworkflowChanged": false,
+          "firstStartTime": 0,
+          "executionMetadata": {
+            "additionalContext": {},
+            "additionalContextMap": {},
+            "empty": true
+          },
+          "taskDefinition": {
+            "createTime": 0,
+            "updateTime": 0,
+            "name": "archon_p7_inline",
+            "retryCount": 0,
+            "timeoutSeconds": 0,
+            "inputKeys": [],
+            "outputKeys": [],
+            "runtimeMetadata": [],
+            "timeoutPolicy": "TIME_OUT_WF",
+            "retryLogic": "FIXED",
+            "retryDelaySeconds": 60,
+            "responseTimeoutSeconds": 0,
+            "inputTemplate": {},
+            "rateLimitPerFrequency": 0,
+            "rateLimitFrequencyInSeconds": 1,
+            "backoffScaleFactor": 1,
+            "maxRetryDelaySeconds": 0,
+            "backoffJitterMs": 0,
+            "totalTimeoutSeconds": 0,
+            "taskStatusListenerEnabled": true,
+            "enforceSchema": false
+          },
+          "queueWaitTime": 0,
+          "loopOverTask": false
+        }
+      ],
+      "input": {
+        "evaluator": "javascript",
+        "expression": "$.a.b.c",
+        "a": 1
+      },
+      "output": {
+        "error": "Error evaluating the script `TypeError: Cannot read property 'c' of undefined` at line 1"
+      },
+      "reasonForIncompletion": "Task af124acc-9005-4581-88fe-088a673f7cdc failed with status: FAILED and reason: 'Error evaluating the script `TypeError: Cannot read property 'c' of undefined` at line 1'",
+      "taskToDomain": {},
+      "failedReferenceTaskNames": [
+        "inline_ref"
+      ],
+      "workflowDefinition": {
+        "createTime": 1793629063598,
+        "updateTime": 0,
+        "name": "archon_p7_inline",
+        "version": 1,
+        "tasks": [
+          {
+            "name": "archon_p7_inline",
+            "taskReferenceName": "inline_ref",
+            "inputParameters": {
+              "evaluatorType": "${workflow.input.evaluator}",
+              "expression": "${workflow.input.expression}",
+              "a": "${workflow.input.a}"
+            },
+            "type": "INLINE",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_inline",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          }
+        ],
+        "inputParameters": [],
+        "outputParameters": {},
+        "schemaVersion": 2,
+        "restartable": true,
+        "workflowStatusListenerEnabled": false,
+        "timeoutPolicy": "ALERT_ONLY",
+        "timeoutSeconds": 0,
+        "variables": {},
+        "inputTemplate": {},
+        "enforceSchema": true,
+        "metadata": {},
+        "maskedFields": []
+      },
+      "priority": 0,
+      "variables": {},
+      "lastRetriedTime": 0,
+      "failedTaskNames": [
+        "archon_p7_inline"
+      ],
+      "history": [],
+      "rateLimited": false,
+      "startTime": 1793629063897,
+      "workflowName": "archon_p7_inline",
+      "workflowVersion": 1
+    }
+  }
+}

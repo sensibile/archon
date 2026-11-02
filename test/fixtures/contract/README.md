@@ -10,6 +10,12 @@
 BASE_URL=http://localhost:18080 scripts/contract/capture_fixtures.sh
 ```
 
+HTTP 태스크 픽스처는 고정 응답 stub([`test/support/http_stub.ex`](../../support/http_stub.ex))를 부른다. 스크립트가
+`MIX_ENV=test mix run`으로 `127.0.0.1:18299`에 띄운다(그 주소에 이미 떠 있으면 `HTTP_STUB=http://127.0.0.1:18299`. 다른 주소는
+거절한다). 재생은 픽스처의 이 주소를 시험 안에서 띄운 stub 주소로 바꾼다. stub의 상태 코드 299 사유 문구는 Plug의 컴파일 시간
+설정(`config/test.exs`의 `config :plug, :statuses`)이라, 그 줄이 없던 `_build/test`에서는 `MIX_ENV=test mix deps.compile plug
+--force`가 한 번 필요하다.
+
 ## 형식
 
 파일 하나가 HTTP 교환 하나다.
@@ -124,6 +130,30 @@ Phase 6 단계는 조각 6a~6g가 구현하는 동안 미구현 액션으로 가
 실패한 자식의 출력을 합친 SUB_WORKFLOW 태스크의 `subWorkflowId`)는 upstream `toTask`처럼 맞췄고(ADR 0024 결정 6), 재생은 그
 경로도 비교한다.
 
+아래는 Phase 7(MVP 밖 시스템 태스크 타입, [ADR 0026](../../../docs/adr/0026-phase7-system-task-types.md) 결정 8)의 첫 조각
+7a가 열두 타입의 시나리오를 한 번에 캡처해 더한 것이다(160개, 모두 520개). 이름은 모두 `p7_<타입>_*`이고 정의 이름은
+`archon_p7_*`, 워커 태스크는 `archon_p7_worker`다. 시나리오는 정의 등록 → 시작 → 멈춘 워크플로우 GET이고, GET은
+`workflowDefinition`까지 비교한다(DYNAMIC·HTTP 매퍼의 정의 변경). 캡처에서 ADR과 다르게 확인한 upstream 응답은 ADR 0026 결정
+4·8 끝에 있다.
+
+| 접두사 | 내용 |
+|---|---|
+| `p7_register_taskdefs` | `archon_p7_worker`와 DYNAMIC의 시스템 타입 대상용 `NOOP` 태스크 정의 |
+| `p7_terminate_*` | 세 상태, `workflowOutput`의 맵·수·없음, 진행 중 형제 `CANCELED`, 문자열이 아니거나 표현식인 `terminationStatus` 등록 400 |
+| `p7_set_variable_*` | 덮어쓰기와 출력의 `${workflow.variables}`, 256 KB 초과(`FAILED_WITH_TERMINAL_ERROR`), FORK 가지 끝 |
+| `p7_noop_*`, `p7_human_*` | NOOP, `POST /api/tasks`로 끝내는 HUMAN |
+| `p7_exclusive_join_*` | SWITCH 뒤 case 태스크, `defaultExclusiveJoinTask`, permissive 실패(upstream NPE 500) |
+| `p7_dynamic_*` | 워커 태스크, 정의 없는 이름, 이름 없음, 시스템 타입(NOOP) |
+| `p7_fjd_*` | FORK_JOIN_DYNAMIC 세 입력 형태, JOIN이 뒤따르지 않는 정의, 동적 가지의 retry·가지 rerun·FORK rerun |
+| `p7_inline_*`, `p7_lambda_*` | javascript, value-param, 모르는 평가기, 스크립트 오류, 문자열이 아닌 `evaluatorType`·`expression`(시작 500), LAMBDA 결과·오류·빈 식 |
+| `p7_jq_*` | 여러 결과, `null` 결과, 문법 오류, `queryExpression` 없음, 문자열이 아닌 것, 등록 400 |
+| `p7_start_workflow_*` | 시작한 워크플로우(GET 포함), 검증 실패, `startWorkflow` 없음 |
+| `p7_http_*` | stub 대상 JSON·POST(헤더 포함)·글자·수 body, 299, 4xx 짧은·긴·빈 body, 503, 연결 거부, `uri`·`method` 없음, `asyncComplete`, 덮이는 `inputParameters.asyncComplete`, 등록 400 |
+
+7a가 다시 캡처한 기존 360개는 `normalize/1` 기준으로 순서만 달랐다(bulk 오류 맵의 키, `workflow_correlated_paused_closed`,
+`route_later_tasks_search`). `task_update_v2_invalid_both`는 두 오류 순서가 바뀌어 기존 캡처를 남겼다. Phase 7 단계는
+`types:` 옵션을 달아 그 타입의 매퍼가 생길 때까지 건너뛴다(7h가 옵션을 없앤다).
+
 Archon이 일부러 다르게 답하는 픽스처(Later 경로와 405는 404, Jackson 문구)는 재생 도우미
 `test/support/archon_web/contract_case.ex`의 시나리오에 단계 옵션으로 적혀 있다.
 
@@ -136,14 +166,15 @@ Archon이 일부러 다르게 답하는 픽스처(Later 경로와 405는 404, Ja
 | 생성 ID(UUID) | `workflowId`, `workflowInstanceId`, `taskId`, 요청 `path`의 ID, `text/plain` 응답 body(시작한 workflow ID, 갱신한 task ID) |
 | 시각(epoch ms) | `createTime`, `updateTime`, `startTime`, `endTime`, `scheduledTime`, `lastRetriedTime` |
 | 시각에서 나온 값 | `queueWaitTime` |
+| 캡처 환경 | HTTP 태스크의 `workerId`(서버 호스트 이름, 가려서 저장), stub 응답 헤더 `date` |
 
 픽스처에는 캡처한 값을 그대로 둔다. 숫자 타임스탬프를 문자열 placeholder로 바꾸면 스키마 검사가
 깨지기 때문이다. 비교가 필요하면 `Archon.Contract.normalize/1`을 양쪽에 적용한다. 시각 키는
 `"<volatile>"`로, 문자열 안의 UUID는 위치와 상관없이 `"<uuid>"`로 바꾼다. 두 번의 캡처는
 `normalize/1` 적용 후 모든 파일이 같았다.
 
-예외로 하나만 캡처 후 가공한다. 오류 body의 `instance`에는 서버 호스트 이름이 들어가므로
-스크립트가 `"<redacted-hostname>"`으로 바꾼다. 키는 남겨 응답 형태는 유지한다.
+예외로 서버 호스트 이름만 캡처 후 가공한다. 오류 body의 `instance`와, 서버가 실행한 HTTP 태스크의 `workerId`처럼 호스트
+이름과 같은 문자열을 스크립트가 `"<redacted-hostname>"`으로 바꾼다. 키는 남겨 응답 형태는 유지한다.
 
 ## 검사
 

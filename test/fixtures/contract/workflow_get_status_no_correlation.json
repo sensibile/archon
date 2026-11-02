@@ -1,14 +1,14 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/workflow/8f16855e-4edf-4681-96e9-d2eb31ca5dd6/status",
+    "path": "/api/workflow/73ee08b6-1f7f-43d7-b766-5ac43a26859b/status",
     "body": null
   },
   "response": {
     "status": 200,
     "content_type": "application/json",
     "body": {
-      "workflowId": "8f16855e-4edf-4681-96e9-d2eb31ca5dd6",
+      "workflowId": "73ee08b6-1f7f-43d7-b766-5ac43a26859b",
       "status": "COMPLETED"
     }
   }

@@ -47,15 +47,52 @@ defmodule Archon.Decider do
   """
   @spec decide(Workflow.t(), Context.t()) :: result()
   def decide(%Workflow{} = workflow, %Context{} = context) do
-    if Enum.any?(workflow.tasks, &(&1.status != :skipped and not &1.executed)) do
-      evaluate(workflow, [], context)
-    else
-      case start_workflow(workflow, context) do
-        {:ok, entries, workflow} -> evaluate(workflow, entries, context)
-        {:terminate, termination, workflow} -> {:terminate, termination, Outcome.new(workflow)}
+    result =
+      if Enum.any?(workflow.tasks, &(&1.status != :skipped and not &1.executed)) do
+        evaluate(workflow, [], context)
+      else
+        case start_workflow(workflow, context) do
+          {:ok, entries, workflow} -> evaluate(workflow, entries, context)
+          {:terminate, termination, workflow} -> {:terminate, termination, Outcome.new(workflow)}
+        end
       end
+
+    case result do
+      {:ok, outcome} -> {:ok, change_definition(outcome)}
+      {:terminate, termination, outcome} -> {:terminate, termination, change_definition(outcome)}
     end
   end
+
+  @doc false
+  # Upstream's DYNAMIC and HTTP mappers change the definition's workflow task object, which the
+  # scheduled task shares; the change shows in the workflow's definition (ADR 0026, decision 4).
+  # `changes?` is Mapper.changes_definition?/1 but for the tests.
+  @spec change_definition(Outcome.t(), (String.t() | nil -> boolean())) :: Outcome.t()
+  def change_definition(outcome, changes? \\ &Mapper.changes_definition?/1)
+
+  def change_definition(
+        %Outcome{workflow: %Workflow{workflow_definition: %WorkflowDef{}}} = outcome,
+        changes?
+      ) do
+    definition = outcome.workflow.workflow_definition
+
+    changed =
+      for %Task{workflow_task: %WorkflowTask{type: type, task_reference_name: ref} = wt} <-
+            outcome.tasks_to_be_scheduled,
+          changes?.(type),
+          WorkflowDef.task_by_ref_name(definition, ref) not in [nil, wt],
+          do: wt
+
+    definition = Enum.reduce(changed, definition, &WorkflowDef.replace_task(&2, &1))
+
+    %{
+      outcome
+      | workflow: %{outcome.workflow | workflow_definition: definition},
+        changed_workflow_tasks: changed
+    }
+  end
+
+  def change_definition(%Outcome{} = outcome, _changes?), do: outcome
 
   defp start_workflow(%Workflow{tasks: tasks} = workflow, context)
        when tasks == [] or workflow.re_run_from_workflow_id == nil do

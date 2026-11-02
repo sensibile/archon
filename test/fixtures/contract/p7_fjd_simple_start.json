@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_fjd_simple",
+    "body": {
+      "inputs": [
+        {
+          "a": 1
+        },
+        {
+          "a": 2
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "fc112929-7666-4050-a445-7e02bd7a1173"
+  }
+}

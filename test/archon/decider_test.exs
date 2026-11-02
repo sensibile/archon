@@ -12,7 +12,7 @@ defmodule Archon.DeciderTest do
   use ExUnit.Case, async: true
 
   alias Archon.Decider
-  alias Archon.Decider.{Context, Outcome, Parameters, Retry, Termination, Timeouts}
+  alias Archon.Decider.{Context, Outcome, Parameters, Retry, SystemTasks, Termination, Timeouts}
   alias Archon.Domain.{SubWorkflowParams, Task, TaskDef, Workflow, WorkflowDef, WorkflowTask}
 
   @now 1_800_000_000_000
@@ -152,7 +152,12 @@ defmodule Archon.DeciderTest do
         update_time: @now - 11_000
       }
 
-      registry = Map.put(Context.new(now: @now).system_tasks, "asyncCompleteSystemTask", true)
+      registry =
+        Map.put(
+          Context.new(now: @now).system_tasks,
+          "asyncCompleteSystemTask",
+          %SystemTasks.Spec{async_complete: true}
+        )
 
       assert Timeouts.response_timed_out?(task_def, task, @now, registry)
 

@@ -13,9 +13,17 @@
 defmodule Archon.Decider.SystemTaskTest do
   use ExUnit.Case, async: true
 
-  alias Archon.Decider.SystemTask
+  alias Archon.Decider.{Context, SystemTask}
   alias Archon.Decider.SystemTask.SubWorkflow
   alias Archon.Domain.{Task, Workflow, WorkflowDef, WorkflowTask}
+
+  # The registry's execute at `now`, as upstream's boolean with the task.
+  defp execute(workflow, task, now) do
+    %SystemTask.Result{changed?: changed?, task: task, workflow: nil} =
+      SystemTask.execute(workflow, task, Context.new(now: now))
+
+    {changed?, task}
+  end
 
   # TestJoin#createTask
   defp forked(ref, status, opts \\ []) do
@@ -43,7 +51,7 @@ defmodule Archon.Decider.SystemTaskTest do
       input_data: %{"joinOn" => Enum.map(tasks, & &1.reference_task_name) ++ extra_refs}
     }
 
-    SystemTask.execute(
+    execute(
       %Workflow{workflow_definition: definition, tasks: tasks ++ [join]},
       join,
       0
@@ -53,11 +61,11 @@ defmodule Archon.Decider.SystemTaskTest do
   test "SWITCH and DECISION complete; FORK does nothing" do
     for type <- ["SWITCH", "DECISION"] do
       task = %Task{task_type: type, status: :in_progress}
-      assert {true, %Task{status: :completed}} = SystemTask.execute(%Workflow{}, task, 0)
+      assert {true, %Task{status: :completed}} = execute(%Workflow{}, task, 0)
     end
 
     fork = %Task{task_type: "FORK", status: :completed}
-    assert {false, ^fork} = SystemTask.execute(%Workflow{}, fork, 0)
+    assert {false, ^fork} = execute(%Workflow{}, fork, 0)
   end
 
   describe "JOIN" do
@@ -139,7 +147,7 @@ defmodule Archon.Decider.SystemTaskTest do
       workflow = %Workflow{workflow_definition: %WorkflowDef{}, tasks: [task, join]}
 
       assert {true, %Task{status: :completed, output_data: %{"task1__2" => %{"i" => 2}}}} =
-               SystemTask.execute(workflow, join, 0)
+               execute(workflow, join, 0)
     end
 
     test "reads the latest task of a reference name" do
@@ -192,7 +200,7 @@ defmodule Archon.Decider.SystemTaskTest do
       join = %Task{task_type: "JOIN", status: :in_progress, input_data: %{"joinOn" => ["t1"]}}
 
       assert {true, %Task{status: :completed}} =
-               SystemTask.execute(%Workflow{tasks: [task, join]}, join, 0)
+               execute(%Workflow{tasks: [task, join]}, join, 0)
     end
   end
 
@@ -200,14 +208,14 @@ defmodule Archon.Decider.SystemTaskTest do
     test "completes once now is past the wait timeout" do
       task = %Task{task_type: "WAIT", status: :in_progress, wait_timeout: 1000}
 
-      assert {false, ^task} = SystemTask.execute(%Workflow{}, task, 999)
-      assert {false, ^task} = SystemTask.execute(%Workflow{}, task, 1000)
-      assert {true, %Task{status: :completed}} = SystemTask.execute(%Workflow{}, task, 1001)
+      assert {false, ^task} = execute(%Workflow{}, task, 999)
+      assert {false, ^task} = execute(%Workflow{}, task, 1000)
+      assert {true, %Task{status: :completed}} = execute(%Workflow{}, task, 1001)
     end
 
     test "a zero wait timeout waits forever" do
       task = %Task{task_type: "WAIT", status: :in_progress, wait_timeout: 0}
-      assert {false, ^task} = SystemTask.execute(%Workflow{}, task, 1_800_000_000_000)
+      assert {false, ^task} = execute(%Workflow{}, task, 1_800_000_000_000)
     end
   end
 

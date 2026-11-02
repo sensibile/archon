@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "DELETE",
-    "path": "/api/workflow/ebfd5b17-b3eb-466d-8a31-4515f94336b9?reason=archon-restart",
+    "path": "/api/workflow/fbf1a018-8dc4-497c-a0d7-fa79726c4061?reason=archon-restart",
     "body": null
   },
   "response": {

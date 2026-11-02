@@ -1,0 +1,224 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/88e8e55f-da54-4441-982a-c544c413c7cc",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "ownerApp": "",
+      "createTime": 1793629067775,
+      "updateTime": 1793629067866,
+      "status": "FAILED",
+      "endTime": 1793629067866,
+      "workflowId": "88e8e55f-da54-4441-982a-c544c413c7cc",
+      "tasks": [
+        {
+          "taskType": "HTTP",
+          "status": "FAILED",
+          "inputData": {
+            "asyncComplete": false,
+            "http_request": {
+              "uri": "http://127.0.0.1:18299/short/404",
+              "method": "GET"
+            }
+          },
+          "referenceTaskName": "http_ref",
+          "retryCount": 0,
+          "seq": 1,
+          "pollCount": 1,
+          "taskDefName": "archon_p7_http",
+          "scheduledTime": 1793629067776,
+          "startTime": 1793629067853,
+          "endTime": 1793629067864,
+          "updateTime": 1793629067853,
+          "startDelayInSeconds": 0,
+          "retried": false,
+          "executed": false,
+          "callbackFromWorker": true,
+          "responseTimeoutSeconds": 0,
+          "workflowInstanceId": "88e8e55f-da54-4441-982a-c544c413c7cc",
+          "workflowType": "archon_p7_http",
+          "taskId": "25d838ce-0d1e-4f50-aa47-58b87ff3d732",
+          "reasonForIncompletion": "Failed to invoke HTTP task due to: java.lang.Exception: 404 Not Found on GET request for \"http://127.0.0.1:18299/short/404\": \"archon short body\"",
+          "callbackAfterSeconds": 0,
+          "workerId": "<redacted-hostname>",
+          "outputData": {
+            "response": "java.lang.Exception: 404 Not Found on GET request for \"http://127.0.0.1:18299/short/404\": \"archon short body\""
+          },
+          "workflowTask": {
+            "name": "archon_p7_http",
+            "taskReferenceName": "http_ref",
+            "inputParameters": {
+              "http_request": "${workflow.input.request}",
+              "asyncComplete": false
+            },
+            "type": "HTTP",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_http",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          },
+          "rateLimitPerFrequency": 0,
+          "rateLimitFrequencyInSeconds": 1,
+          "workflowPriority": 0,
+          "iteration": 0,
+          "subworkflowChanged": false,
+          "firstStartTime": 0,
+          "executionMetadata": {
+            "additionalContext": {},
+            "additionalContextMap": {},
+            "empty": true
+          },
+          "taskDefinition": {
+            "createTime": 0,
+            "updateTime": 0,
+            "name": "archon_p7_http",
+            "retryCount": 0,
+            "timeoutSeconds": 0,
+            "inputKeys": [],
+            "outputKeys": [],
+            "runtimeMetadata": [],
+            "timeoutPolicy": "TIME_OUT_WF",
+            "retryLogic": "FIXED",
+            "retryDelaySeconds": 60,
+            "responseTimeoutSeconds": 0,
+            "inputTemplate": {},
+            "rateLimitPerFrequency": 0,
+            "rateLimitFrequencyInSeconds": 1,
+            "backoffScaleFactor": 1,
+            "maxRetryDelaySeconds": 0,
+            "backoffJitterMs": 0,
+            "totalTimeoutSeconds": 0,
+            "taskStatusListenerEnabled": true,
+            "enforceSchema": false
+          },
+          "queueWaitTime": 77,
+          "loopOverTask": false
+        }
+      ],
+      "input": {
+        "request": {
+          "uri": "http://127.0.0.1:18299/short/404",
+          "method": "GET"
+        }
+      },
+      "output": {
+        "response": "java.lang.Exception: 404 Not Found on GET request for \"http://127.0.0.1:18299/short/404\": \"archon short body\""
+      },
+      "reasonForIncompletion": "Task 25d838ce-0d1e-4f50-aa47-58b87ff3d732 failed with status: FAILED and reason: 'Failed to invoke HTTP task due to: java.lang.Exception: 404 Not Found on GET request for \"http://127.0.0.1:18299/short/404\": \"archon short body\"'",
+      "taskToDomain": {},
+      "failedReferenceTaskNames": [
+        "http_ref"
+      ],
+      "workflowDefinition": {
+        "createTime": 1793629066157,
+        "updateTime": 0,
+        "name": "archon_p7_http",
+        "version": 1,
+        "tasks": [
+          {
+            "name": "archon_p7_http",
+            "taskReferenceName": "http_ref",
+            "inputParameters": {
+              "http_request": "${workflow.input.request}",
+              "asyncComplete": false
+            },
+            "type": "HTTP",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_http",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          }
+        ],
+        "inputParameters": [],
+        "outputParameters": {},
+        "schemaVersion": 2,
+        "restartable": true,
+        "workflowStatusListenerEnabled": false,
+        "timeoutPolicy": "ALERT_ONLY",
+        "timeoutSeconds": 0,
+        "variables": {},
+        "inputTemplate": {},
+        "enforceSchema": true,
+        "metadata": {},
+        "maskedFields": []
+      },
+      "priority": 0,
+      "variables": {},
+      "lastRetriedTime": 0,
+      "failedTaskNames": [
+        "archon_p7_http"
+      ],
+      "history": [],
+      "rateLimited": false,
+      "startTime": 1793629067775,
+      "workflowName": "archon_p7_http",
+      "workflowVersion": 1
+    }
+  }
+}

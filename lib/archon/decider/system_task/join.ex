@@ -25,9 +25,18 @@ defmodule Archon.Decider.SystemTask.Join do
   shaped as upstream does for Conductor-Agents.
   """
 
+  @behaviour Archon.Decider.SystemTask
+
+  alias Archon.Decider.SystemTask.Result
   alias Archon.Domain.{Task, Workflow, WorkflowDef, WorkflowTask}
 
   @agent_keys ["_state_updates", "state"]
+
+  @impl Archon.Decider.SystemTask
+  def execute(%Workflow{} = workflow, %Task{} = task, _context) do
+    {changed?, task} = execute(workflow, task)
+    %Result{changed?: changed?, task: task}
+  end
 
   @doc "Upstream `Join#execute`."
   @spec execute(Workflow.t(), Task.t()) :: {boolean(), Task.t()}

@@ -17,25 +17,23 @@ defmodule Archon.Runtime.Step.Schedule do
   worker tasks.
   """
 
-  alias Archon.Decider.SystemTasks
+  alias Archon.Decider.{SystemTask, SystemTasks}
   alias Archon.Domain.{Task, Workflow}
   alias Archon.Runtime.Step.{Env, State}
-
-  # WorkflowSystemTask#isAsync
-  @async ~w(JOIN WAIT SUB_WORKFLOW)
 
   @doc "A registered system task type."
   @spec system_task?(Env.t(), Task.t()) :: boolean()
   def system_task?(%Env{system_tasks: registry}, %Task{task_type: type}),
     do: SystemTasks.system_task?(registry, type)
 
-  @doc "Upstream `WorkflowSystemTask#isAsync` for a system task."
-  @spec async?(Task.t()) :: boolean()
-  def async?(%Task{task_type: type}), do: type in @async
+  @doc "Upstream `WorkflowSystemTask#isAsync`: an asynchronous system task."
+  @spec async?(Env.t(), Task.t()) :: boolean()
+  def async?(%Env{system_tasks: registry}, %Task{task_type: type}),
+    do: SystemTasks.async?(registry, type)
 
   @doc "A system task the decide loop runs in place (not `isAsync`)."
   @spec sync_system_task?(Env.t(), Task.t()) :: boolean()
-  def sync_system_task?(env, task), do: system_task?(env, task) and not async?(task)
+  def sync_system_task?(env, task), do: system_task?(env, task) and not async?(env, task)
 
   @doc """
   Upstream `QueueUtils#getQueueName` without the execution namespace and isolation group
@@ -138,7 +136,8 @@ defmodule Archon.Runtime.Step.Schedule do
   @doc """
   Upstream `scheduleTask`: numbers the tasks after the highest `seq`, stamps
   `firstScheduledTime`, saves them, gives system tasks that are not terminal a `startTime`,
-  starts the synchronous ones and pushes worker tasks to their queues. Asynchronous system tasks
+  starts the synchronous ones (their `Archon.Decider.SystemTask.start/3`, if any) and pushes
+  worker tasks to their queues. Asynchronous system tasks
   without a delay are marked for evaluation (ADR 0018, decision 6). Returns whether a
   synchronous system task started.
   """
@@ -163,8 +162,7 @@ defmodule Archon.Runtime.Step.Schedule do
     Enum.reduce(tasks, {state, false}, fn task, {state, started?} ->
       cond do
         sync_system_task?(env, task) ->
-          # The synchronous system tasks have no `start` of their own.
-          {State.save_current(state, task.task_id), true}
+          {start_sync(state, task), true}
 
         system_task?(env, task) ->
           {if(delay_ms(task) == 0, do: State.due(state, [task.task_id]), else: state), started?}
@@ -173,6 +171,43 @@ defmodule Archon.Runtime.Step.Schedule do
           {push(state, task), started?}
       end
     end)
+  end
+
+  @doc """
+  `WorkflowSystemTask#start` of a synchronous system task in the step (if its type has one),
+  then `updateTask`.
+  """
+  @spec start_sync(State.t(), Task.t()) :: State.t()
+  def start_sync(%State{env: env} = state, %Task{task_id: id}) do
+    case State.task(state, id) do
+      nil ->
+        state
+
+      task ->
+        state =
+          case SystemTask.start(state.wf, task, Env.context(env)) do
+            nil -> state
+            result -> apply_result(state, result)
+          end
+
+        State.save_current(state, id)
+    end
+  end
+
+  @doc """
+  Puts what a system task's `start` or `execute` answered into the step: the task, kept whatever
+  `changed?` says, and a changed workflow, which is saved at once as upstream's `SetVariable`
+  saves it (ADR 0026, decision 2). Saving the task is the caller's.
+  """
+  @spec apply_result(State.t(), SystemTask.Result.t()) :: State.t()
+  def apply_result(%State{} = state, %SystemTask.Result{task: task, workflow: nil}),
+    do: State.put_task(state, task)
+
+  def apply_result(%State{wf: wf} = state, %SystemTask.Result{task: task, workflow: workflow}) do
+    state
+    |> State.put_workflow(%{workflow | tasks: wf.tasks})
+    |> State.put_task(task)
+    |> State.save_workflow()
   end
 
   defp start_time(task, env, now) do

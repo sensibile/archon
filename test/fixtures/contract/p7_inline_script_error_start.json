@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_inline",
+    "body": {
+      "evaluator": "javascript",
+      "expression": "$.a.b.c",
+      "a": 1
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "31dea89d-79da-46f2-b1d8-059c9a5bcff2"
+  }
+}

@@ -17,11 +17,15 @@ defmodule Archon.Decider.Outcome do
     * `complete?` - the workflow has nothing left to run.
     * `terminate_task` - the last successful `TERMINATE` task, if any.
     * `workflow` - the workflow with every change upstream made in place: task `executed`,
-      `retried`, timeout and `COMPLETED_WITH_ERRORS` markings, and `output` when complete or
-      terminated by a failed task.
+      `retried`, timeout and `COMPLETED_WITH_ERRORS` markings, `output` when complete or
+      terminated by a failed task, and the definition's workflow tasks a mapper changed.
+    * `changed_workflow_tasks` - the definition's workflow tasks a mapper changed in place
+      (`Archon.Decider.Mapper.changes_definition?/1`), already written into
+      `workflow.workflow_definition`. The runtime saves the workflow when there are any
+      (ADR 0026, decision 4).
   """
 
-  alias Archon.Domain.{Task, Workflow}
+  alias Archon.Domain.{Task, Workflow, WorkflowTask}
 
   @enforce_keys [:workflow]
   defstruct [
@@ -29,6 +33,7 @@ defmodule Archon.Decider.Outcome do
     :terminate_task,
     tasks_to_be_scheduled: [],
     tasks_to_be_updated: [],
+    changed_workflow_tasks: [],
     complete?: false
   ]
 
@@ -37,7 +42,8 @@ defmodule Archon.Decider.Outcome do
           tasks_to_be_scheduled: [Task.t()],
           tasks_to_be_updated: [Task.t()],
           complete?: boolean(),
-          terminate_task: Task.t() | nil
+          terminate_task: Task.t() | nil,
+          changed_workflow_tasks: [WorkflowTask.t()]
         }
 
   @doc "An outcome with nothing to do."

@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/tasks/4aadb4e4-212a-4ff1-9ff2-59ff70ff4fdc/ops_b_ref/COMPLETED/sync",
+    "path": "/api/tasks/ac8e0229-fafe-488d-8676-9d6877b1bce2/ops_b_ref/COMPLETED/sync",
     "body": {
       "z": 2
     }
@@ -11,11 +11,11 @@
     "content_type": "application/json",
     "body": {
       "ownerApp": "",
-      "createTime": 1793571056692,
-      "updateTime": 1793571056836,
+      "createTime": 1793629053526,
+      "updateTime": 1793629053637,
       "status": "COMPLETED",
-      "endTime": 1793571056836,
-      "workflowId": "4aadb4e4-212a-4ff1-9ff2-59ff70ff4fdc",
+      "endTime": 1793629053637,
+      "workflowId": "ac8e0229-fafe-488d-8676-9d6877b1bce2",
       "tasks": [
         {
           "taskType": "archon_ops_a",
@@ -29,18 +29,18 @@
           "correlationId": "archon-ops-ref",
           "pollCount": 0,
           "taskDefName": "archon_ops_a",
-          "scheduledTime": 1793571056694,
+          "scheduledTime": 1793629053528,
           "startTime": 0,
-          "endTime": 1793571056737,
-          "updateTime": 1793571056737,
+          "endTime": 1793629053565,
+          "updateTime": 1793629053565,
           "startDelayInSeconds": 0,
           "retried": false,
           "executed": true,
           "callbackFromWorker": true,
           "responseTimeoutSeconds": 3600,
-          "workflowInstanceId": "4aadb4e4-212a-4ff1-9ff2-59ff70ff4fdc",
+          "workflowInstanceId": "ac8e0229-fafe-488d-8676-9d6877b1bce2",
           "workflowType": "archon_ops",
-          "taskId": "272aa5e9-2c4c-409a-b801-3b4e9600e757",
+          "taskId": "76995aac-197e-4cd1-84df-52f84db3b867",
           "callbackAfterSeconds": 0,
           "workerId": "archon-ref-worker",
           "outputData": {
@@ -60,7 +60,7 @@
             "joinOn": [],
             "optional": false,
             "taskDefinition": {
-              "createTime": 1793571048482,
+              "createTime": 1793629045677,
               "updateTime": 0,
               "createdBy": "",
               "name": "archon_ops_a",
@@ -102,7 +102,7 @@
             "empty": true
           },
           "taskDefinition": {
-            "createTime": 1793571048482,
+            "createTime": 1793629045677,
             "updateTime": 0,
             "createdBy": "",
             "name": "archon_ops_a",
@@ -138,18 +138,18 @@
           "correlationId": "archon-ops-ref",
           "pollCount": 0,
           "taskDefName": "archon_ops_b",
-          "scheduledTime": 1793571056750,
+          "scheduledTime": 1793629053568,
           "startTime": 0,
-          "endTime": 1793571056832,
-          "updateTime": 1793571056833,
+          "endTime": 1793629053633,
+          "updateTime": 1793629053634,
           "startDelayInSeconds": 0,
           "retried": false,
           "executed": false,
           "callbackFromWorker": true,
           "responseTimeoutSeconds": 3600,
-          "workflowInstanceId": "4aadb4e4-212a-4ff1-9ff2-59ff70ff4fdc",
+          "workflowInstanceId": "ac8e0229-fafe-488d-8676-9d6877b1bce2",
           "workflowType": "archon_ops",
-          "taskId": "6e55b7d1-751d-4945-b98c-e9e095cdc083",
+          "taskId": "237aa8fd-4a70-4028-97f4-bbf91e43d461",
           "callbackAfterSeconds": 0,
           "outputData": {
             "z": 2
@@ -166,7 +166,7 @@
             "joinOn": [],
             "optional": false,
             "taskDefinition": {
-              "createTime": 1793571048482,
+              "createTime": 1793629045679,
               "updateTime": 0,
               "createdBy": "",
               "name": "archon_ops_b",
@@ -208,7 +208,7 @@
             "empty": true
           },
           "taskDefinition": {
-            "createTime": 1793571048482,
+            "createTime": 1793629045679,
             "updateTime": 0,
             "createdBy": "",
             "name": "archon_ops_b",
@@ -245,7 +245,7 @@
       "taskToDomain": {},
       "failedReferenceTaskNames": [],
       "workflowDefinition": {
-        "createTime": 1793571048557,
+        "createTime": 1793629045743,
         "updateTime": 0,
         "name": "archon_ops",
         "description": "Version 2",
@@ -265,7 +265,7 @@
             "joinOn": [],
             "optional": false,
             "taskDefinition": {
-              "createTime": 1793571048482,
+              "createTime": 1793629045677,
               "updateTime": 0,
               "createdBy": "",
               "name": "archon_ops_a",
@@ -307,7 +307,7 @@
             "joinOn": [],
             "optional": false,
             "taskDefinition": {
-              "createTime": 1793571048482,
+              "createTime": 1793629045679,
               "updateTime": 0,
               "createdBy": "",
               "name": "archon_ops_b",
@@ -359,9 +359,9 @@
       "failedTaskNames": [],
       "history": [],
       "rateLimited": false,
+      "startTime": 1793629053526,
       "workflowName": "archon_ops",
-      "workflowVersion": 2,
-      "startTime": 1793571056692
+      "workflowVersion": 2
     }
   }
 }

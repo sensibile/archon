@@ -1,9 +1,9 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/workflow/89939051-b59e-45f1-ad71-4a1c99921412/rerun",
+    "path": "/api/workflow/7aa1f58d-7e21-4570-b3b4-43d464f3484d/rerun",
     "body": {
-      "reRunFromTaskId": "24ccc2e7-f232-4056-9eab-b7ae3e994c5e",
+      "reRunFromTaskId": "b492f8b4-05dc-4de0-be03-cee246066d53",
       "workflowInput": {
         "t": 1
       }
@@ -12,6 +12,6 @@
   "response": {
     "status": 200,
     "content_type": "text/plain;charset=UTF-8",
-    "body": "89939051-b59e-45f1-ad71-4a1c99921412"
+    "body": "7aa1f58d-7e21-4570-b3b4-43d464f3484d"
   }
 }

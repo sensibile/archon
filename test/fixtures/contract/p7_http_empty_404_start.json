@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_http",
+    "body": {
+      "request": {
+        "uri": "http://127.0.0.1:18299/status/404",
+        "method": "GET"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "a6ddc1aa-64d9-4ce8-9b0b-a6db47874cc6"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_p7_fjd_no_join",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_p7_fjd",
+          "taskReferenceName": "fjd_ref",
+          "type": "FORK_JOIN_DYNAMIC",
+          "inputParameters": {
+            "forkTaskName": "archon_p7_worker",
+            "forkTaskInputs": [
+              {
+                "a": 1
+              }
+            ]
+          }
+        },
+        {
+          "name": "archon_p7_worker",
+          "taskReferenceName": "worker_ref",
+          "type": "SIMPLE"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

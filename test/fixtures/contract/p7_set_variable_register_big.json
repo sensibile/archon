@@ -1,0 +1,31 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_p7_set_variable_big",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_p7_set",
+          "taskReferenceName": "big_ref",
+          "type": "SET_VARIABLE",
+          "inputParameters": {
+            "big": "${workflow.input.big}"
+          }
+        }
+      ],
+      "variables": {
+        "a": "init"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

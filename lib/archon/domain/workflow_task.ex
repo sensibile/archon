@@ -140,6 +140,71 @@ defmodule Archon.Domain.WorkflowTask do
   end
 
   @doc """
+  This task with the first task named `replacement.task_reference_name` (itself or one nested
+  in it, in `collect_tasks/1` order) replaced by `replacement`, as a change upstream makes in
+  place to a definition's task object shows wherever that object is.
+  """
+  @spec replace(t(), t()) :: {:ok, t()} | :error
+  def replace(%__MODULE__{task_reference_name: ref}, %__MODULE__{task_reference_name: ref} = new),
+    do: {:ok, new}
+
+  def replace(%__MODULE__{type: type} = task, new) when type in ["DECISION", "SWITCH"] do
+    cases = Enum.to_list(task.decision_cases || %{})
+
+    with :error <- replace_in_cases(task, cases, new),
+         {:ok, default} <- replace_in_list(task.default_case, new) do
+      {:ok, %{task | default_case: default}}
+    end
+  end
+
+  def replace(%__MODULE__{type: "FORK_JOIN", fork_tasks: forks} = task, new) do
+    with {:ok, forks} <- replace_in_lists(forks, new), do: {:ok, %{task | fork_tasks: forks}}
+  end
+
+  def replace(%__MODULE__{type: "DO_WHILE", loop_over: body} = task, new) do
+    with {:ok, body} <- replace_in_list(body, new), do: {:ok, %{task | loop_over: body}}
+  end
+
+  def replace(%__MODULE__{}, _new), do: :error
+
+  @doc false
+  # The first task list element (or nested task) named as `new` replaced; `:error` if none is.
+  @spec replace_in_list([t() | nil] | nil, t()) :: {:ok, [t() | nil]} | :error
+  def replace_in_list(nil, _new), do: :error
+  def replace_in_list([], _new), do: :error
+  def replace_in_list([nil | rest], new), do: prepend(nil, replace_in_list(rest, new))
+
+  def replace_in_list([task | rest], new) do
+    case replace(task, new) do
+      {:ok, task} -> {:ok, [task | rest]}
+      :error -> prepend(task, replace_in_list(rest, new))
+    end
+  end
+
+  defp replace_in_lists(nil, _new), do: :error
+  defp replace_in_lists([], _new), do: :error
+
+  defp replace_in_lists([list | rest], new) do
+    case replace_in_list(list, new) do
+      {:ok, list} -> {:ok, [list | rest]}
+      :error -> prepend(list, replace_in_lists(rest, new))
+    end
+  end
+
+  # collect_tasks/1 order: the cases in the map's own order, as Map.values/1 gives them.
+  defp replace_in_cases(_task, [], _new), do: :error
+
+  defp replace_in_cases(task, [{key, list} | rest], new) do
+    case replace_in_list(list, new) do
+      {:ok, list} -> {:ok, %{task | decision_cases: Map.put(task.decision_cases, key, list)}}
+      :error -> replace_in_cases(task, rest, new)
+    end
+  end
+
+  defp prepend(head, {:ok, tail}), do: {:ok, [head | tail]}
+  defp prepend(_head, :error), do: :error
+
+  @doc """
   Upstream `WorkflowTask#has`: whether this task or one nested in it has `ref_name`.
   """
   @spec has?(t(), String.t()) :: boolean()
@@ -241,12 +306,12 @@ defmodule Archon.Domain.WorkflowTask do
   `@PositiveOrZero`. `@Valid` cascades into `decisionCases`, `defaultCase`, `forkTasks` and
   `onStateChange`, but not `loopOver` or `taskDefinition`, which upstream leaves unannotated.
   """
-  @spec validate(t()) :: Validation.result()
-  def validate(%__MODULE__{} = task), do: task |> errors() |> Validation.result()
+  @spec validate(t(), Validation.opts()) :: Validation.result()
+  def validate(%__MODULE__{} = task, opts \\ []), do: task |> errors(opts) |> Validation.result()
 
   @doc false
-  @spec errors(t()) :: [Codec.error()]
-  def errors(%__MODULE__{} = task) do
+  @spec errors(t(), Validation.opts()) :: [Codec.error()]
+  def errors(%__MODULE__{} = task, opts \\ []) do
     Validation.not_empty("name", task.name, "WorkflowTask name cannot be empty or null") ++
       Validation.not_empty(
         "taskReferenceName",
@@ -254,37 +319,37 @@ defmodule Archon.Domain.WorkflowTask do
         "WorkflowTask taskReferenceName name cannot be empty or null"
       ) ++
       Validation.min("startDelay", task.start_delay, 0, "must be greater than or equal to 0") ++
-      decision_case_errors(task.decision_cases) ++
-      list_errors(task.default_case, "defaultCase") ++
-      fork_errors(task.fork_tasks) ++
+      decision_case_errors(task.decision_cases, opts) ++
+      list_errors(task.default_case, "defaultCase", opts) ++
+      fork_errors(task.fork_tasks, opts) ++
       state_change_errors(task.on_state_change) ++
-      TaskTypeConstraint.errors(task)
+      TaskTypeConstraint.errors(task, opts)
   end
 
-  defp decision_case_errors(nil), do: []
+  defp decision_case_errors(nil, _opts), do: []
 
-  defp decision_case_errors(cases) do
+  defp decision_case_errors(cases, opts) do
     cases
     |> Enum.sort()
-    |> Enum.flat_map(fn {key, tasks} -> list_errors(tasks, "decisionCases[#{key}]") end)
+    |> Enum.flat_map(fn {key, tasks} -> list_errors(tasks, "decisionCases[#{key}]", opts) end)
   end
 
-  defp fork_errors(nil), do: []
+  defp fork_errors(nil, _opts), do: []
 
-  defp fork_errors(forks) do
+  defp fork_errors(forks, opts) do
     forks
     |> Enum.with_index()
-    |> Enum.flat_map(fn {tasks, index} -> list_errors(tasks, "forkTasks[#{index}]") end)
+    |> Enum.flat_map(fn {tasks, index} -> list_errors(tasks, "forkTasks[#{index}]", opts) end)
   end
 
-  defp list_errors(nil, _prefix), do: []
+  defp list_errors(nil, _prefix, _opts), do: []
 
-  defp list_errors(tasks, prefix) do
+  defp list_errors(tasks, prefix, opts) do
     tasks
     |> Enum.with_index()
     |> Enum.flat_map(fn
       {nil, _index} -> []
-      {task, index} -> task |> errors() |> Validation.nest("#{prefix}[#{index}]")
+      {task, index} -> task |> errors(opts) |> Validation.nest("#{prefix}[#{index}]")
     end)
   end
 

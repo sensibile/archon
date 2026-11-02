@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_exclusive_join",
+    "body": {
+      "route": "a"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "b78ae67a-a7ed-4cee-b7bc-0b9815d99ae3"
+  }
+}

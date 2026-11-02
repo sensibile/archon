@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/tasks/2e102f54-68ab-42ed-8877-66468829affc/COMPLETED/signal/sync?returnStrategy=BLOCKING_TASK",
+    "path": "/api/tasks/4e24a588-3104-4347-8fad-4d4843ccd023/COMPLETED/signal/sync?returnStrategy=BLOCKING_TASK",
     "body": {
       "s": 9
     }
@@ -11,21 +11,21 @@
     "content_type": "application/json",
     "body": {
       "responseType": "BLOCKING_TASK",
-      "targetWorkflowId": "2e102f54-68ab-42ed-8877-66468829affc",
+      "targetWorkflowId": "4e24a588-3104-4347-8fad-4d4843ccd023",
       "targetWorkflowStatus": "RUNNING",
-      "requestId": "9b5e49fb-9c86-4087-ab8c-9b3516cfa98b",
-      "workflowId": "6f1866d0-12d2-3d71-9eb4-8b18671a18fd",
+      "requestId": "748ab373-6d60-4a75-9901-550164e7437b",
+      "workflowId": "64bfa791-3d10-3ce1-965f-40c433c950fd",
       "input": {},
       "output": {},
       "signalTimeout": false,
       "taskType": "WAIT",
-      "taskId": "03911ea8-571c-49da-9903-bc811f1d8bd7",
+      "taskId": "2a0834d5-e608-4ea7-8a31-af60e3bbe277",
       "referenceTaskName": "wait2_ref",
       "retryCount": 0,
       "taskDefName": "archon_wait",
       "workflowType": "archon_ops_waits",
       "priority": 0,
-      "createTime": 1793571056548,
+      "createTime": 1793629053386,
       "updateTime": 0,
       "status": "IN_PROGRESS"
     }
