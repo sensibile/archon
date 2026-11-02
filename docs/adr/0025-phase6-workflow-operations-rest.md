@@ -175,7 +175,11 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
     - **늦게 닿는 경우 3.** 경우 3은 아래 outbox를 기다린 뒤라 upstream보다 늦게 쓴다. 그 사이 자식이 다시 완료해 SUB_WORKFLOW
       태스크가 바뀌었으면(읽을 때와 `updateTime`이 다른 성공한 태스크, 또는 그 사이 재시도된 태스크) 경우 3은 워크플로우와 태스크를
       그대로 둔다. 자식이 바로 완료해 부모까지 끝났는데 경우 3이 다시 `RUNNING`으로 돌리는 일을 막는다. 자식이 다시 실패한
-      경우는 upstream처럼 경우 3이 덮어쓴다(재시도된 자식 사례). 아래의 rerun은 그대로다.
+      경우는 upstream처럼 경우 3이 덮어쓴다(재시도된 자식 사례). 아래의 rerun은 그대로다. 같은 밀리초 안의 완료처럼 태스크로
+      알 수 없는 경우를 위해, `Lifecycle.rerun`은 경우 3을 보내기 전에 바로 아래 워크플로우를 다시 읽어 `COMPLETED`면(완료 알림은
+      outbox로 이미 전달됨) 더 올라가지 않는다.
+    - **비동기 시스템 태스크의 지연.** 경우 1의 대상과 `finalizeRerun`의 비동기 시스템 태스크(JOIN·WAIT·SUB_WORKFLOW 형제)는 콜백
+      지연이 없을 때만 바로 평가하고, 있으면 지연이 끝난 `:wake`에 평가한다(upstream `addTaskToQueue`의 지연).
       rerun 도중 위 워크플로우가 지워졌으면 그 ID로 404다.
     - **부모가 취소한 자식의 알림.** 끝나는 부모가 SUB_WORKFLOW 태스크를 `CANCELED`로 하고 자식을 끝내면, 자식의 종료 알림이 그
       태스크에 사유를 쓰지 않는다(`Step.SubWorkflow.child_changed`). upstream `cancelNonTerminalTasks`는 자식 종료가 태스크를 갱신한

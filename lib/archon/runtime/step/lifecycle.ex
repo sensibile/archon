@@ -627,10 +627,16 @@ defmodule Archon.Runtime.Step.Lifecycle do
     # nothing, and is then pushed as upstream does with a SCHEDULED task (the decide loop runs it).
     state =
       if Schedule.system_task?(env, task) and Schedule.async?(task),
-        do: State.due(state, [task.task_id]),
+        do: due_now(state, task),
         else: Schedule.push(state, task)
 
     finalize_rerun(state, task)
+  end
+
+  # addTaskToQueue for an asynchronous system task: evaluated at once without a callback delay,
+  # else when the delay is over (the next :wake), as repair_canceled does.
+  defp due_now(state, task) do
+    if Schedule.delay_ms(task) == 0, do: State.due(state, [task.task_id]), else: state
   end
 
   # The fields every reset target of rerunWF clears.
@@ -677,7 +683,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
         true ->
           task = %{task | status: :scheduled}
-          state |> State.save_task(task) |> State.due([task.task_id])
+          state |> State.save_task(task) |> due_now(task)
       end
     end)
     |> push_parents(true)
