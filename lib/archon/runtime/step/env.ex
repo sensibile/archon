@@ -30,6 +30,8 @@ defmodule Archon.Runtime.Step.Env do
       child is taken out with `child/3` only.
     * `outbox_pending?` - the workflow has outbox entries left (ADR 0021, decision 4), for the
       recovery check of a terminal workflow.
+    * `offsets_reset` - for `:reset_callbacks`, the IDs of the tasks whose queue message was made
+      due while the env was read (ADR 0025, decision 2: the one env value that is not only read).
 
   The settings default to upstream's `ConductorProperties`:
 
@@ -66,6 +68,7 @@ defmodule Archon.Runtime.Step.Env do
     queued: MapSet.new(),
     workflows: %{},
     outbox_pending?: false,
+    offsets_reset: MapSet.new(),
     workflow_offset_timeout_ms: 30_000,
     max_postpone_ms: 3_600_000,
     active_worker_last_poll_ms: 10_000,
@@ -88,6 +91,7 @@ defmodule Archon.Runtime.Step.Env do
           queued: MapSet.t(String.t()),
           workflows: %{optional(String.t()) => Workflow.t() | nil},
           outbox_pending?: boolean(),
+          offsets_reset: MapSet.t(String.t()),
           workflow_offset_timeout_ms: non_neg_integer(),
           max_postpone_ms: non_neg_integer(),
           active_worker_last_poll_ms: non_neg_integer(),

@@ -59,6 +59,11 @@ defmodule ArchonWeb.ErrorsTest do
                json({:payload_too_large, "big"})
     end
 
+    test "a refused cross-origin request is 403 (ADR 0025, decision 3)" do
+      assert %{"status" => 403, "message" => "no", "retryable" => false, "instance" => _host} =
+               json({:forbidden, "no"})
+    end
+
     test "isolated failures, exits and database errors are TransientException" do
       transient = [
         {:env, :boom},
@@ -66,6 +71,8 @@ defmodule ArchonWeb.ErrorsTest do
         {:commit, {:limit, "x"}},
         {:post_effect, :boom},
         {:exit, {:timeout, {GenServer, :call, []}}},
+        {:exit, :unavailable},
+        :outbox_pending,
         %DBConnection.ConnectionError{message: "down"},
         %Postgrex.Error{message: "failed"}
       ]

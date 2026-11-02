@@ -22,7 +22,8 @@ defmodule ArchonWeb.Errors do
   | `{:invalid_state, message}`, `{:terminate, message}` | unmapped | 500 | false |
   | `{:server_error, message}` | unmapped (a message upstream's framework writes) | 500 | false |
   | `{:payload_too_large, message}` | (a body over `ArchonWeb.Request`'s limit) | 413 | false |
-  | `{:env \\| :pre_effect \\| :commit \\| :post_effect, _}`, `{:exit, _}`, a database exception | `TransientException` | 500 | true |
+  | `{:forbidden, message}` | (a browser's cross-origin request to a bodyless action, ADR 0025) | 403 | false |
+  | `{:env \\| :pre_effect \\| :commit \\| :post_effect, _}`, `{:exit, _}`, `:outbox_pending`, a database exception | `TransientException` | 500 | true |
   | anything else | `Throwable` | 500 | false |
 
   A reason without a message (`:not_found`, `:conflict`) takes the upstream message from the
@@ -111,6 +112,9 @@ defmodule ArchonWeb.Errors do
   def error_response({:payload_too_large, message}, _opts) when is_binary(message),
     do: application(413, message)
 
+  def error_response({:forbidden, message}, _opts) when is_binary(message),
+    do: application(403, message)
+
   def error_response({tag, message}, _opts)
       when tag in [:invalid_state, :terminate, :server_error] and is_binary(message),
       do: application(500, message)
@@ -152,9 +156,11 @@ defmodule ArchonWeb.Errors do
   defp message!(opts), do: Keyword.fetch!(opts, :message)
 
   # Upstream's TransientException: the step or effect failed after the workflow was read, the
-  # workflow process did not answer, or the database is unreachable or failed the query.
+  # workflow process did not answer, a removal waited too long for the workflow's outbox
+  # (ADR 0025, decision 3), or the database is unreachable or failed the query.
   defp transient?({tag, _reason}) when tag in @transient_tags, do: true
   defp transient?({:exit, _reason}), do: true
+  defp transient?(:outbox_pending), do: true
   defp transient?(%DBConnection.ConnectionError{}), do: true
   defp transient?(%Postgrex.Error{}), do: true
   defp transient?(_reason), do: false

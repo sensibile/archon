@@ -6,13 +6,16 @@
 # Derived from conductor-oss core/src/main/java/com/netflix/conductor/core/execution/WorkflowExecutorOps.java
 # (pauseWorkflow, resumeWorkflow, retry, taskToBeRescheduled, clearRetriedTaskRuntimeState,
 # clearLegacySubWorkflowId, isJoinOnFailedPermissive, restart, updateAndPushParents,
-# adjustStateIfSubWorkflowChanged, findChangedSubWorkflowTask, resetUnsuccessfulJoinTasks) and
-# core/.../model/WorkflowModel.java (toString, toShortString)
+# adjustStateIfSubWorkflowChanged, findChangedSubWorkflowTask, resetUnsuccessfulJoinTasks,
+# skipTaskFromWorkflow, resetCallbacksForWorkflow),
+# core/.../core/dal/ExecutionDAOFacade.java (removeWorkflowIndex, removeTaskIndex), core/.../model/
+# WorkflowModel.java (toString, toShortString) and core/.../model/TaskModel.java (toTask)
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: each operation is an event of the workflow's own process; the parents
 # are revived by a message to each parent in turn instead of one loop over the store, and the
 # decider queue push became the step's decide (ADR 0018, decision 9); a task's child is followed
-# only when it belongs to the task (ADR 0024, decision 2).
+# only when it belongs to the task (ADR 0024, decision 2); the queue offsets of resetcallbacks are
+# reset while the env is read (ADR 0025, decision 2).
 
 defmodule Archon.Runtime.Step.Lifecycle do
   @moduledoc """
@@ -28,18 +31,24 @@ defmodule Archon.Runtime.Step.Lifecycle do
       the child that runs again goes back to `IN_PROGRESS`, the workflow runs again, its other
       failed `SUB_WORKFLOW` children are retried and its canceled tasks scheduled again; then it
       asks its own parent to revive.
+    * `skip_task/2` - upstream `skipTaskFromWorkflow`: a `SKIPPED` task for a reference of the
+      definition that has none yet, then a decide (ADR 0025, decision 2).
+    * `reset_callbacks/1` - upstream `resetCallbacksForWorkflow`: the tasks whose queue message
+      the env made due (`Env.offsets_reset`) lose their `callbackAfterSeconds`.
+    * `removable/2` - the checks of upstream `removeWorkflow` before anything is deleted
+      (ADR 0025, decision 3); the deletion is `Archon.Runtime.WorkflowServer`'s.
     * `adjust/1` - upstream `adjustStateIfSubWorkflowChanged`, run by every decide.
 
   Replies are `:ok` or `{:error, {kind, message}}` with upstream's exception as `kind`:
-  `:conflict` (`ConflictException`), `:not_found` (`NotFoundException`) or `:invalid_state`
-  (`IllegalStateException`), and its message.
+  `:conflict` (`ConflictException`), `:not_found` (`NotFoundException`), `:invalid_state`
+  (`IllegalStateException`) or `:invalid` (`IllegalArgumentException`), and its message.
   """
 
   alias Archon.Decider.Parameters
   alias Archon.Domain.{Task, Workflow, WorkflowDef, WorkflowTask}
   alias Archon.Runtime.Step.{Decide, Env, Schedule, State}
 
-  @type reply :: :ok | {:error, {:conflict | :not_found | :invalid_state, String.t()}}
+  @type reply :: :ok | {:error, {:conflict | :not_found | :invalid_state | :invalid, String.t()}}
 
   # Retried in place, with the same task ID (taskToBeRescheduled).
   @in_place ["DO_WHILE", "FORK_JOIN", "JOIN", "EXCLUSIVE_JOIN"]
@@ -186,11 +195,13 @@ defmodule Archon.Runtime.Step.Lifecycle do
   end
 
   # The rest of retry(WorkflowModel): taskToBeRescheduled for each task, dedupAndAddTasks,
-  # updateTasks for every task of the workflow, then scheduleTask.
+  # updateTasks for every task of the workflow, then scheduleTask. Upstream schedules the same
+  # objects updateTasks stamped, so the new tasks keep that `updateTime`.
   defp reschedule(%State{} = state, tasks) do
     {rescheduled, state} = Enum.map_reduce(tasks, state, &reschedule_task(&2, &1))
     {state, _new} = Schedule.dedup_and_add(state, rescheduled)
     state = State.save_tasks(state, state.wf.tasks)
+    rescheduled = Enum.map(rescheduled, &(State.task(state, &1.task_id) || &1))
     {state, _started?} = Schedule.schedule(state, rescheduled)
     state
   end
@@ -430,6 +441,113 @@ defmodule Archon.Runtime.Step.Lifecycle do
   end
 
   defp repair_canceled(state, _task), do: state
+
+  @doc """
+  Upstream `skipTaskFromWorkflow`: only a running workflow, only a reference of its definition
+  and only one that has no task yet; each refusal is upstream's `IllegalStateException`. The
+  `SKIPPED` task copies the workflow's correlation ID and priority, ends now and has no input or
+  output (the request body is not read, ADR 0025, decision 2). It has no `seq` (0) and, as
+  upstream's `toTask` writes it, a workflow task of only its name and reference. Then the
+  workflow is decided.
+  """
+  @spec skip_task(State.t(), String.t()) :: {reply(), State.t()}
+  def skip_task(%State{wf: wf, env: env, now: now} = state, ref) do
+    workflow_task =
+      if wf.workflow_definition, do: WorkflowDef.task_by_ref_name(wf.workflow_definition, ref)
+
+    cond do
+      wf.status != :running ->
+        {{:error,
+          {:invalid_state,
+           "The workflow #{wf.workflow_id} is not running so the task referenced by #{ref} " <>
+             "cannot be skipped"}}, state}
+
+      workflow_task == nil ->
+        {{:error,
+          {:invalid_state,
+           "The task referenced by #{ref} does not exist in the WorkflowDefinition " <>
+             Parameters.java_string(Workflow.workflow_name(wf))}}, state}
+
+      Enum.any?(wf.tasks, &(&1.reference_task_name == ref)) ->
+        {{:error,
+          {:invalid_state,
+           "The task referenced #{ref} has already been processed, cannot be skipped"}}, state}
+
+      true ->
+        task = %Task{
+          task_id: env.new_id.(),
+          reference_task_name: ref,
+          workflow_instance_id: wf.workflow_id,
+          workflow_priority: wf.priority,
+          status: :skipped,
+          end_time: now,
+          task_type: workflow_task.name,
+          correlation_id: wf.correlation_id,
+          workflow_task: %WorkflowTask{name: workflow_task.name, task_reference_name: ref}
+        }
+
+        {:ok, state |> State.create_tasks([task]) |> State.sort_tasks() |> Decide.settle()}
+    end
+  end
+
+  @doc """
+  Upstream `resetCallbacksForWorkflow`: a terminal workflow is a conflict. Otherwise each task
+  whose queue message `Archon.Runtime.WorkflowServer` made due while it read the env
+  (`Env.offsets_reset`, only for the worker tasks `SCHEDULED` with a `callbackAfterSeconds`) is
+  saved with no callback delay. Nothing is decided.
+  """
+  @spec reset_callbacks(State.t()) :: {reply(), State.t()}
+  def reset_callbacks(%State{wf: wf, env: env} = state) do
+    if Workflow.terminal?(wf.status) do
+      {{:error, {:conflict, "Workflow is in terminal state. Status = #{status_name(wf.status)}"}},
+       state}
+    else
+      state =
+        wf.tasks
+        |> Enum.filter(&MapSet.member?(env.offsets_reset, &1.task_id))
+        |> Enum.reduce(state, fn task, state ->
+          State.save_task(state, %{task | callback_after_seconds: 0, callback_after_ms: 0})
+        end)
+
+      {:ok, state}
+    end
+  end
+
+  @doc """
+  Whether `Archon.Runtime.Step.Env.offsets_reset` asks about the task: a worker task that is
+  `SCHEDULED` with a `callbackAfterSeconds` (the filter of `resetCallbacksForWorkflow`).
+  """
+  @spec callback_to_reset?(Env.t(), Task.t()) :: boolean()
+  def callback_to_reset?(%Env{} = env, %Task{} = task),
+    do:
+      task.status == :scheduled and is_integer(task.callback_after_seconds) and
+        task.callback_after_seconds > 0 and not Schedule.system_task?(env, task)
+
+  @doc """
+  The checks of upstream `removeWorkflow` (`removeWorkflowIndex`, `removeTaskIndex`) with
+  `archiveWorkflow`: only a terminal workflow, and none of its tasks may be running (a `SCHEDULED`
+  one is let through); each refusal is upstream's `IllegalArgumentException`. Without
+  `archiveWorkflow` anything may be removed.
+  """
+  @spec removable(Workflow.t(), boolean()) :: :ok | {:error, {:invalid, String.t()}}
+  def removable(%Workflow{}, false), do: :ok
+
+  def removable(%Workflow{workflow_id: id, status: status, tasks: tasks}, true) do
+    if Workflow.terminal?(status) do
+      case Enum.find(tasks, &(not Task.terminal?(&1.status) and &1.status != :scheduled)) do
+        nil ->
+          :ok
+
+        task ->
+          {:error,
+           {:invalid,
+            "Cannot archive task: #{task.task_id} of workflow: #{id} with non-terminal status: " <>
+              status_name(task.status)}}
+      end
+    else
+      {:error, {:invalid, "Cannot archive workflow: #{id} with status: #{status_name(status)}"}}
+    end
+  end
 
   @doc """
   Upstream `adjustStateIfSubWorkflowChanged`: the first `SUB_WORKFLOW` task marked
