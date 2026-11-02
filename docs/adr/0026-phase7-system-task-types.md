@@ -363,7 +363,9 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     (`JQ query rejected: import and include are not supported`). 라이브러리 검색 경로는 빈 목록이다(`modulemeta`는 못 찾음,
     `get_search_list`는 `[]`). 입력 콜백은 빈 입력이다(`[inputs]`는 `[]`, `input`은 오류). debug·stderr 콜백은 버리고, 호스트의
     stderr도 `/dev/null`이다(sanitize 빌드는 보고를 위해 남김). `halt`·`halt_error`는 `halt and halt_error are not supported`
-    오류다. 결과는 16MiB, 결과 하나의 깊이 1,000을 넘으면 `JQ query result is too large`·`JQ query result is nested too deeply`다.
+    오류다. jq는 쿼리를 C 문자열로 읽으므로 NUL 문자가 든 쿼리는 뒤를 잘라 실행하지 않고 거절한다(`JQ query rejected: the query
+    contains a NUL character`). 메모리 상한보다 큰 요청은 받아 두지 않고 읽어 버린 뒤 `JQ query memory limit exceeded`로 답한다(파싱한
+    값은 그보다 크므로 어차피 상한을 넘는다). 결과는 16MiB, 결과 하나의 깊이 1,000을 넘으면 `JQ query result is too large`·`JQ query result is nested too deeply`다.
   - **프로토콜과 값.** 요청 `{"op": "eval", "query", "input"}`, 응답 `{"ok": [결과...]}` 또는 `{"error": kind, "message"}`다. jq 값은
     JSON 그대로이므로 `archon_js`의 타입 붙은 값 대신 평범한 JSON을 쓰고, 정수·실수 구분은 수 표기로 전한다. 수는 upstream
     `extractBody`처럼 정수이고 `long` 범위면 정수, 아니면 실수다. 다만 jq가 입력이나 쿼리의 표기를 지닌 수(`USE_DECNUM`의

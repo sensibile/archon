@@ -238,6 +238,14 @@ defmodule Archon.JqTest do
       assert {:ok, [[]]} = run("get_search_list")
     end
 
+    test "a query with a NUL character is rejected, not cut short" do
+      assert {:error, %Error{kind: :request} = error} =
+               run(".a\u0000| error(\"blocked\")", %{"a" => "secret"})
+
+      assert Jq.message(error) == "JQ query rejected: the query contains a NUL character"
+      assert {:ok, ["a\u0000b"]} = run(".s", %{"s" => "a\u0000b"})
+    end
+
     test "there is no input beyond the request's" do
       assert {:ok, [[]]} = run("[inputs]")
       assert {:error, %Error{kind: :runtime}} = run("input")
@@ -278,6 +286,16 @@ defmodule Archon.JqTest do
       assert {:error, %Error{kind: :limit}} = eval(pool, "(\"a\" * 1000000) | test(\"^(a|b)*$\")")
 
       assert {:ok, [true]} = eval(pool, "(\"a\" * 1000) | test(\"^(a|b)*$\")")
+    end
+
+    test "a request larger than the memory limit is answered without being held" do
+      pool = start_pool(:jq_request_pool, memory_limit: 1024 * 1024)
+      big = String.duplicate("x", 2 * 1024 * 1024)
+
+      assert {:error, %Error{kind: :limit, reason: "memory limit exceeded"}} =
+               eval(pool, ".s | length", %{"s" => big})
+
+      assert {:ok, [3]} = eval(pool, ".s | length", %{"s" => "abc"})
     end
 
     test "a result larger than the output limit or nested too deeply is rejected" do

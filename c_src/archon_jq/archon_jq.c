@@ -144,6 +144,20 @@ static int write_full(int fd, const void *src, size_t n)
     return 0;
 }
 
+/* Reads and drops a request of len bytes. */
+static int skip_request(size_t len)
+{
+    char chunk[65536];
+    while (len > 0) {
+        size_t n = len < sizeof chunk ? len : sizeof chunk;
+        int r = read_full(STDIN_FILENO, chunk, n);
+        if (r != 1)
+            return r;
+        len -= n;
+    }
+    return 1;
+}
+
 static int write_frame(const char *data, size_t len)
 {
     unsigned char header[4] = {(unsigned char)(len >> 24), (unsigned char)(len >> 16),
@@ -640,6 +654,9 @@ static void handle(const Config *cfg, const char *request, size_t request_len, B
         put_fixed_error(out, "request", "op must be \"eval\"");
     } else if (jv_get_kind(query) != JV_KIND_STRING) {
         put_fixed_error(out, "request", "query must be a string");
+    } else if (strlen(jv_string_value(query)) != (size_t)jv_string_length_bytes(jv_copy(query))) {
+        /* jq reads the query as a C string: a NUL would cut off what follows it. */
+        put_fixed_error(out, "request", "the query contains a NUL character");
     } else if (!jv_is_valid(input)) {
         put_fixed_error(out, "request", "input is missing");
     } else {
@@ -758,6 +775,18 @@ int main(int argc, char **argv)
                      ((size_t)header[2] << 8) | header[3];
         if (len > MAX_REQUEST || len > INT_MAX)
             return 1;
+        if (len > cfg.memory_limit) {
+            /* Its parsed form could not fit either: answer without holding it. */
+            if (skip_request(len) != 1)
+                return 1;
+            Buf out = {NULL, 0, 0, SIZE_MAX, 0};
+            put_fixed_error(&out, "limit", "memory limit exceeded");
+            int w = write_frame(out.data, out.len);
+            free(out.data);
+            if (w < 0)
+                return 1;
+            continue;
+        }
         char *request = malloc(len + 1);
         if (!request || read_full(STDIN_FILENO, request, len) != 1)
             return 1;
