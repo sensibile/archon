@@ -380,7 +380,7 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   - **문자열이 아닌 `queryExpression`.** upstream `start`의 캐스트 예외는 `scheduleTask`의 `catch`에서
     `TerminateWorkflowException("Error scheduling tasks: <이 배치의 태스크 ID 목록>, for workflow: <ID>")`가 된다. 그래서
     `SystemTask.start/3`가 upstream이 던지는 자리에서 `{:error, reason}`을 돌려줄 수 있게 넓혔고(`reason`은 upstream이 로그로만 남기는
-    예외), `Step.Schedule.schedule/2`가 그 자리에서 멈춰(뒤의 태스크는 시작도 큐 추가도 하지 않음) `{:terminate, termination, state}`를
+    예외), `Step.Schedule.schedule/2`가 그 자리에서 멈춰(뒤의 동기 시스템 태스크는 시작하지 않고, 배치의 어떤 태스크도 큐에 넣지 않음) `{:terminate, termination, state}`를
     돌려준다. 결정 루프, `DO_WHILE`의 다음 반복, retry, rerun(그 태스크 하나의 ID)이 이것으로 워크플로우를 끝낸다(`FAILED`, 남은
     태스크 `CANCELED`). `p7_jq_not_string_get`과 같다. upstream의 retry·rerun은 그 예외가 요청 밖으로 나가지만, archon은 결정 루프와
     같게 워크플로우를 끝낸다(픽스처 없음). upstream `scheduleTask`처럼 동기 시스템 태스크를 먼저 모두 시작하고 나머지를 큐에 넣거나
