@@ -143,7 +143,10 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   (upstream은 대상이 시스템 타입이어도 정의를 요구한다). 태스크의 `taskType`은 풀린 이름이고 상태는 `SCHEDULED`다. 그래서 대상이
   시스템 태스크 표의 타입이면 그 타입의 실행 경로를 탄다. upstream 매퍼는 정의의 `WorkflowTask`에 `setName`·`setTaskDefinition`을
   하고, `DeciderService`가 정의 객체를 복사하지 않고 넘기므로 저장되는 `workflowDefinition`에 보일 수 있다. 7a 캡처의
-  `workflowDefinition`으로 확인해, 보이면 맞추고(`Outcome`으로 바뀐 정의를 돌려줌) 아니면 그대로 둔다. `ignore`로 덮지 않는다.
+  `workflowDefinition`으로 확인해, 보이면 맞추고 아니면 그대로 둔다. `ignore`로 덮지 않는다. 맞춰야 하면 Decider 계약(`Outcome`의
+  바뀐 정의 필드와 `Step.Decide`의 반영)은 캡처를 한 7a가 만들고, 7c·7g는 자기 매퍼에서 그 필드만 채운다. 이와 별개로 DYNAMIC
+  태스크 자신의 `workflowTask`에는 upstream처럼(`setName`·`setTaskDefinition` 뒤 `createTaskModel`) 풀린 이름과 태스크 정의를 넣는다.
+  같은 태스크의 재시도·시간 초과가 이 정의를 쓴다.
 - **FORK_JOIN_DYNAMIC.** 세 입력 형태를 upstream 순서로 시도한다.
   1. `forkTaskInputs`가 목록이면 간단 형태(`forkTaskName`, `forkTaskType`(기본 SIMPLE), `forkTaskWorkflow`·`forkTaskWorkflowVersion`이면
      SUB_WORKFLOW 가지, ref는 `_<name>_<i>` 또는 이미 동적 포크가 있으면 `_<부모 ref>_<name>_<i>`, 입력에 `__index`).
@@ -228,10 +231,14 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   archon은 시스템 태스크 표에 "시작 멱등" 성질을 두어 같게 한다.
   - START_WORKFLOW: archon에서는 멱등이다(아래, ID를 태스크로 정함). 그래서 SUB_WORKFLOW처럼 시작했는데 결과가 없는 태스크를
     복구(`Step.Recover`)가 바로 다시 시작한다. upstream은 START_WORKFLOW를 멱등으로 보지 않으므로 의도적 차이다.
-  - HTTP: 멱등이 아니다. 시작한 태스크(`SCHEDULED`, `pollCount` > 0, `startTime` > 0)는 결과가 오기 전까지 다시 시작하지 않는다.
+  - HTTP: 멱등이 아니다. 시작한 태스크(`SCHEDULED`, `pollCount` > 0. `startTime`은 예약 때 이미 찍히므로 구분에 쓰지 않는다)는 결과가
+    오기 전까지 다시 시작하지 않는다.
     워크플로우 프로세스는 진행 중인 요청의 태스크 ID 집합을 상태에 두고, `:wake`나 다른 이벤트로 `Step.Async`가 평가할 때 그 태스크를
     시작하지 않는다. 프로세스가 결과 전에 죽어 집합을 잃었으면, 복구는 그 태스크를 다시 보내지 않고 `startTime` +
-    `responseTimeoutSeconds`에 `TIMED_OUT`으로 둔다(upstream과 같음). 그 뒤 재시도는 보통의 태스크 재시도 규칙이다.
+    `responseTimeoutSeconds`에 `TIMED_OUT`으로 둔다(upstream과 같음). 살아 있는 프로세스에서 진행 중인 요청(실행기 대기열에서
+    기다리는 것 포함)도 같은 마감에 `TIMED_OUT`으로 두고, 그 뒤 온 결과는 다른 시도가 아니어도 태스크가 끝났으므로 버린다(upstream도
+    예약이 끝나면 `TIMED_OUT`이다). 마감은 `startTime`이 아니라 시작 커밋 시각부터 잰다(조각 7f가 저장할 값을 정한다). 그 뒤 재시도는
+    보통의 태스크 재시도 규칙이다.
   - 재평가 시각(`Step.Postpone`)은 진행 중인 HTTP 태스크의 위 마감이다.
 - **결과(7f·7g).** 결과는 이벤트로 돌아와 그 태스크가 아직 같은 시도(`SCHEDULED`, 같은 `pollCount`)일 때만 반영한다. 이미
   끝났거나(종료로 `CANCELED`, 위 `TIMED_OUT` 등) 다른 시도면 버린다. 태스크가 끝나면(또는 `asyncComplete`로 `IN_PROGRESS`가 되면) 그
@@ -242,8 +249,11 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   `{:start_workflow, task_id, start}`를 올린다. 커밋 뒤 `Effects.run`이 `Runtime.start_workflow_idempotent/1`로 시작하고 결과를 이벤트
   `{:workflow_started, task_id, result}`로 되먹인다(하위 워크플로우와 같은 경로). 되먹임은 같은 메시지 처리 안이라 그 사이 다른
   시도가 끼지 않으므로 이벤트에 `pollCount`를 싣지 않는다. 새 워크플로우 ID는 `child_id/2`와 같은 방식의 해시
-  (`startworkflow:<워크플로우 ID>:<태스크 ID>:<재시도 횟수>`)라 효과가 다시 돌아도 하나만 생긴다. `start_workflow_idempotent`가 이미
-  있는 워크플로우를 돌려주면 `triggeringWorkflowId`가 이 워크플로우인지 확인하고, 아니면 `FAILED`다(ADR 0024 결정 2와 같은 취지).
+  (`startworkflow:<워크플로우 ID>:<태스크 ID>:<재시도 횟수>`)라 효과가 다시 돌아도 하나만 생긴다. 이미 있는 워크플로우를 돌려받아도
+  소유권은 확인하지 않는다. upstream·archon 모두 `triggeringWorkflowId`를 워크플로우에 저장하지 않아 비교할 값이 없고, 그 ID는
+  `startworkflow:` 접두의 해시이며 시작 REST는 호출자가 ID를 정하게 하지 않으므로(ADR 0024 결정 4) 다른 호출자가 같은 ID를 먼저
+  만들 수 없다. 요청의 `idempotencyKey`·`idempotencyStrategy`는 기존 시작 규칙대로 넘긴다. 같은 태스크의 재실행은 고정 ID가 먼저
+  막고, 키가 같은 다른 워크플로우와의 관계는 그 전략(`FAIL`, `RETURN_EXISTING`)이 정한다.
   `taskToDomain`·`correlationId` 기본값은 시작한 워크플로우의 것이고, `triggeringWorkflowId`만 적고 부모 필드는 넣지 않는다(upstream처럼
   따로 도는 워크플로우). 성공은 출력 `workflowId`, `COMPLETED`. 일시적 오류(`{:error, {:exit, _}}` 등)는 태스크를 `SCHEDULED`로 두고 다시
   시도하며, 그 밖의 오류는 메시지로 `FAILED`다. 검증 위반이 여럿이면 upstream은 Java `Set` 순서로 잇는다. archon은 경로 순으로
@@ -321,9 +331,9 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
 
 | 조각 | 범위 | 시험·정답 기준 | 선행 | 건드리는 파일·모듈 |
 |---|---|---|---|---|
-| 7a | 결정 2의 두 표와 behaviour, 주입 함수 셋과 설정 자리, 타입 제약의 태스크 정의 조회 연결, 결정 8의 캡처 전부·HTTP stub·`types:` 건너뛰기 | 기존 시험·재생 전부 그대로 통과(동작 무변경), 기존 픽스처 재캡처 비교, 건너뛰기를 뺀 전체 재생 | Phase 6 조각 6h 머지(같은 재생 장치·픽스처 등록·재캡처를 고친다) | `lib/archon/decider.ex`, `lib/archon/decider/{system_tasks,system_task,mapper,retry,context}.ex`, `lib/archon/decider/system_task/*`, `lib/archon/runtime/step/{schedule,async,postpone,recover,lifecycle,decide,env}.ex`, `lib/archon/runtime/tasks.ex`, `lib/archon/domain/{workflow_task,workflow_def,start_workflow_request,task_type_constraint}.ex`(조회 옵션), `lib/archon/metadata.ex`, `lib/archon/runtime.ex`(시작 검증의 조회), `config/config.exs`, `test/support/step_replay.ex`, `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`, `test/fixtures/contract/README.md`, `test/support/contract.ex`, `test/support/archon_web/contract_case.ex`, `test/support/http_stub.ex`, `test/archon/contract_test.exs`, `test/archon/domain/contract_round_trip_test.exs` |
+| 7a | 결정 2의 두 표와 behaviour, 주입 함수 셋과 설정 자리, 타입 제약의 태스크 정의 조회 연결, 결정 8의 캡처 전부·HTTP stub·`types:` 건너뛰기, 캡처에서 정의 변경이 보이면 Decider 계약(결정 4) | 기존 시험·재생 전부 그대로 통과(동작 무변경), 기존 픽스처 재캡처 비교, 건너뛰기를 뺀 전체 재생 | Phase 6 조각 6h 머지(같은 재생 장치·픽스처 등록·재캡처를 고친다) | `lib/archon/decider.ex`, `lib/archon/decider/{system_tasks,system_task,mapper,retry,context,outcome}.ex`, `lib/archon/decider/system_task/*`, `lib/archon/runtime/step/{schedule,async,postpone,recover,lifecycle,decide,env}.ex`, `lib/archon/runtime/tasks.ex`, `lib/archon/domain/{workflow_task,workflow_def,start_workflow_request,task_type_constraint}.ex`(조회 옵션), `lib/archon/metadata.ex`, `lib/archon/runtime.ex`(시작 검증의 조회), `config/config.exs`, `test/support/step_replay.ex`, `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`, `test/fixtures/contract/README.md`, `test/support/contract.ex`, `test/support/archon_web/contract_case.ex`, `test/support/http_stub.ex`, `test/archon/contract_test.exs`, `test/archon/domain/contract_round_trip_test.exs` |
 | 7b | 결정 3: TERMINATE, SET_VARIABLE, NOOP, HUMAN, EXCLUSIVE_JOIN | upstream `TestDeciderService`·`TerminateTest`·`SetVariableTest`·`ExclusiveJoinTest` 등에서 옮긴 사례, FORK 가지 끝 SET_VARIABLE의 저장 시험, StepReplay, 픽스처 재생 | 7a | `lib/archon/decider/mapper/{terminate,set_variable,noop,human,exclusive_join}.ex`, `lib/archon/decider/system_task/{terminate,set_variable,noop,human,exclusive_join}.ex`, 두 표의 자기 줄, 해당 시험 |
-| 7c | 결정 4: DYNAMIC, FORK_JOIN_DYNAMIC, rerun의 동적 포크 분기, 정의 변경 확인 | `DynamicTaskMapperTest`·`ForkJoinDynamicTaskMapperTest`에서 옮긴 사례, 동적 가지 rerun·retry 시험과 갱신이 늘 결정하는 회귀 시험(두 백엔드), 픽스처 재생 | 7a | `lib/archon/decider/mapper/{dynamic,fork_join_dynamic}.ex`, `lib/archon/decider/mapper/fork_join.ex`(공용 함수 꺼내기), `lib/archon/runtime/step/lifecycle.ex`(rerun 분기), 매퍼 표의 자기 줄, 해당 시험 |
+| 7c | 결정 4: DYNAMIC, FORK_JOIN_DYNAMIC, rerun의 동적 포크 분기, SUB_WORKFLOW 매퍼의 `workflow_def_lookup` 사용 | `DynamicTaskMapperTest`·`ForkJoinDynamicTaskMapperTest`에서 옮긴 사례, 동적 가지 rerun·retry 시험과 갱신이 늘 결정하는 회귀 시험(두 백엔드), 픽스처 재생 | 7a | `lib/archon/decider/mapper/{dynamic,fork_join_dynamic}.ex`, `lib/archon/decider/mapper/fork_join.ex`(공용 함수 꺼내기), `lib/archon/decider/mapper/sub_workflow.ex`(`latest_workflow_versions`에 없는 이름의 조회), `lib/archon/runtime/step/lifecycle.ex`(rerun 분기), 매퍼 표의 자기 줄, 해당 시험 |
 | 7d | 결정 5: INLINE, LAMBDA | GraalJS 오라클 비교, `InlineTest`·`LambdaTest` 사례, 픽스처 재생 | 7a | `lib/archon/decider/mapper/{inline,lambda}.ex`, `lib/archon/decider/system_task/{inline,lambda}.ex`, 두 표의 자기 줄, 해당 시험 |
 | 7e | 결정 6: jq vendoring, `archon_jq`, 풀 일반화와 `Archon.Jq.Pool`, JSON_JQ_TRANSFORM, 그 타입 제약 | jackson-jq 프로브 비교, `JsonJqTransformTest` 사례, 격리 시험(`$ENV`, `import`, 시간·출력 상한), 픽스처 재생 | 7a | `c_src/jq/*`, `c_src/archon_jq/*`, `Makefile`, `NOTICE`, `.github/workflows/ci.yml`(sanitize 빌드), `config/*.exs`, `lib/archon/script/{pool,worker}.ex`, `lib/archon/jq.ex`, `lib/archon/application.ex`, `lib/archon/decider/mapper/json_jq_transform.ex`, `lib/archon/decider/system_task/json_jq_transform.ex`, `lib/archon/domain/task_type_constraint.ex`(JQ 규칙 절), 두 표의 자기 줄, 해당 시험 |
 | 7f | 결정 7의 공통 비동기 경로(시작 멱등 성질, 결과 이벤트와 시도 확인, 복구·재평가 시각)와 START_WORKFLOW | 비동기 시작·결과 버림·복구 재시작 시험(두 백엔드), `StartWorkflowTest` 사례, 픽스처 재생 | 7a | `lib/archon/runtime/step/{async,event,effect,recover,postpone,start_workflow}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/effects.ex`, `lib/archon/runtime/workflow_server.ex`, `lib/archon/decider/mapper/start_workflow.ex`, 두 표의 자기 줄, 해당 시험 |
