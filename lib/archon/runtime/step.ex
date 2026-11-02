@@ -34,7 +34,8 @@ defmodule Archon.Runtime.Step do
     * `{:update, ...}` - the saved task (`nil` for `extendLease`), or `{:error, :not_found}`.
     * `{:terminate, reason}` - `:ok` or `{:error, :conflict}` for a `COMPLETED` workflow.
     * `:pause`, `:resume`, `{:retry, push_parents?}`, `{:restart, definition}`,
-      `{:skip_task, ref}`, `:reset_callbacks` - `:ok` or `{:error, {kind, message}}`
+      `{:skip_task, ref}`, `:reset_callbacks`, `{:rerun, request}`, `{:rerun_parent, request}` - `:ok`
+      or `{:error, {kind, message}}`
       (`Archon.Runtime.Step.Lifecycle`).
     * any other event - `:ok`.
 
@@ -171,6 +172,9 @@ defmodule Archon.Runtime.Step do
 
   defp handle({:skip_task, ref}, state), do: Lifecycle.skip_task(state, ref)
   defp handle(:reset_callbacks, state), do: Lifecycle.reset_callbacks(state)
+  defp handle({:rerun, request}, state), do: Lifecycle.rerun(state, request)
+
+  defp handle({:rerun_parent, request}, state), do: Lifecycle.rerun_parent(state, request)
 
   # What AsyncSystemTaskExecutor does after SubWorkflow#start returned.
   defp sub_workflow_started(state, task, result) do

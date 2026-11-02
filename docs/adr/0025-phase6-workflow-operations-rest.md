@@ -14,6 +14,7 @@
 - 갱신: 2026-11-02 조각 6e. 결정 5 끝 "조각 6e가 정한 것"에 구현에서 정한 세부(모르는 자식, 응답 없음의 문구, 대기의
   30초 상한, 변환 실패 문구, `ArchonWeb.Request` 보충)를 적었다.
 - 갱신: 2026-11-02 조각 6d. 구현하며 정한 것과 결정 3의 기술을 바로잡은 것을 결정 3 끝 "조각 6d에서 정한 것"에 적었다.
+- 갱신: 2026-11-02 조각 6f. rerun의 실행 순서와 세부를 결정 2의 rerun 끝 "조각 6f에서 정한 것"에 적었다.
 
 ## 맥락
 
@@ -149,6 +150,31 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
        캡처한 픽스처(결정 7의 캡처 목록)에서 가져온다.
        자식이 아직 `FAILED`일 때 위가 결정하지 않도록 2의 답(자식 커밋과 결정 저장)을 받은 뒤에 3을 보낸다.
   - 같은 ID를 돌려준다. 동적 FORK(`FORK_JOIN_DYNAMIC`)는 MVP 태스크 타입이 아니므로(ADR 0003 결정 4) 그 분기는 옮기지 않는다.
+  - **조각 6f에서 정한 것(2026-11-02).** 결정 7 끝의 캡처(재시도된 자식 안의 rerun 뒤 중간 `FAILED`, 첫 자식 `TERMINATED`, 최상위
+    `RUNNING`)에 맞춘 설계다.
+    - **아래의 outbox를 기다린 뒤 위로.** upstream은 재귀 안에서 아래 워크플로우의 rerun, 그 부모 되살림, 그 결정(중간이 두 번째
+      시도의 `FAILED`로 다시 끝나고 첫 자식을 끝냄)을 모두 동기로 마친 뒤 위 워크플로우를 쓴다. archon에서는 그 알림·되살림이
+      아래 워크플로우의 outbox로 가므로, `Lifecycle.rerun`은 경우 3 메시지를 보내기 전에 바로 아래 워크플로우의 outbox가 빌
+      때까지 100ms(`rerun_retry_ms`)마다 본다. 마감(`rerun_timeout`, 10초)이 지나면 로그를 남기고 진행한다. 그러지 않으면 중간의
+      `FAILED` 알림이 최상위의 경우 3 뒤에 닿아 최상위가 바로 `FAILED`가 된다. 최상위의 SUB_WORKFLOW 태스크는 upstream처럼 다음
+      평가(`:wake`)에서 자식의 `FAILED`를 읽는다. 위 3의 "응답 때 경로의 워크플로우는 모두 `RUNNING`"은 이 경우 중간이 다시
+      `FAILED`라서 성립하지 않는다(upstream과 같음).
+    - **경우 3의 `lastRetriedTime`.** upstream은 재귀 전에 읽은 워크플로우를 경우 3에서 저장하므로, 아래의 되살림이 찍은
+      `lastRetriedTime`을 읽은 값(보통 0)으로 덮는다. 경우 3 메시지는 `Lifecycle`이 읽기 단계에서 본 값을 싣고 그 값으로
+      저장한다(`workflow_get_rerun_child_parent`, `workflow_get_rerun_top`).
+    - **경우 2의 자식 시작.** upstream은 `SubWorkflow#start`를 바로 부르므로 시스템 태스크 실행기의 `pollCount` 증가와
+      `startTime`이 없다. 규칙도 시작 효과를 바로 내고(`SubWorkflow.start`), 결과는 `{:sub_workflow_started, ...}`로 돌아온다.
+      태스크 ID와 재시도 횟수가 같아 결정적 자식 ID가 끝난 이전 자식과 같으면, 기존 경로(`SubWorkflow.started`)가 새 ID로 다시
+      시작한다(캡처의 새 자식 ID도 무작위 UUID다).
+    - **경우 1의 동기 시스템 태스크.** MVP 동기 시스템 태스크(`SWITCH`·`DECISION`·`FORK`·`DO_WHILE`)는 upstream `start`가 아무것도
+      하지 않으므로 `SCHEDULED`로 두고 큐에 넣지 않는다(upstream과 같음).
+    - **부모가 취소한 자식의 알림.** 끝나는 부모가 SUB_WORKFLOW 태스크를 `CANCELED`로 하고 자식을 끝내면, 자식의 종료 알림이 그
+      태스크에 사유를 쓰지 않는다(`Step.SubWorkflow.child_changed`). upstream `cancelNonTerminalTasks`는 자식 종료가 태스크를 갱신한
+      뒤 자기가 든 `CANCELED` 태스크를 다시 저장한다(`workflow_get_rerun_mid`). Phase 4의 모든 "부모가 자식을 취소" 경로에 적용된다.
+    - **읽기 검증의 404.** 내려가다 만난 자식이 저장소에 없거나 그 태스크의 자식이 아니면(ADR 0024 결정 2) 404
+      `"No such workflow found by id: <자식 ID>"`다. ID가 없으면 `null`이다(upstream `getWorkflowModel(null)`).
+    - **교차 출처.** rerun은 필수 JSON body를 읽으므로 결정 3의 `refuse_cross_origin`에 넣지 않는다. 폼·`text/plain`은 Content-Type
+      검사가 막고, body 없는 요청은 빈 body 500이다.
 - **skiptask(새 기능).** upstream `skipTaskFromWorkflow`다. `RUNNING`이 아니면, 정의에 그 ref가 없으면, 이미 그 ref의 태스크가
   있으면 각각 upstream 문구의 `:invalid_state`(500)다. 통과하면 `SKIPPED` 태스크(`taskType`은 정의 태스크의 `name`, 새 ID,
   `endTime`이 지금, `correlationId`와 `workflowPriority`는 워크플로우에서 복사)를 더하고 결정한다. 픽스처는 correlationId와 0이 아닌
