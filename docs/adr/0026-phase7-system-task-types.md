@@ -36,7 +36,7 @@ upstream에서 각 타입이 사는 곳과 실행 방식은 다음과 같다(`co
 | JSON_JQ_TRANSFORM | `JsonJQTransformTaskMapper` 77 + `JsonJqTransform` 160 | 동기 | `IN_PROGRESS` | `start`(예약 때) |
 | HTTP | `HTTPTaskMapper` 99 + `HttpTask` 424 | 비동기 | `SCHEDULED` | `start`(나가는 요청) |
 
-archon에 이미 있는 것(`abdc3f0` 기준):
+archon에 이미 있는 것(`e2f73b7` 기준, Phase 6 조각 6f 머지 뒤):
 
 - `Archon.Decider.SystemTasks`(등록부, `isAsyncComplete` 규칙), `Archon.Decider.SystemTask.execute/3`(동기 실행),
   `Archon.Runtime.Step.Decide.execute_sync`(결정 루프의 동기 실행 반복), `Archon.Runtime.Step.Async`(비동기 태스크 평가).
@@ -50,7 +50,8 @@ archon에 이미 있는 것(`abdc3f0` 기준):
 - 타입 제약: `Archon.Domain.TaskTypeConstraint`가 DYNAMIC, FORK_JOIN_DYNAMIC, TERMINATE 규칙을 이미 갖는다. HTTP·JSON_JQ_TRANSFORM
   규칙은 태스크 정의 조회가 필요해 미뤘다([ADR 0014](0014-phase2-decider.md) 결정 7).
 - 하위 워크플로우 시작 경로: `Step.SubWorkflow.start/2`가 효과 `{:start_sub_workflow, task_id, start}`를 올리고, 커밋 뒤
-  `Effects.run`이 `Runtime.start_workflow_idempotent/1`을 불러 결과를 이벤트 `{:sub_workflow_started, ...}`로 되먹인다.
+  `Effects.run`이 `SubWorkflows.start_child/1`(안에서 `Runtime.start_workflow_idempotent/1`과 소유권 확인)을 불러 결과를 이벤트
+  `{:sub_workflow_started, ...}`로 되먹인다. 되먹임은 같은 메시지 처리 안에서 다시 결정한다(`WorkflowServer.feed_back`).
   자식 ID는 `Step.SubWorkflow.child_id/2`(부모 ID·태스크 ID·재시도 횟수의 해시)라 다시 시도해도 같은 자식이다.
 - HTTP 클라이언트 의존성은 없다(`mix.lock`에 Req·Finch·Mint·hackney 없음).
 
@@ -73,28 +74,45 @@ archon에 이미 있는 것(`abdc3f0` 기준):
 
 ### 2. 시스템 태스크 등록부를 하나로 모은다(조각 7a)
 
-새 타입을 더할 때마다 여섯 파일의 타입 목록을 고치지 않도록, 타입별 성질을 `Archon.Decider.SystemTasks` 한 곳에 둔다.
+새 타입을 더할 때마다 여러 파일의 타입 목록을 고치지 않도록, 타입별 성질을 두 표로 모은다. 키 공간이 다르기 때문이다.
+매퍼는 정의의 `WorkflowTask.type`(FORK_JOIN, DYNAMIC, FORK_JOIN_DYNAMIC 등)으로 찾고, 시스템 태스크는 만들어진 `Task.taskType`(FORK,
+DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FORK_JOIN_DYNAMIC은 매퍼만 있고 시스템 태스크 등록부에 없다.
 
-- 등록부 항목은 타입마다 다음을 갖는다: 매퍼 모듈, 실행 모듈(없으면 매퍼만), `async?`(upstream `isAsync`), `isAsyncComplete`
-  규칙(지금의 `:by_task`·고정 값), 재시도하지 않는 내장 타입 여부(`Retry`의 `@built_in`, upstream `TaskType.isBuiltIn`),
-  제자리 재평가 여부(`Step.Lifecycle`의 `@in_place`).
-- `Mapper.module_for/1`, `Step.Schedule`의 `@async`, `Step.Async`의 타입별 분기, `Step.Postpone`, `Step.Recover`, `Step.Lifecycle`,
-  `Runtime.Tasks`, `Retry`가 타입 이름 대신 등록부를 읽는다. 동작은 바뀌지 않는다(기존 시험·재생이 그대로 통과).
-- 동기 실행은 behaviour `Archon.Decider.SystemTask`로 묶는다.
-  - `start(workflow, task, context) :: task` (선택. upstream `start`. 예약 직후 한 번. JSON_JQ_TRANSFORM이 쓴다)
-  - `execute(workflow, task, context) :: {changed?, task} | {changed?, task, workflow}` (upstream `execute`. 결과 워크플로우는
-    SET_VARIABLE의 `variables`처럼 태스크 밖을 바꾸는 타입만 돌려준다)
-  - 지금의 `SystemTask.execute/3`(`now`만 받음)와 DO_WHILE의 별도 분기(`decide.ex`)를 이 behaviour로 옮긴다. `context`는
-    `Decider.Context`이고 `now`·`evaluate_script` 등을 담는다.
-- `Step.Decide.execute_sync`는 등록부에서 실행 모듈을 찾아 부르고, 세 원소 결과면 워크플로우 상태를 바꾼다.
-- `Decider.Context`에 주입 함수 둘을 더한다. 7a가 필드·`Step.Env` 연결·기본값을 만들고 7c·7e가 쓴다.
-  - `task_def_lookup :: (name -> TaskDef.t() | nil)`: `task_defs`에 없는 이름을 읽는다. DYNAMIC·FORK_JOIN_DYNAMIC은 입력을 풀어야
-    태스크 이름을 알 수 있어 `WorkflowServer`가 미리 읽을 수 없다. 기본값은 `Runtime.metadata().get_task_def/1`이다.
-    같은 이유로 `latest_workflow_version_lookup :: (name -> integer | nil)`도 더한다(FORK_JOIN_DYNAMIC의 `forkTaskWorkflow`).
-  - `evaluate_jq :: (query, input -> {:ok, [value]} | {:error, message})`: 기본값은 결정 6의 풀을 부른다. 7e 전까지는 7a가 둔
-    "평가기 없음" 오류를 돌려준다(JSON_JQ_TRANSFORM이 등록되기 전이라 불리지 않는다).
-  - 둘 다 ADR 0015 결정 3이 둔 "주입 함수 호출은 허용"의 예외에 든다. 영속 상태를 바꾸지 않는 읽기·계산이다. 조회 결과는
-    한 결정 안에서 바뀌지 않게 첫 조회 값을 결정 끝까지 쓴다.
+- **매퍼 표**(`Archon.Decider.Mapper`): 워크플로우 태스크 타입 → 매퍼 모듈. 없는 타입은 지금처럼 `UserDefined`다.
+- **시스템 태스크 표**(`Archon.Decider.SystemTasks`): 태스크 타입 → 실행 모듈, `async?`(upstream `isAsync`), `isAsyncComplete`
+  규칙(지금의 `:by_task`·고정 값), 재시도하지 않는 내장 타입 여부(`Retry`의 `@built_in`, upstream `TaskType.isBuiltIn`), 제자리
+  재평가 여부(`Step.Lifecycle`의 `@in_place`), 비동기 시작이 멱등인지(결정 7). `system_task?/2`는 이 표에 있는지다. 그래서 7c가
+  DYNAMIC·FORK_JOIN_DYNAMIC을 매퍼 표에만 넣으면 시스템 태스크로 판정되지 않는다.
+- `Decider`(`Mapper.module_for/1` 호출), `Step.Schedule`의 `@async`, `Step.Async`의 타입별 분기, `Step.Postpone`, `Step.Recover`,
+  `Step.Lifecycle`, `Runtime.Tasks`, `Retry`가 타입 이름 대신 두 표를 읽는다. 동작은 바뀌지 않는다(기존 시험·재생이 그대로 통과).
+- **동기 실행 behaviour** `Archon.Decider.SystemTask`:
+  - `start(workflow, task, context) :: Result.t()` (선택. upstream `start`. `Step.Schedule`이 동기 시스템 태스크를 예약한 직후 한 번
+    부른다. 지금의 "동기 타입에는 start가 없다"는 전제를 바꾼다. JSON_JQ_TRANSFORM·HUMAN이 쓴다)
+  - `execute(workflow, task, context) :: Result.t()` (upstream `execute`)
+  - `Result`는 `%{changed?: boolean, task: Task.t(), workflow: Workflow.t() | nil}`다. `changed?`는 upstream `execute`의 반환값이다.
+    upstream은 `false`를 돌려주면서 태스크를 바꾸는 경우가 있다(TERMINATE의 잘못된 상태: `FAILED`로 바꾸고 `false`). archon은
+    `changed?`와 상관없이 바뀐 태스크를 상태에 넣는다. 저장은 upstream처럼 `true`일 때만 갱신 목록에 들어간다(결과 상태는 같은
+    결정의 다른 저장이나 다음 결정에서 저장된다. 7b가 이 경우를 시험으로 정한다).
+  - `workflow`는 SET_VARIABLE처럼 태스크 밖(`variables`)을 바꾸는 타입만 채운다. `Step.Decide`는 이것을 받으면 워크플로우 상태를
+    바꾸고 그 결정이 끝날 때 `State.save_workflow`를 반드시 부른다(지금 `loop`로 가면 저장하지 않는 경로가 있다). upstream
+    `SetVariable`이 `updateWorkflow`를 직접 부르는 것과 같은 결과다.
+  - 지금의 `SystemTask.execute/3`(`now`만 받음)은 이 behaviour로 옮긴다. DO_WHILE은 다음 반복 예약·지울 ID·종료를 돌려주므로
+    `decide.ex`의 별도 분기를 그대로 둔다. `context`는 `Decider.Context`이고 `now`·`evaluate_script` 등을 담는다.
+- **`Decider.Context`의 주입 함수 셋.** 7a가 필드·`Step.Env` 연결·기본값·`Archon.StepReplay`의 고정 함수(픽스처의 정의에서 만든
+  표)를 만들고 7c·7e가 쓴다.
+  - `task_def_lookup :: (name -> {:ok, TaskDef.t()} | {:error, :not_found})`: `task_defs`에 없는 이름을 읽는다. DYNAMIC·FORK_JOIN_DYNAMIC은
+    입력을 풀어야 태스크 이름을 알 수 있어 `WorkflowServer`가 미리 읽을 수 없다. 기본값은 `Runtime.metadata().get_task_def/1`이다.
+  - `workflow_def_lookup :: (name, version | nil -> {:ok, WorkflowDef.t()} | {:error, :not_found})`: FORK_JOIN_DYNAMIC 간단 형태의
+    `forkTaskWorkflow`처럼 미리 알 수 없는 하위 워크플로우 이름의 최신 버전을 읽는다.
+  - `evaluate_jq :: (query, input -> {:ok, [value]} | {:error, Archon.Script.Error.t()})`: 기본값은 결정 6의 풀을 부른다. 7e 전까지는
+    7a가 둔 "평가기 없음" 오류를 돌려준다(JSON_JQ_TRANSFORM이 등록되기 전이라 불리지 않는다).
+  - 조회 둘은 upstream 매퍼가 `MetadataDAO`를 읽는 그 자리의 읽기다. upstream처럼 한 결정 안에서 기억하지 않는다(정의를 동시에
+    등록하면 upstream과 같이 결정마다 다른 값을 볼 수 있다). 이는 [ADR 0014](0014-phase2-decider.md) 결정 2("`task_defs`는 호출자가
+    미리 채운다")와 [ADR 0015](0015-script-evaluator.md) 결정 3의 예외("계산 요청")를 "metadata 읽기"까지 넓힌다. 결과 절에 적는다.
+- **설정.** 7b가 쓸 `max_workflow_variables_payload_kb`(결정 3)와 7e·7g의 설정 키를 읽어 `Context`에 넣는 자리도 7a가 만든다.
+- **타입 제약의 태스크 정의 조회.** `TaskTypeConstraint.errors/1`은 `WorkflowTask.errors/1`에서 불리고 `WorkflowDef.validate`와
+  `StartWorkflowRequest.validate`(시작 REST의 내장 정의)를 거친다. 7a가 이 사슬에 태스크 정의 조회 옵션을 넘기는 연결(정의 등록
+  `Archon.Metadata`, 시작 경로)을 만든다. 7e·7g는 `TaskTypeConstraint`에 자기 규칙 절만 더한다.
 
 ### 3. 엔진이 필요 없는 동기 타입(조각 7b)
 
@@ -102,19 +120,20 @@ archon에 이미 있는 것(`abdc3f0` 기준):
 
 - **TERMINATE.** 매퍼는 `IN_PROGRESS`, 입력은 `getTaskInputV2`(태스크 정의 없음). 실행은 `terminationStatus`가 `COMPLETED`·`FAILED`·
   `TERMINATED`면 출력에 `workflowOutput`(맵이면 그대로, 다른 값이면 `{"output": 값}`, 없으면 빈 맵)을 넣고 `COMPLETED`, 아니면
-  `"given termination status is not valid"`로 `FAILED`다. 워크플로우 쪽(`end_execution`, 출력 덮어쓰기, 남은 태스크 `CANCELED`,
+  `"given termination status is not valid"`로 `FAILED`(upstream 반환 `false`, 결정 2)다. 워크플로우 쪽(`end_execution`, 출력 덮어쓰기, 남은 태스크 `CANCELED`,
   실패 워크플로우)은 이미 있는 경로를 쓴다.
 - **SET_VARIABLE.** 입력의 모든 키를 `workflow.variables`에 넣는다. 크기는 upstream처럼 JSON으로 직렬화한 바이트 수를
   `max_workflow_variables_payload_kb`(기본 256, `config :archon, Archon.Runtime`)와 비교한다. 넘으면 바꾸기 전 값으로 되돌리고
   `FAILED_WITH_TERMINAL_ERROR`, 문구 `"The variables payload size: <n> of workflow: <id> is greater than the permissible limit:
-  <k> kilobytes"`다. 출력은 없다. 바뀐 `variables`는 그 결정의 커밋에 함께 저장된다.
+  <k> kilobytes"`다. 출력은 없다. 바뀐 `variables`는 결정 2의 `workflow` 결과로 그 결정의 커밋에 저장된다.
 - **NOOP.** 바로 `COMPLETED`.
-- **HUMAN.** `IN_PROGRESS`로 남고 `POST /api/tasks`·`update-v2`·ref 갱신·signal이 끝낸다. 취소는 `CANCELED`. upstream의
+- **HUMAN.** `start`가 `IN_PROGRESS`로 두고(DYNAMIC이 HUMAN을 `SCHEDULED`로 만들 때 필요), 그대로 남아 `POST /api/tasks`·`update-v2`·ref 갱신·signal이 끝낸다. 취소는 `CANCELED`. upstream의
   `humanTaskPreventsDeciderQueue`는 결정 큐가 없는 archon에 대응이 없다(워크플로우 프로세스는 이벤트가 올 때만 결정한다).
-- **EXCLUSIVE_JOIN.** 입력 `{joinOn, defaultExclusiveJoinTask?}`. 결정마다 `joinOn`을 차례로 보고(반복 안에서는 `__<iteration>` 접미사)
-  처음 찾은 태스크로 판정한다. 없거나 `SKIPPED`면 다음, 찾은 것이 끝났으면 성공 시 그 출력으로 `COMPLETED`, 실패 시 실패한
-  `joinOn` 태스크들의 `reasonForIncompletion`을 공백으로 이어 `FAILED`다. 아무것도 못 찾으면 `defaultExclusiveJoinTask`로 같은 판정을
-  한다. 내장 타입이라 재시도하지 않는다.
+- **EXCLUSIVE_JOIN.** 입력 `{joinOn, defaultExclusiveJoinTask?}`. 결정마다 `ExclusiveJoin.execute`를 옮긴 판정을 한다: `joinOn`을
+  차례로 보고(반복 안에서는 `__<iteration>` 접미사) 없거나 `SKIPPED`인 것은 건너뛰고 처음 찾은 태스크에서 멈춘다. 그것이 끝나지
+  않았으면 `defaultExclusiveJoinTask` 쪽 판정으로 넘어가고, 끝났으면 성공 시 그 출력으로 `COMPLETED`, 실패 시 `reasonForIncompletion`으로
+  `FAILED`다. 세부(실패 이유를 잇는 공백, permissive 판정)는 이 요약이 아니라 upstream 코드가 기준이다. 내장 타입이라 재시도하지
+  않는다.
 
 ### 4. 매퍼 확장: DYNAMIC, FORK_JOIN_DYNAMIC(조각 7c)
 
@@ -122,7 +141,9 @@ archon에 이미 있는 것(`abdc3f0` 기준):
   `"Cannot map a dynamic task based on the parameter and input. Parameter= <p>, input= <input>"`로 종료한다. 태스크 정의는 내장 정의,
   없으면 `task_def_lookup`이고, 없으면 `"Invalid task specified.  Cannot find task by name <name> in the task definitions"`로 종료한다
   (upstream은 대상이 시스템 타입이어도 정의를 요구한다). 태스크의 `taskType`은 풀린 이름이고 상태는 `SCHEDULED`다. 그래서 대상이
-  등록부의 타입이면 그 타입의 실행 경로를 탄다.
+  시스템 태스크 표의 타입이면 그 타입의 실행 경로를 탄다. upstream 매퍼는 정의의 `WorkflowTask`에 `setName`·`setTaskDefinition`을
+  하고, `DeciderService`가 정의 객체를 복사하지 않고 넘기므로 저장되는 `workflowDefinition`에 보일 수 있다. 7a 캡처의
+  `workflowDefinition`으로 확인해, 보이면 맞추고(`Outcome`으로 바뀐 정의를 돌려줌) 아니면 그대로 둔다. `ignore`로 덮지 않는다.
 - **FORK_JOIN_DYNAMIC.** 세 입력 형태를 upstream 순서로 시도한다.
   1. `forkTaskInputs`가 목록이면 간단 형태(`forkTaskName`, `forkTaskType`(기본 SIMPLE), `forkTaskWorkflow`·`forkTaskWorkflowVersion`이면
      SUB_WORKFLOW 가지, ref는 `_<name>_<i>` 또는 이미 동적 포크가 있으면 `_<부모 ref>_<name>_<i>`, 입력에 `__index`).
@@ -131,24 +152,35 @@ archon에 이미 있는 것(`abdc3f0` 기준):
   결과는 upstream처럼 `FORK` 태스크(`COMPLETED`, 입력 `forkedTasks`·`forkedTaskDefs`), 가지마다 그 가지 타입의 매퍼가 만든 태스크,
   정의에서 다음에 오는 `JOIN`(입력 `joinOn`은 가지마다 마지막 태스크 ref)이다. 다음이 JOIN이 아니면
   `"Dynamic join definition is not followed by a join task.  Check the workflow definition."`로 종료한다. 이미 그 ref의 FORK가 있으면
-  가지를 다시 만들지 않는다. 오류 문구 다섯 가지(목록 변환 실패, 입력 맵 아님, 동적 태스크 없음, 잘못된 입력, ref 중복)는
-  upstream 문자열이다. `FORK_JOIN` 매퍼의 가지 예약·JOIN 찾기 함수를 같이 쓴다.
+  가지를 다시 만들지 않는다. 오류 문구 여섯 가지(목록 변환 실패, 입력 맵 아님, 동적 태스크 없음, 잘못된 입력, ref 중복, ref 없음
+  `"One of the tasks had a null/missing taskReferenceName"`)는 upstream 문자열이다. 다만 문구 안의 Java `toString`
+  (`WorkflowModel.toShortString()`, `WorkflowTask.toString()`)은 재현하지 않고 앞부분만 맞춘다(의도적 차이). `FORK_JOIN` 매퍼의 가지 예약·JOIN 찾기 함수를 같이 쓴다.
 - **생명주기의 동적 포크 분기.** ADR 0025가 "MVP 타입 밖"이라 미룬 rerun의 동적 FORK 분기(upstream `rerunWF`의
   `FORK_JOIN_DYNAMIC` 분기와 `finalizeRerun`: FORK 태스크를 지우고 매퍼를 다시 불러 가지를 새로 만든다)를 이 조각이 옮긴다.
   `Step.Lifecycle`의 `contains_type?(..., "FORK_JOIN_DYNAMIC")` 판정(실패 JOIN 되돌리기, 바뀐 SUB_WORKFLOW 찾기)은 이미 있으므로
-  시험만 더한다. `Step.Tasks.lazy_evaluate?/2`는 upstream `isLazyEvaluateWorkflow`처럼 정의에 없는 ref(동적 가지)의 성공 갱신도
-  결정을 건너뛰게 고친다.
+  시험만 더한다. `Step.Tasks.lazy_evaluate?/2`는 이미 upstream `isLazyEvaluateWorkflow`와 같다(정의에 없는 동적 가지 ref의 갱신은
+  늘 결정한다, `WorkflowExecutorOps` 1237행). 고치지 않고 회귀 시험만 더한다.
 
 ### 5. 스크립트 타입: INLINE, LAMBDA(조각 7d)
 
 - 평가는 ADR 0015의 `evaluate_script`(QuickJS-ng, 시간 4초, 요청마다 새 realm)를 그대로 쓴다. 새 엔진·새 설정은 없다.
 - **INLINE.** 입력은 `getTaskInputV2`(태스크 정의의 `inputTemplate` 합침). `evaluatorType`(기본 `javascript`)이 `javascript`·`graaljs`면
   `expression`을 `$` = 태스크 입력 전체로 평가하고, `value-param`이면 기존 `Archon.Decider.Evaluator`를 쓴다. 출력 `result`로
-  `COMPLETED`. 오류 문구는 upstream 셋(`Empty 'evaluatorType' ...`, `Unknown evaluator '<x>' in INLINE task.`, `Empty 'expression' ...`)과
-  평가 오류(ADR 0015 결정 4의 문구)이고, 출력 `error`와 `reasonForIncompletion`에 같은 메시지를 넣어 `FAILED`다. upstream은
-  `TerminateWorkflowException`일 때만 `FAILED_WITH_TERMINAL_ERROR`인데 평가기 오류는 그 예외가 아니므로 archon은 늘 `FAILED`다.
+  `COMPLETED`. 오류는 출력 `error`와 `reasonForIncompletion`에 같은 메시지(upstream처럼 원인 예외가 있으면 그 메시지)를 넣고, 상태는
+  upstream `Inline`처럼 예외 종류로 정한다.
+
+  | 오류 | upstream 예외 | 상태 |
+  |---|---|---|
+  | `Empty 'evaluatorType' ...`, `Unknown evaluator '<x>' in INLINE task.`, `Empty 'expression' ...` | `TerminateWorkflowException`(`checkEvaluatorType`·`checkExpression`) | `FAILED_WITH_TERMINAL_ERROR` |
+  | 스크립트 문법·실행 오류(ADR 0015 결정 4의 ``Error evaluating the script `...` at line N``) | `TerminateWorkflowException`(`ScriptEvaluator.handlePolyglotException`) | `FAILED_WITH_TERMINAL_ERROR` |
+  | `value-param` 평가기 오류 | `TerminateWorkflowException`(`ValueParamEvaluator`) | `FAILED_WITH_TERMINAL_ERROR` |
+  | 시간 초과(`Script not evaluated within <N> seconds, interrupted.`) | `NonTransientException` | `FAILED` |
+
+  평가기 풀이 받지 못함(대기열 가득 참, 프로세스 죽음)은 upstream에 대응이 없다. 일시적 오류이므로 `FAILED`(재시도 가능)로 둔다.
+  표의 상태는 7a 캡처(모르는 평가기, 스크립트 오류)로 확인한다.
 - **LAMBDA.** `scriptExpression`을 `function scriptFun(){<식>} scriptFun();`으로 감싸 평가한다. 빈 식은
-  `"Empty 'scriptExpression' in Lambda task's input parameters. A non-empty String value must be provided."`.
+  `"Empty 'scriptExpression' in Lambda task's input parameters. A non-empty String value must be provided."`. upstream `Lambda`는 모든
+  예외를 `FAILED`로 두므로(`reasonForIncompletion`은 예외 메시지, 출력 `error`는 원인 메시지) 그대로 따른다.
 - 결과 값 변환(정수·실수·비유한 수)은 ADR 0015 결정 4를 따른다. 정답 기준도 ADR 0015 결정 7의 GraalJS 오라클이다.
 
 ### 6. JSON_JQ_TRANSFORM과 jq 엔진(조각 7e, BOSS 결정: jqlang vendoring)
@@ -169,64 +201,92 @@ archon에 이미 있는 것(`abdc3f0` 기준):
   Caffeine 캐시는 성능용이라 옮기지 않는다).
 - **태스크.** 입력은 `getTaskInputV2`(정의의 `inputTemplate`). upstream처럼 `queryExpression`을 포함한 입력 맵 전체가 `.`이다.
   `queryExpression`이 없으면 `"Missing 'queryExpression' in input parameters"`로 `FAILED`. 성공은 출력 `result`(첫 결과 또는 `null`)와
-  `resultList`(전체), `COMPLETED`. 오류는 엔진 메시지를 출력 `error`와 `reasonForIncompletion`에 넣고 `FAILED`다. upstream처럼 일은
-  예약 때(`start`) 하고 `execute`는 다시 하지 않는다.
+  `resultList`(전체), `COMPLETED`. 오류는 엔진 메시지를 출력 `error`와 `reasonForIncompletion`에 넣고 `FAILED`다. 일은 예약 때
+  (`start`) 한다. upstream `execute`는 `start`를 다시 부르지만, `start`가 늘 종료 상태로 끝나 결정 루프의 미종료 검사에 걸리지 않으므로
+  불리지 않는다. archon은 `execute`를 두지 않는다. `queryExpression`이 문자열이 아니면 upstream은 `try` 밖의 `ClassCastException`으로
+  예약 오류(`"Error scheduling tasks: ..."`, 워크플로우 종료)가 된다. 이 경우는 7a 캡처로 확인해 맞춘다.
+- **시간 상한.** jackson-jq에는 상한이 없다. archon은 풀의 시간 상한(기본 4초)을 넘으면 `Script not evaluated within <N> seconds,
+  interrupted.`와 같은 모양의 jq 문구로 `FAILED`다(의도적 차이).
 - **값 변환.** upstream `JsonJqTransform`처럼 정수인 수는 정수, 아닌 수는 실수다. jq와 jackson-jq의 함수·숫자·오류 문구 차이는
   로컬 Gradle 캐시의 jackson-jq jar를 JDK 프로브로 돌려 확인하고(ADR 0015 결정 7과 같은 방식), 맞추지 않기로 한 것만 "upstream과
   의도적으로 다른 점"에 더한다. 정답 기준은 골든 픽스처(결정 8)와 프로브 비교다.
 - **타입 제약.** upstream `WorkflowTaskTypeConstraint`의 JSON_JQ_TRANSFORM 규칙(`queryExpression`이 입력이나 태스크 정의의
   `inputTemplate`에 있어야 함, 문구 `"inputParameters.queryExpression field is required for taskType: JSON_JQ_TRANSFORM taskName: <name>"`)을
-  옮긴다. 정의 등록 검사가 태스크 정의를 읽어 넘긴다(ADR 0014 결정 7이 미룬 부분).
+  옮긴다. 태스크 정의 조회는 7a가 만든 연결(결정 2)을 쓴다(ADR 0014 결정 7이 미룬 부분).
 
 ### 7. 비동기 타입: START_WORKFLOW(조각 7f), HTTP(조각 7g)
 
-upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(큐 폴링) 대신, 다른 비동기 타입처럼 워크플로우 프로세스가 직접 다룬다
-(ADR 0018 결정 1의 "워크플로우마다 프로세스"). 등록부의 `async?`가 참이면 `Step.Schedule`이 큐에 넣지 않고 `due`로 두고
-`Step.Async`가 시작한다.
+upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 폴링) 대신, 다른 비동기 타입처럼 워크플로우 프로세스가 직접
+다룬다(ADR 0018 결정 1의 "워크플로우마다 프로세스"). 시스템 태스크 표의 `async?`가 참이면 `Step.Schedule`이 큐에 넣지 않고 `due`로
+두고 `Step.Async`가 시작한다.
 
-- **공통(7f가 만든다).** `Step.Async`가 `SCHEDULED` 비동기 태스크를 시작할 때 upstream `AsyncSystemTaskExecutor`처럼
-  `pollCount`를 올리고 `startTime`을 찍어 커밋한 뒤 일을 효과로 넘긴다. 결과는 이벤트로 돌아와 그 태스크가 아직 같은 시도
-  (`SCHEDULED`, 같은 `pollCount`)일 때만 반영한다. 이미 끝났거나(종료로 `CANCELED` 등) 다른 시도면 버린다. 프로세스가 결과 전에
-  죽으면 복구(`Step.Recover`)가 `SCHEDULED` 태스크를 다시 시작한다(최소 한 번, upstream 큐 재전달과 같은 성질).
-  upstream의 `responseTimeoutSeconds` 판정(정의가 없으면 1시간, `"Task did not complete within its responseTimeout of <n>s"`)도
-  같은 자리에서 한다. 태스크가 끝나면(또는 `asyncComplete`로 `IN_PROGRESS`가 되면) 그 이벤트 처리가 결정을 돌린다.
+- **시작(7f).** `Step.Async`가 `SCHEDULED` 비동기 태스크를 시작할 때 upstream `AsyncSystemTaskExecutor`처럼 `pollCount`를 올리고
+  `startTime`을 찍어 커밋한 뒤 일을 효과로 넘긴다.
+- **시작이 멱등인 타입과 아닌 타입.** upstream은 `start`가 멱등인 SUB_WORKFLOW만 재전달 때 다시 실행하고, 나머지는 메시지를
+  `responseTimeoutSeconds`(정의가 없으면 1시간) 동안 예약해 두 번 실행하지 않는다(`isStartIdempotent`, `reserveSeconds`). 예약이 끝난
+  뒤에도 `SCHEDULED`면 다시 실행하지 않고 `TIMED_OUT`(`"Task did not complete within its responseTimeout of <n>s"`)으로 둔다.
+  archon은 시스템 태스크 표에 "시작 멱등" 성질을 두어 같게 한다.
+  - START_WORKFLOW: archon에서는 멱등이다(아래, ID를 태스크로 정함). 그래서 SUB_WORKFLOW처럼 시작했는데 결과가 없는 태스크를
+    복구(`Step.Recover`)가 바로 다시 시작한다. upstream은 START_WORKFLOW를 멱등으로 보지 않으므로 의도적 차이다.
+  - HTTP: 멱등이 아니다. 시작한 태스크(`SCHEDULED`, `pollCount` > 0, `startTime` > 0)는 결과가 오기 전까지 다시 시작하지 않는다.
+    워크플로우 프로세스는 진행 중인 요청의 태스크 ID 집합을 상태에 두고, `:wake`나 다른 이벤트로 `Step.Async`가 평가할 때 그 태스크를
+    시작하지 않는다. 프로세스가 결과 전에 죽어 집합을 잃었으면, 복구는 그 태스크를 다시 보내지 않고 `startTime` +
+    `responseTimeoutSeconds`에 `TIMED_OUT`으로 둔다(upstream과 같음). 그 뒤 재시도는 보통의 태스크 재시도 규칙이다.
+  - 재평가 시각(`Step.Postpone`)은 진행 중인 HTTP 태스크의 위 마감이다.
+- **결과(7f·7g).** 결과는 이벤트로 돌아와 그 태스크가 아직 같은 시도(`SCHEDULED`, 같은 `pollCount`)일 때만 반영한다. 이미
+  끝났거나(종료로 `CANCELED`, 위 `TIMED_OUT` 등) 다른 시도면 버린다. 태스크가 끝나면(또는 `asyncComplete`로 `IN_PROGRESS`가 되면) 그
+  이벤트 처리가 결정을 돌린다.
 - **START_WORKFLOW.** 매퍼는 `SCHEDULED`, `callbackAfterSeconds` = `startDelay`. 시작은 입력 `startWorkflow`를
   `StartWorkflowRequest`로 바꿔 검증하고(없으면 `"Missing 'startWorkflow' in input data."`, 검증 실패
   `"startWorkflow validation failed. ..."`, 변환 실패 `"Error reading StartWorkflowRequest. ..."`로 `FAILED`), 효과
   `{:start_workflow, task_id, start}`를 올린다. 커밋 뒤 `Effects.run`이 `Runtime.start_workflow_idempotent/1`로 시작하고 결과를 이벤트
-  `{:workflow_started, task_id, result}`로 되먹인다(하위 워크플로우와 같은 경로). 새 워크플로우 ID는 `child_id/2`와 같은 방식의
-  해시(`startworkflow:<워크플로우 ID>:<태스크 ID>:<재시도 횟수>`)라 효과가 다시 돌아도 하나만 생긴다. `taskToDomain`·`correlationId`
-  기본값은 시작한 워크플로우의 것이고, `triggeringWorkflowId`만 적고 부모 필드는 넣지 않는다(upstream처럼 따로 도는 워크플로우).
-  성공은 출력 `workflowId`, `COMPLETED`. 일시적 오류(`{:error, {:exit, _}}` 등)는 태스크를 `SCHEDULED`로 두고 다시 시도하며, 그 밖의
-  오류는 메시지로 `FAILED`다.
+  `{:workflow_started, task_id, result}`로 되먹인다(하위 워크플로우와 같은 경로). 되먹임은 같은 메시지 처리 안이라 그 사이 다른
+  시도가 끼지 않으므로 이벤트에 `pollCount`를 싣지 않는다. 새 워크플로우 ID는 `child_id/2`와 같은 방식의 해시
+  (`startworkflow:<워크플로우 ID>:<태스크 ID>:<재시도 횟수>`)라 효과가 다시 돌아도 하나만 생긴다. `start_workflow_idempotent`가 이미
+  있는 워크플로우를 돌려주면 `triggeringWorkflowId`가 이 워크플로우인지 확인하고, 아니면 `FAILED`다(ADR 0024 결정 2와 같은 취지).
+  `taskToDomain`·`correlationId` 기본값은 시작한 워크플로우의 것이고, `triggeringWorkflowId`만 적고 부모 필드는 넣지 않는다(upstream처럼
+  따로 도는 워크플로우). 성공은 출력 `workflowId`, `COMPLETED`. 일시적 오류(`{:error, {:exit, _}}` 등)는 태스크를 `SCHEDULED`로 두고 다시
+  시도하며, 그 밖의 오류는 메시지로 `FAILED`다. 검증 위반이 여럿이면 upstream은 Java `Set` 순서로 잇는다. archon은 경로 순으로
+  정렬해 잇는다(의도적 차이. 픽스처는 위반 하나로 캡처한다).
+  다른 워크플로우를 시작하는 일을 outbox가 아니라 `Effects`로 하는 것은 하위 워크플로우 시작과 같은 선택이다(ADR 0021 결정 4는
+  다른 워크플로우에 대한 알림·종료를 outbox로 보낸다). 멱등 ID와 복구 재시작이 같은 보장을 준다.
 - **HTTP(BOSS 결정: 대상 제한 없음).**
-  - 매퍼는 upstream `HTTPTaskMapper`대로 `SCHEDULED`, 입력은 `getTaskInputV2` 뒤 `asyncComplete`를 넣는다. `retryCount`,
-    `callbackAfterSeconds` = `startDelay`, 정의가 있으면 빈도 한도·`isolationGroupId`·`executionNameSpace`를 옮긴다. 태스크 정의는
-    필요 없다(없으면 재시도 0).
+  - 매퍼는 upstream `HTTPTaskMapper`대로 `SCHEDULED`다. upstream은 입력을 풀기 **전에** 정의의 `inputParameters`에 `asyncComplete` =
+    `workflowTask.asyncComplete`를 넣는다. 그래서 사용자가 `inputParameters.asyncComplete`에 준 표현식은 덮이고, 정의 객체도 바뀐다
+    (DYNAMIC과 같은 정의 변경 문제. 7a 캡처의 `workflowDefinition`으로 확인해 결정 4와 같이 처리). 입력은 `getTaskInputV2`(태스크 정의).
+    `retryCount`, `callbackAfterSeconds` = `startDelay`, 정의가 있으면 빈도 한도·`isolationGroupId`·`executionNameSpace`를 옮긴다. 태스크
+    정의는 필요 없다(없으면 재시도 0).
   - 요청은 입력 `http_request`, 없으면 입력 전체다. 필드 `uri`, `method`, `headers`(값은 문자열로, `null` 건너뜀), `body`, `accept`(문자열
     또는 목록, 기본 `application/json`), `contentType`(기본 `application/json`), `connectionTimeOut`·`readTimeOut`(기본 3000ms).
     `vipAddress`·`appName`은 upstream 기본 제공자처럼 쓰지 않는다. `uri` 없음 `"Missing HTTP URI.  See documentation for HttpTask for
-    required input parameters"`, `method` 없음 `"No HTTP method specified"`로 `FAILED`.
-  - 실행은 워크플로우 프로세스를 막지 않는다. 효과 `{:http_request, task_id, request}`를 `Archon.Runtime.HttpTask` 실행기가 감독
-    Task(`Task.Supervisor.async_nolink`)로 돌리고, 결과를 그 워크플로우 프로세스에 이벤트 `{:http_completed, task_id, poll_count,
-    result}`로 보낸다. 실행기는 동시 요청 수 상한(`config :archon, Archon.Runtime.HttpTask, max_concurrency:`, 기본 스케줄러 수 × 2,
-    upstream 시스템 태스크 스레드 수와 같은 뜻)을 두고 넘는 요청은 차례로 기다리게 한다. 태스크 정의의 동시 실행 한도
-    (`concurrentExecLimit`)는 worker 태스크의 기존 판정을 써서 넘으면 미룬다. 빈도 한도는 archon worker 경로에도 아직 없으므로 이
-    Phase에서도 적용하지 않는다(결과 절).
+    required input parameters"`, `method` 없음 `"No HTTP method specified"`로 `FAILED`. `workerId`는 upstream이 서버 ID를 넣으므로
+    archon은 노드 이름을 넣고 재생에서 `ignore`한다.
+  - 실행은 워크플로우 프로세스를 막지 않는다. 효과 `{:http_request, task_id, poll_count, request}`를 `Archon.Runtime.HttpTask` 실행기가
+    감독 Task(`Task.Supervisor.async_nolink`)로 돌린다. 결과는 pid가 아니라 워크플로우 ID로 `WorkflowServer`의 API를 통해 이벤트
+    `{:http_completed, task_id, poll_count, result}`로 보낸다(프로세스가 그 사이 바뀌었으면 활성화한 새 프로세스가 받는다). 진행 중인
+    요청이 있는 프로세스는 `evict_after`로 끝내지 않는다. 실행기는 동시 요청 수 상한(`config :archon, Archon.Runtime.HttpTask,
+    max_concurrency:`, 기본 스케줄러 수 × 2, upstream 시스템 태스크 스레드 수와 같은 뜻)을 두고 넘는 요청은 차례로 기다리게 한다.
+    태스크 정의의 동시 실행 한도(`concurrentExecLimit`)는 worker 태스크의 기존 판정을 써서 넘으면 미룬다. 빈도 한도는 archon worker
+    경로에도 아직 없으므로 이 Phase에서도 적용하지 않는다(결과 절).
   - HTTP 클라이언트는 **Finch**(Mint 기반, 새 의존성)다. 연결 시간 상한은 `connectionTimeOut`, 받기 시간 상한은 `readTimeOut`이다.
     응답 body는 `max_response_bytes`(기본 10 MiB, upstream 태스크 출력 하드 한도 10240KB와 같은 크기)까지만 읽고, 넘으면 태스크를
     `FAILED`로 끝낸다(의도적 차이).
   - 응답 처리는 upstream `HttpTask`를 따른다. 2xx면 출력 `response` = `{body, headers, statusCode, reasonPhrase}`, `COMPLETED`(또는
     `asyncComplete`면 `IN_PROGRESS`). body는 JSON 배열·객체면 목록·맵, 수면 실수(upstream `Double`), 그 밖에는 글자, 파싱 실패는
-    원문이다. `headers`는 이름마다 값 목록, `reasonPhrase`는 Spring `HttpStatus`의 문구표다. 4xx·5xx는 upstream 기본
-    `RestTemplate`이 예외로 바꾸므로 `"Failed to invoke HTTP task due to: <예외 toString>"`와 문자열 `response`로 `FAILED`다. 예외
-    글자(`org.springframework.web.client.HttpClientErrorException$NotFound: 404 Not Found: ...` 등)는 상태 코드별 표로 재현하고 골든
-    픽스처로 맞춘다. 연결 거부·시간 초과 같은 전송 오류는 Java 문구를 흉내 내지 않고 archon 문구로 같은 `FAILED` 모양을 만든다
-    (의도적 차이). 리다이렉트처럼 `RestTemplate`의 전송 세부에 기대는 동작은 결정 8의 stub 픽스처로 정한다.
+    원문이다. `headers`는 이름마다 값 목록이고 Mint가 이름을 소문자로 바꾼다(upstream은 서버가 보낸 대소문자, 의도적 차이).
+    `reasonPhrase`는 Spring `HttpStatus`의 문구표다. Spring 표에 없는 2xx 코드(예: 299)는 upstream `HttpStatus.valueOf`가
+    `IllegalArgumentException`을 내 아래 실패 경로로 간다.
+  - 실패는 upstream이 `RestClientException`을 `new Exception(ex.getLocalizedMessage())`로 다시 감싸므로 `reasonForIncompletion`이
+    `"Failed to invoke HTTP task due to: java.lang.Exception: <Spring 메시지>"`이고 출력 `response`는 문자열
+    `"java.lang.Exception: <Spring 메시지>"`, `FAILED`다. 4xx·5xx의 Spring 메시지는 `<코드> <문구>: "<응답 body>"`(body가 없으면
+    `[no body]`, 긴 body는 Spring이 줄임)이다. 이 형식과 줄임 규칙은 긴 body를 포함한 stub 픽스처로 맞춘다. 연결 거부·시간 초과 같은
+    전송 오류의 Spring 메시지(`I/O error on <METHOD> request for "<uri>": ...`)는 앞부분만 맞추고 원인 문구는 archon 문구다(의도적
+    차이). 리다이렉트처럼 `RestTemplate`의 전송 세부에 기대는 동작은 결정 8의 stub 픽스처로 정한다.
   - 대상 주소 제한은 없다(upstream과 같음). 정의를 등록할 수 있는 호출자는 서버가 닿는 어떤 주소로든 요청을 보낼 수 있다. 이는
     ADR 0024 결정 4(인증 없음, 기본 주소 `127.0.0.1`)의 신뢰 모델 안의 일이고, 대상 허용 목록은 인증 ADR에서 함께 본다.
   - 타입 제약: upstream HTTP 규칙(`http_request`, 최상위 `uri`·`method`, 또는 태스크 정의 `inputTemplate`의 `http_request` 중 하나,
-    문구 `"inputParameters.http_request or inputParameters.uri field is required for taskType: HTTP taskName: <name>"`)을 옮긴다.
+    문구 `"inputParameters.http_request or inputParameters.uri field is required for taskType: HTTP taskName: <name>"`)을 옮긴다(7a의
+    조회 연결을 쓴다).
 
 ### 8. 골든 픽스처와 재생(조각 7a가 한 번에 캡처)
 
@@ -241,15 +301,19 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(큐 폴링) 대신, �
   - DYNAMIC의 정의 없음, 대상이 시스템 타입인 경우, FORK_JOIN_DYNAMIC의 세 입력 형태, 다음이 JOIN이 아닌 정의, 동적 가지 태스크의
     rerun·retry
   - INLINE의 `javascript`·`value-param`·모르는 평가기·스크립트 오류, LAMBDA
-  - JSON_JQ_TRANSFORM의 여러 결과, `null` 결과, 문법 오류, `queryExpression` 없음
+  - JSON_JQ_TRANSFORM의 여러 결과, `null` 결과, 문법 오류, `queryExpression` 없음과 문자열 아님
   - START_WORKFLOW의 성공(시작된 워크플로우 GET 포함)과 검증 실패
-  - HTTP의 2xx JSON·글자·수 body, 4xx, 5xx, `asyncComplete`, `uri`·`method` 없음, 연결 거부
+  - HTTP의 2xx JSON·글자·수 body, 표에 없는 2xx 코드, 4xx(짧은 body·긴 body·body 없음), 5xx, `asyncComplete`, `inputParameters`의
+    `asyncComplete` 표현식, `uri`·`method` 없음, 연결 거부
   - 등록 검사: HTTP·JSON_JQ_TRANSFORM 규칙의 400
 - **HTTP 대상 stub.** 캡처와 재생이 같은 응답을 받도록 고정 응답 HTTP stub(Plug, `test/support/`)을 둔다. 캡처 스크립트는 그 stub를
   띄워 upstream 서버의 HTTP 태스크가 부르게 하고, 재생은 같은 stub를 시험 안에서 띄운다. 포트가 다르므로 재생 도우미는 픽스처의
-  요청·응답 값에 든 캡처 stub 주소를 시험 stub 주소로 바꿔 비교한다. 응답 헤더 중 시각처럼 정해지지 않는 값은 `ignore`로 적는다.
-- **아직 구현하지 않은 타입의 재생.** 7a가 새 단계마다 쓰는 타입을 단계 옵션 `types: [...]`로 적고, 재생 도우미는 등록부(결정 2)에
-  없는 타입이 있는 단계를 건너뛴다. 뒤 단계가 앞 단계에 기대면 그 단계도 같은 타입을 적는다. 그래서 각 조각은 등록부에 자기
+  요청·응답 값에 든 캡처 stub 주소를 시험 stub 주소로 바꿔 비교한다. stub는 요청 헤더(`User-Agent`, `Accept` 등 클라이언트마다
+  다른 값)를 응답에 싣지 않는다. 응답 헤더 중 시각처럼 정해지지 않는 값과 `workerId`는 `ignore`로 적는다.
+- **정의 변경 확인.** DYNAMIC·HTTP 매퍼가 정의 객체를 바꾸는지(결정 4·7) 보도록, 그 타입의 시나리오는 끝난 워크플로우 GET의
+  `workflowDefinition`을 비교 대상에 둔다.
+- **아직 구현하지 않은 타입의 재생.** 7a가 새 단계마다 쓰는 워크플로우 태스크 타입을 단계 옵션 `types: [...]`로 적고, 재생
+  도우미는 매퍼 표(결정 2)에 없는 타입이 있는 단계를 건너뛴다. 뒤 단계가 앞 단계에 기대면 그 단계도 같은 타입을 적는다. 그래서 각 조각은 등록부에 자기
   타입을 넣으면 자기 단계가 켜지고, 시나리오를 고치지 않는다. 7h가 이 옵션을 없앤다.
 - 결정 루프 단위의 재생(`Archon.StepReplay`)도 타입마다 더한다. 이것은 각 조각이 자기 시험 파일로 한다.
 
@@ -257,23 +321,23 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(큐 폴링) 대신, �
 
 | 조각 | 범위 | 시험·정답 기준 | 선행 | 건드리는 파일·모듈 |
 |---|---|---|---|---|
-| 7a | 결정 2의 등록부와 behaviour, 주입 함수 셋의 자리, 결정 8의 캡처 전부·HTTP stub·`types:` 건너뛰기 | 기존 시험·재생 전부 그대로 통과(동작 무변경), 기존 픽스처 재캡처 비교, 건너뛰기를 뺀 전체 재생 | 없음 | `lib/archon/decider/{system_tasks,system_task,mapper,retry,context}.ex`, `lib/archon/decider/system_task/*`, `lib/archon/runtime/step/{schedule,async,postpone,recover,lifecycle,decide,env}.ex`, `lib/archon/runtime/tasks.ex`, `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`, `test/fixtures/contract/README.md`, `test/support/contract.ex`, `test/support/archon_web/contract_case.ex`, `test/support/http_stub.ex`, `test/archon/contract_test.exs`, `test/archon/domain/contract_round_trip_test.exs` |
-| 7b | 결정 3: TERMINATE, SET_VARIABLE, NOOP, HUMAN, EXCLUSIVE_JOIN | upstream `TestDeciderService`·`TerminateTest`·`SetVariableTest`·`ExclusiveJoinTest` 등에서 옮긴 사례, StepReplay, 픽스처 재생 | 7a | `lib/archon/decider/mapper/{terminate,set_variable,noop,human,exclusive_join}.ex`, `lib/archon/decider/system_task/{terminate,set_variable,noop,human,exclusive_join}.ex`, 등록부 줄, 해당 시험 |
-| 7c | 결정 4: DYNAMIC, FORK_JOIN_DYNAMIC, rerun의 동적 포크 분기, `lazy_evaluate?/2` | `DynamicTaskMapperTest`·`ForkJoinDynamicTaskMapperTest`에서 옮긴 사례, 동적 가지 rerun·retry 시험(두 백엔드), 픽스처 재생 | 7a | `lib/archon/decider/mapper/{dynamic,fork_join_dynamic}.ex`, `lib/archon/decider/mapper/fork_join.ex`(공용 함수 꺼내기), `lib/archon/runtime/step/lifecycle.ex`(rerun 분기), `lib/archon/runtime/step/tasks.ex`, 등록부 줄, 해당 시험 |
-| 7d | 결정 5: INLINE, LAMBDA | GraalJS 오라클 비교, `InlineTest`·`LambdaTest` 사례, 픽스처 재생 | 7a | `lib/archon/decider/mapper/{inline,lambda}.ex`, `lib/archon/decider/system_task/{inline,lambda}.ex`, 등록부 줄, 해당 시험 |
-| 7e | 결정 6: jq vendoring, `archon_jq`, 풀 일반화와 `Archon.Jq.Pool`, JSON_JQ_TRANSFORM, 그 타입 제약 | jackson-jq 프로브 비교, `JsonJqTransformTest` 사례, 격리 시험(`$ENV`, `import`, 시간·출력 상한), 픽스처 재생 | 7a | `c_src/jq/*`, `c_src/archon_jq/*`, `Makefile`, `NOTICE`, `lib/archon/script/{pool,worker}.ex`, `lib/archon/jq.ex`, `lib/archon/application.ex`, `lib/archon/decider/mapper/json_jq_transform.ex`, `lib/archon/decider/system_task/json_jq_transform.ex`, `lib/archon/domain/task_type_constraint.ex`(JQ 규칙), `lib/archon/metadata.ex`(정의 조회 넘기기), 등록부 줄, 해당 시험 |
-| 7f | 결정 7의 공통 비동기 경로와 START_WORKFLOW | 비동기 시작·결과 버림·복구 재시작 시험(두 백엔드), `StartWorkflowTest` 사례, 픽스처 재생 | 7a | `lib/archon/runtime/step/{async,event,effect,start_workflow}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/effects.ex`, `lib/archon/runtime/workflow_server.ex`, `lib/archon/decider/mapper/start_workflow.ex`, 등록부 줄, 해당 시험 |
-| 7g | 결정 7의 HTTP | stub 대상 시험(성공·4xx·5xx·시간 초과·body 상한·동시 상한), `HttpTaskTest` 사례, 픽스처 재생 | 7f | `mix.exs`·`mix.lock`(Finch), `lib/archon/runtime/http_task.ex`, `lib/archon/runtime/step/http.ex`, `lib/archon/runtime/step/{async,event}.ex`(HTTP 분기), `lib/archon/runtime/workflow_server.ex`(결과 메시지), `lib/archon/application.ex`, `lib/archon/decider/mapper/http.ex`, `lib/archon/domain/task_type_constraint.ex`(HTTP 규칙), 등록부 줄, 해당 시험 |
+| 7a | 결정 2의 두 표와 behaviour, 주입 함수 셋과 설정 자리, 타입 제약의 태스크 정의 조회 연결, 결정 8의 캡처 전부·HTTP stub·`types:` 건너뛰기 | 기존 시험·재생 전부 그대로 통과(동작 무변경), 기존 픽스처 재캡처 비교, 건너뛰기를 뺀 전체 재생 | Phase 6 조각 6h 머지(같은 재생 장치·픽스처 등록·재캡처를 고친다) | `lib/archon/decider.ex`, `lib/archon/decider/{system_tasks,system_task,mapper,retry,context}.ex`, `lib/archon/decider/system_task/*`, `lib/archon/runtime/step/{schedule,async,postpone,recover,lifecycle,decide,env}.ex`, `lib/archon/runtime/tasks.ex`, `lib/archon/domain/{workflow_task,workflow_def,start_workflow_request,task_type_constraint}.ex`(조회 옵션), `lib/archon/metadata.ex`, `lib/archon/runtime.ex`(시작 검증의 조회), `config/config.exs`, `test/support/step_replay.ex`, `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`, `test/fixtures/contract/README.md`, `test/support/contract.ex`, `test/support/archon_web/contract_case.ex`, `test/support/http_stub.ex`, `test/archon/contract_test.exs`, `test/archon/domain/contract_round_trip_test.exs` |
+| 7b | 결정 3: TERMINATE, SET_VARIABLE, NOOP, HUMAN, EXCLUSIVE_JOIN | upstream `TestDeciderService`·`TerminateTest`·`SetVariableTest`·`ExclusiveJoinTest` 등에서 옮긴 사례, FORK 가지 끝 SET_VARIABLE의 저장 시험, StepReplay, 픽스처 재생 | 7a | `lib/archon/decider/mapper/{terminate,set_variable,noop,human,exclusive_join}.ex`, `lib/archon/decider/system_task/{terminate,set_variable,noop,human,exclusive_join}.ex`, 두 표의 자기 줄, 해당 시험 |
+| 7c | 결정 4: DYNAMIC, FORK_JOIN_DYNAMIC, rerun의 동적 포크 분기, 정의 변경 확인 | `DynamicTaskMapperTest`·`ForkJoinDynamicTaskMapperTest`에서 옮긴 사례, 동적 가지 rerun·retry 시험과 갱신이 늘 결정하는 회귀 시험(두 백엔드), 픽스처 재생 | 7a | `lib/archon/decider/mapper/{dynamic,fork_join_dynamic}.ex`, `lib/archon/decider/mapper/fork_join.ex`(공용 함수 꺼내기), `lib/archon/runtime/step/lifecycle.ex`(rerun 분기), 매퍼 표의 자기 줄, 해당 시험 |
+| 7d | 결정 5: INLINE, LAMBDA | GraalJS 오라클 비교, `InlineTest`·`LambdaTest` 사례, 픽스처 재생 | 7a | `lib/archon/decider/mapper/{inline,lambda}.ex`, `lib/archon/decider/system_task/{inline,lambda}.ex`, 두 표의 자기 줄, 해당 시험 |
+| 7e | 결정 6: jq vendoring, `archon_jq`, 풀 일반화와 `Archon.Jq.Pool`, JSON_JQ_TRANSFORM, 그 타입 제약 | jackson-jq 프로브 비교, `JsonJqTransformTest` 사례, 격리 시험(`$ENV`, `import`, 시간·출력 상한), 픽스처 재생 | 7a | `c_src/jq/*`, `c_src/archon_jq/*`, `Makefile`, `NOTICE`, `.github/workflows/ci.yml`(sanitize 빌드), `config/*.exs`, `lib/archon/script/{pool,worker}.ex`, `lib/archon/jq.ex`, `lib/archon/application.ex`, `lib/archon/decider/mapper/json_jq_transform.ex`, `lib/archon/decider/system_task/json_jq_transform.ex`, `lib/archon/domain/task_type_constraint.ex`(JQ 규칙 절), 두 표의 자기 줄, 해당 시험 |
+| 7f | 결정 7의 공통 비동기 경로(시작 멱등 성질, 결과 이벤트와 시도 확인, 복구·재평가 시각)와 START_WORKFLOW | 비동기 시작·결과 버림·복구 재시작 시험(두 백엔드), `StartWorkflowTest` 사례, 픽스처 재생 | 7a | `lib/archon/runtime/step/{async,event,effect,recover,postpone,start_workflow}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/effects.ex`, `lib/archon/runtime/workflow_server.ex`, `lib/archon/decider/mapper/start_workflow.ex`, 두 표의 자기 줄, 해당 시험 |
+| 7g | 결정 7의 HTTP(진행 중 집합, `evict_after` 예외, 결과 전달 API) | stub 대상 시험(성공·4xx·5xx·시간 초과·body 상한·동시 상한·진행 중 재시작 안 함·프로세스 교체 뒤 결과·`TIMED_OUT`), `HttpTaskTest` 사례, 픽스처 재생 | 7e, 7f | `mix.exs`·`mix.lock`(Finch), `lib/archon/runtime/http_task.ex`, `lib/archon/runtime/step/http.ex`, `lib/archon/runtime/step/{async,event,recover,postpone}.ex`(HTTP 분기), `lib/archon/runtime/workflow_server.ex`, `lib/archon/application.ex`, `config/*.exs`, `lib/archon/decider/mapper/http.ex`, `lib/archon/domain/task_type_constraint.ex`(HTTP 규칙 절), 두 표의 자기 줄, 해당 시험 |
 | 7h | 통합: `types:` 건너뛰기 제거와 전체 재생(두 백엔드), 빠진 픽스처, README 호환성 절(지원 타입 표, 의도적 차이), `TaskTypeConstraint` moduledoc, ADR 0003 결정 4 비고, 이 ADR `승인` | `mix test` 전부(두 백엔드), CI | 7b~7g | `test/support/archon_web/contract_case.ex`, `README.md`, `docs/adr/{0003,0026,README}.md`, 빠진 픽스처가 있으면 7a의 픽스처 파일들 |
 
 - **병렬로 진행할 수 있는 묶음.**
-  - 1차: 7a.
-  - 2차: 7b, 7c, 7d, 7e, 7f. 새 타입 모듈은 각자 새 파일이다. 함께 고치는 곳은 등록부(`system_tasks.ex`)의 자기 타입 줄뿐이고,
-    7e·7g의 `task_type_constraint.ex`는 서로 다른 함수 절이다. 같은 줄을 고치지 않으므로 겹쳐도 `gh pr update-branch`로 푸는 작은
-    충돌이다. 7a가 `Decider.Context`·`Step.Env`의 주입 함수 자리를 먼저 만들므로 7c·7e는 그 파일을 고치지 않는다.
-  - 3차: 7g(7f 뒤. 같은 비동기 파일을 고친다).
+  - 1차: 7a(Phase 6 마지막 조각 6h가 머지된 뒤).
+  - 2차: 7b, 7c, 7d, 7e, 7f. 새 타입 모듈은 각자 새 파일이다. 함께 고치는 곳은 두 표(`mapper.ex`, `system_tasks.ex`)의 자기 타입
+    줄뿐이다. 7a가 `Decider.Context`·`Step.Env`의 주입 함수·설정 자리와 타입 제약의 조회 연결을 먼저 만들므로 7c·7e는 그 파일을
+    고치지 않는다. 같은 줄을 고치지 않으므로 겹쳐도 `gh pr update-branch`로 푸는 작은 충돌이다.
+  - 3차: 7g(7f 뒤. 같은 비동기 파일을 고친다. 7e 뒤. `application.ex`·`config`·`task_type_constraint.ex`를 함께 고친다).
   - 마지막: 7h.
-- 각 조각은 자기 타입을 등록부에 넣어 재생 단계를 켠다(결정 8). 구현하다 자기 단계의 옵션(`ignore` 등)을 더 고쳐야 하면 그 단계
+- 각 조각은 자기 타입을 매퍼 표에 넣어 재생 단계를 켠다(결정 8). 구현하다 자기 단계의 옵션(`ignore` 등)을 더 고쳐야 하면 그 단계
   줄만 고친다(ADR 0025 결정 8과 같음).
 - 각 조각은 이 ADR의 결정 번호와 조각 이름을 PR에 적는다. 조각 중에 결정이 바뀌면 이 ADR의 해당 결정과 날짜 줄에 갱신 사실을
   적는다.
@@ -285,14 +349,17 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
 - **비동기 시스템 태스크의 실행 위치**(결정 7): upstream은 타입 이름의 큐를 시스템 태스크 워커가 50ms마다 꺼낸다. archon은 워크플로우
   프로세스가 바로 시작하고 결과를 이벤트로 받는다. 그래서 `HTTP`·`START_WORKFLOW` 큐가 없고, 큐 크기 조회 등에 나타나지 않는다.
   결과 상태는 같고 반영이 더 이르다.
-- **START_WORKFLOW의 중복 시작**(결정 7): upstream은 큐 재전달로 같은 태스크가 워크플로우를 두 번 시작할 수 있다. archon은 태스크로
-  정해지는 ID로 멱등 시작한다.
+- **START_WORKFLOW의 시작 멱등**(결정 7): upstream은 START_WORKFLOW를 멱등으로 보지 않아 시작 중 죽으면 `responseTimeout` 뒤
+  `TIMED_OUT`이다. archon은 태스크로 정해지는 ID로 멱등 시작하고 복구가 바로 다시 시작한다. 검증 위반 여럿의 순서는 경로 순이다.
 - **HTTP 응답 body 상한**(결정 7): 10 MiB를 넘으면 `FAILED`. upstream은 다 읽은 뒤 출력 크기 한도(외부 저장소 임계값)로 다룬다.
-- **HTTP 전송 오류 문구**(결정 7): 연결 거부·시간 초과는 Java 예외 문구가 아니라 archon 문구다. 4xx·5xx의 예외 글자는 맞춘다.
+- **HTTP 응답 헤더 이름**(결정 7): 소문자다(Mint). upstream은 서버가 보낸 대소문자다.
+- **HTTP 전송 오류 문구**(결정 7): 연결 거부·시간 초과는 Spring 메시지의 앞부분만 맞추고 원인 문구는 archon 문구다. 4xx·5xx의
+  메시지는 맞춘다.
 - **HTTP 빈도 한도**(결정 7): `rateLimitPerFrequency`를 적용하지 않는다(worker 태스크와 같음).
 - **INLINE의 `python` 평가기**(결정 1): 없다(ADR 0015 결정 5).
-- **INLINE 평가 오류의 상태**(결정 5): 늘 `FAILED`. upstream도 평가기 오류에서는 `FAILED`이므로 응답은 같다.
-- **JQ 엔진**(결정 6): jackson-jq 대신 jqlang. 프로브가 찾은 차이 중 맞추지 않은 것은 조각 7e가 여기에 더한다.
+- **INLINE 평가기 풀 오류**(결정 5): upstream에 대응이 없다. 재시도 가능한 `FAILED`다.
+- **FORK_JOIN_DYNAMIC 오류 문구의 Java `toString`**(결정 4): 재현하지 않는다.
+- **JQ 엔진**(결정 6): jackson-jq 대신 jqlang. 시간 상한(기본 4초)이 있다. 프로브가 찾은 차이 중 맞추지 않은 것은 조각 7e가 여기에 더한다.
 - **HUMAN의 결정 큐**(결정 3): `humanTaskPreventsDeciderQueue`에 대응하는 것이 없다. 결과 상태는 같다.
 - **비밀 값 치환**(결정 1): 하지 않는다.
 
@@ -315,12 +382,15 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
   직접 해야 한다. Req는 Finch 위의 편의 계층이라 이 용도에는 더하는 것이 없다.
 - **정의 조회를 미리 하기(동적 이름):** `Decider`가 이름이 필요하다고 돌려주면 런타임이 읽고 다시 부르는 방식은 매퍼 중간에서 멈춰야
   해서 Decider를 재개 가능한 상태 기계로 만든다(ADR 0015 결정 3과 같은 이유). 읽기 전용 주입 함수를 쓴다.
+  모든 태스크 정의를 결정마다 미리 읽는 방식은 정의 수에 비례하는 읽기를 매 결정에 더한다.
 
 ## 결과
 
 - 이 ADR은 결정만 담는다. 구현은 결정 9의 조각 7a~7h로 하고, 마지막 조각 7h의 PR에서 `승인`으로 바꾼다.
 - [ADR 0003](0003-porting-strategy.md) 단계 표에 Phase 7을 더한다. 결정 4의 "나머지 타입은 그 뒤에"는 이 ADR이 연 타입만큼 줄어든다
   (7h가 비고를 단다). [ADR 0001](0001-api-contract-scope.md)의 경로 분류는 바뀌지 않는다(새 경로 없음).
+- [ADR 0014](0014-phase2-decider.md) 결정 2("`task_defs`는 호출자가 미리 채운다")와 [ADR 0015](0015-script-evaluator.md) 결정 3의
+  주입 함수 예외를 metadata 읽기 조회 둘(`task_def_lookup`, `workflow_def_lookup`)과 jq 평가까지 넓힌다(결정 2).
 - [ADR 0014](0014-phase2-decider.md) 결정 7이 미룬 HTTP·JSON_JQ_TRANSFORM 타입 제약과 [ADR 0015](0015-script-evaluator.md)가 미룬
   INLINE·LAMBDA를 이 ADR이 다룬다. ADR 0025 "의도적으로 다른 점"의 rerun 동적 FORK 분기는 7c가 닫는다.
 - 새 의존성: Finch(와 Mint, NimblePool, NimbleOptions), vendoring한 jqlang·oniguruma. `mix deps.audit`와 `NOTICE`가 다룬다.
