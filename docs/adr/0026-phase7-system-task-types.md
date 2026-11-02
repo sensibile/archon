@@ -257,8 +257,9 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   - 재생: FORK_JOIN_DYNAMIC 단계의 JOIN `pollCount`·`updateTime`은 upstream 시스템 태스크 워커가 따로 평가하는 시점에 달려 같은
     단계라도 캡처마다 다르므로 `ignore`한다. retry 뒤 JOIN의 `endTime`(`p7_fjd_retried_get` 한 단계)도 `ignore`한다. upstream retry
     코드는 취소된 JOIN을 `IN_PROGRESS`로 돌릴 때 `endTime`을 그대로 두고(archon과 같음), 태스크 `endTime`을 0으로 만드는 upstream
-    코드(`DeciderService`, `WorkflowExecutorOps`의 재시도·rerun 재설정)도 이 경로에 닿지 않는데 캡처는 0이다. 원인은 확인하지 못했다.
-    archon은 코드를 따르고, 7h가 전체를 다시 캡처할 때 이 값이 다시 0인지 확인한다.
+    코드(`DeciderService`, `WorkflowExecutorOps`의 재시도·rerun 재설정)도 이 경로에 닿지 않는데 캡처는 0이다. 같은 기준 SHA 서버에서
+    같은 단계(시작, 한 가지 `FAILED`, retry)를 세 번 다시 돌려 보니 retry 뒤 JOIN의 `endTime`은 세 번 모두 취소 시각 그대로였다
+    (2026-11-03, 픽스처는 바꾸지 않음). 캡처의 0은 재현되지 않는 경합 값으로 보고 archon은 코드와 재현 결과를 따른다.
   - DYNAMIC이 시스템 타입을 가리키는 재생 단계(`p7_dynamic_system_*`)는 NOOP(7b)이 매퍼 표에 들어가야 켜진다. 7c는 등록한 가짜 동기
     시스템 타입으로 같은 경로를 시험했다(`Archon.Runtime.Step.DynamicStepTest`).
 
