@@ -26,9 +26,8 @@ defmodule Archon.Runtime.Step.StartWorkflow do
   `idempotencyStrategy` are read but not used, as upstream's `startWorkflow`.
 
   The ID makes the start idempotent: an effect run again (after a crash, or when the recovery
-  starts the task again) gets the workflow it started. A task run again in place (a rerun, which
-  keeps its ID, retry count and the workflow it started first) is scheduled after that workflow
-  was created; it then starts another one, with the ID `rerun_workflow_id/2`.
+  starts the task again) gets the workflow it started. A task run again in place (a rerun keeps
+  its ID and retry count) is scheduled anew, so its `scheduledTime` gives it another workflow.
   """
 
   alias Archon.Domain.{StartWorkflowRequest, Task, Validation, Workflow}
@@ -38,18 +37,10 @@ defmodule Archon.Runtime.Step.StartWorkflow do
 
   @doc """
   The ID of the workflow a task starts: the name-based UUID of
-  `startworkflow:<workflow ID>:<task ID>:<retry count>`.
+  `startworkflow:<workflow ID>:<task ID>:<retry count>:<scheduledTime>`.
   """
   @spec workflow_id(String.t(), Task.t()) :: String.t()
-  def workflow_id(workflow_id, %Task{task_id: task_id, retry_count: retry_count}),
-    do: SubWorkflow.name_uuid("startworkflow:#{workflow_id}:#{task_id}:#{retry_count}")
-
-  @doc """
-  The ID for a task run again in place: `workflow_id/2`'s name with the task's `scheduledTime`
-  appended, so each run gets its own.
-  """
-  @spec rerun_workflow_id(String.t(), Task.t()) :: String.t()
-  def rerun_workflow_id(workflow_id, %Task{} = task) do
+  def workflow_id(workflow_id, %Task{} = task) do
     SubWorkflow.name_uuid(
       "startworkflow:#{workflow_id}:#{task.task_id}:#{task.retry_count}:#{task.scheduled_time}"
     )
@@ -73,17 +64,16 @@ defmodule Archon.Runtime.Step.StartWorkflow do
 
   # getRequest, then what upstream's startWorkflow refuses before a workflow exists that the
   # runtime does not check (as ArchonWeb.WorkflowController's check_start).
-  defp request(%State{env: env}, %Task{} = task) do
-    with {:ok, request} <- read(task),
-         :ok <- validate(request, task_def_lookup: env.task_def_lookup) do
-      refuse(request)
-    end
-  end
-
-  defp read(%Task{input_data: input}) do
+  defp request(%State{env: env}, %Task{input_data: input}) do
     case Map.get(input, @parameter) do
-      nil -> {:error, "Missing '#{@parameter}' in input data."}
-      json -> decode(json)
+      nil ->
+        {:error, "Missing '#{@parameter}' in input data."}
+
+      json ->
+        with {:ok, request} <- decode(json),
+             :ok <- validate(request, task_def_lookup: env.task_def_lookup) do
+          refuse(request)
+        end
     end
   end
 
@@ -162,36 +152,18 @@ defmodule Archon.Runtime.Step.StartWorkflow do
   end
 
   @doc """
-  The result of starting the workflow. `{:ok, workflow}` completes the task with its ID, unless
-  that workflow was created before the task was scheduled (the task runs again in place): then
-  the start is made again with `rerun_workflow_id/2`. A transient error leaves the task
-  `SCHEDULED` to try again; any other error fails it. A workflow other than the ones the task
-  asks for is ignored.
+  The result of starting the workflow. `{:ok, workflow}` completes the task with its ID. A
+  transient error leaves the task `SCHEDULED` to try again; any other error fails it. A workflow
+  other than the one the task asks for is ignored.
   """
   @spec started(State.t(), Task.t(), Event.sub_workflow_result()) ::
-          {:retry, State.t()} | {:done, Task.t()} | :ignore
-  def started(%State{wf: wf} = state, %Task{} = task, {:ok, %Workflow{} = started}) do
-    first = workflow_id(wf.workflow_id, task)
-    rerun = rerun_workflow_id(wf.workflow_id, task)
-
-    cond do
-      started.workflow_id == first and started.create_time < task.scheduled_time ->
-        # The request was valid when the start was made, in this same message; it is not
-        # validated again, since the task definitions it looks up may have changed since.
-        with {:ok, request} <- read(task),
-             {:ok, request} <- refuse(request) do
-          effect = {:start_workflow, task.task_id, start_input(wf, request, rerun)}
-          {:retry, State.post(state, effect)}
-        else
-          {:error, reason} -> {:done, failed(task, reason)}
-        end
-
-      started.workflow_id in [first, rerun] ->
-        output = Map.put(task.output_data, "workflowId", started.workflow_id)
-        {:done, %{task | status: :completed, output_data: output}}
-
-      true ->
-        :ignore
+          {:done, Task.t()} | :ignore
+  def started(%State{wf: wf}, %Task{} = task, {:ok, %Workflow{} = started}) do
+    if started.workflow_id == workflow_id(wf.workflow_id, task) do
+      output = Map.put(task.output_data, "workflowId", started.workflow_id)
+      {:done, %{task | status: :completed, output_data: output}}
+    else
+      :ignore
     end
   end
 

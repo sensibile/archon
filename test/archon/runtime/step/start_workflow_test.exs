@@ -121,7 +121,7 @@ defmodule Archon.Runtime.Step.StartWorkflowTest do
       id = StartWorkflow.workflow_id("wf", task)
 
       assert id ==
-               "startworkflow:wf:#{task.task_id}:0"
+               "startworkflow:wf:#{task.task_id}:0:#{@now}"
                |> then(&:crypto.hash(:md5, &1))
                |> uuid3()
 
@@ -352,24 +352,12 @@ defmodule Archon.Runtime.Step.StartWorkflowTest do
       assert starts(post) == []
     end
 
-    test "a task run again in place starts another workflow than its first run's" do
+    # A rerun keeps the task's ID and retry count and schedules it anew.
+    test "a task run again in place asks for another workflow than its first run's" do
       {stored, _post} = start(%{"request" => @request})
       task = only_task(stored)
-      first = StartWorkflow.workflow_id("wf", task)
-
-      # The first run's workflow was created before this run of the task was scheduled.
-      {:ok, stored, _pre, post} =
-        started(stored, {:ok, %Workflow{workflow_id: first, create_time: @now - 1}})
-
-      rerun = StartWorkflow.rerun_workflow_id("wf", task)
-      assert rerun != first
-      assert [%{workflow_id: ^rerun, name: "target"}] = starts(post)
-      assert %Task{status: :scheduled} = only_task(stored)
-
-      {:ok, stored, _pre, _post} =
-        started(stored, {:ok, %Workflow{workflow_id: rerun, create_time: @now + 5}})
-
-      assert %Task{status: :completed, output_data: %{"workflowId" => ^rerun}} = only_task(stored)
+      rerun = %{task | scheduled_time: @now + 60_000}
+      assert StartWorkflow.workflow_id("wf", rerun) != StartWorkflow.workflow_id("wf", task)
     end
   end
 

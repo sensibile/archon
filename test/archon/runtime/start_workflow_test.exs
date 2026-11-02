@@ -219,7 +219,7 @@ defmodule Archon.Runtime.StartWorkflowTest do
 
       [rerun_task] = starter.tasks
       second = rerun_task.output_data["workflowId"]
-      assert second == StartWorkflow.rerun_workflow_id(id, rerun_task)
+      assert second == StartWorkflow.workflow_id(id, rerun_task)
       assert workflow(first).status == :running
       assert workflow(second).status == :running
     end
