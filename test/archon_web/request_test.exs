@@ -215,6 +215,22 @@ defmodule ArchonWeb.RequestTest do
     end
   end
 
+  describe "convert_int/4" do
+    test "converts a value that is not a query value as int/4 does" do
+      assert Request.convert_int("version", "0x10", nil, "java.lang.Integer") == {:ok, 16}
+      assert Request.convert_int("version", " ", nil, "java.lang.Integer") == {:ok, nil}
+      assert Request.convert_int("version", "", 7, "java.lang.Integer") == {:ok, 7}
+
+      assert {:error, {:server_error, "Method parameter 'version': " <> _rest}} =
+               Request.convert_int("version", "x", nil, "java.lang.Integer")
+    end
+  end
+
+  test "values/2 lists every value of a parameter in order" do
+    assert Request.values(conn("a=1&b=2&a=3"), "a") == ["1", "3"]
+    assert Request.values(conn("b=2"), "a") == []
+  end
+
   describe "long/4" do
     test "takes Java's long range and names java.lang.Long" do
       assert Request.long(conn(), "t", nil) == {:ok, nil}

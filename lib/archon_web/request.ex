@@ -282,17 +282,22 @@ defmodule ArchonWeb.Request do
   """
   @spec int(Plug.Conn.t(), String.t(), integer() | nil, String.t()) ::
           {:ok, integer() | nil} | {:error, {:server_error, String.t()}}
-  def int(conn, name, default, java_type \\ "int") do
-    case first_value(conn, name) do
-      value when value in [nil, ""] ->
-        {:ok, default}
+  def int(conn, name, default, java_type \\ "int"),
+    do: convert_int(name, first_value(conn, name), default, java_type)
 
-      text ->
-        case String.replace(text, @java_whitespace, "") do
-          # A boxed Integer takes blank text as null; a primitive int fails on it.
-          "" when java_type == "java.lang.Integer" -> {:ok, default}
-          digits -> int_result(parse_int(digits, @int_range), name, java_type)
-        end
+  @doc """
+  `int/4` for a value that is not a query value (the path variable of a handler that does not
+  require it, such as `executeWorkflow`'s `version`): `nil` or `""` is `default`.
+  """
+  @spec convert_int(String.t(), String.t() | nil, integer() | nil, String.t()) ::
+          {:ok, integer() | nil} | {:error, {:server_error, String.t()}}
+  def convert_int(_name, value, default, _java_type) when value in [nil, ""], do: {:ok, default}
+
+  def convert_int(name, text, default, java_type) do
+    case String.replace(text, @java_whitespace, "") do
+      # A boxed Integer takes blank text as null; a primitive int fails on it.
+      "" when java_type == "java.lang.Integer" -> {:ok, default}
+      digits -> int_result(parse_int(digits, @int_range), name, java_type)
     end
   end
 
@@ -400,6 +405,10 @@ defmodule ArchonWeb.Request do
       values -> Enum.join(values, ",")
     end
   end
+
+  @doc "Every value of a query parameter, in order (Tomcat's parsing, below)."
+  @spec values(Plug.Conn.t(), String.t()) :: [String.t()]
+  def values(conn, name), do: query_values(conn, name)
 
   @doc """
   A `List<String>` query value (`StringToCollectionConverter`): `nil` when missing, the values of

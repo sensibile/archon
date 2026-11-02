@@ -11,6 +11,8 @@
   결정 6으로 맞췄다고 적었다.
 - 갱신: 2026-11-02 조각 6b. 결정 4 끝 "조각 6b 구현에서 정한 것"에 저장소 콜백 셋, 마이그레이션의 기존 행 채우기,
   `status` 변환, `int` 넘침, `null` correlationId를 적었다.
+- 갱신: 2026-11-02 조각 6e. 결정 5 끝 "조각 6e가 정한 것"에 구현에서 정한 세부(모르는 자식, 응답 없음의 문구, 대기의
+  30초 상한, 변환 실패 문구, `ArchonWeb.Request` 보충)를 적었다.
 - 갱신: 2026-11-02 조각 6d. 구현하며 정한 것과 결정 3의 기술을 바로잡은 것을 결정 3 끝 "조각 6d에서 정한 것"에 적었다.
 
 ## 맥락
@@ -314,6 +316,31 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
   upstream과 같음), `returnStrategy`다. 시작은 `POST /api/workflow`와 같은 경로(ADR 0023 결정 3·4의 검증과 오류, ADR 0024 결정 4)를
   쓴다. 인라인 정의에 태스크가 있으면 upstream은 입력에 `_systemMetadata.dynamic = true`를 넣는다(입력이 `null`이면 NPE 500). archon도
   같은 입력을 만든다.
+- **조각 6e가 정한 것(2026-11-02).** upstream 서버(기준 SHA, 빈 SQLite)에서 확인한 응답을 따른다.
+  - 함수: `Archon.Runtime.Tasks`의 `pending_task/2`, `update_by_ref/6`(`keep_worker: false`가 sync), `signal/3`, `owned_child/3`.
+    응답기는 `ArchonWeb.SignalResponder.await/5`, 모델은 `Archon.Domain.{SignalResponse,WorkflowRun,TaskRun}`이다.
+    `WorkflowSignalReturnStrategy`는 따로 모듈을 두지 않고 `SignalResponse.strategies/0`의 원자다.
+  - signal이 내려간 자식이 저장소에 없으면 upstream `getExecutionStatus`처럼 404 `"No such workflow found by id: <자식 ID>"`다.
+    소유권이 맞지 않는 자식은 건너뛴다(ADR 0024 결정 2). 응답기는 둘 다 건너뛴다(upstream의 `catch`).
+  - 막힌 태스크가 없는 `BLOCKING_TASK*`의 500 문구는 대기 중이면 `"The mapper [com.netflix.conductor.rest.controllers.
+    WorkflowSignalResponder$$Lambda] returned a null value."`(upstream의 JVM 람다 주소는 재현하지 않음, 재생은 `message`를 뺌),
+    시간 초과면 `"value"`다. 시간 초과가 0 이하면(`waitForSeconds=-1`) 읽기 없이 바로 시간 초과 응답이다(upstream 관측).
+  - 대기는 시간 초과 값과 상관없이 30초를 넘지 않는다. upstream은 Spring MVC 비동기 요청으로 답하고 Tomcat 기본 비동기 시간 제한
+    (30초, `spring.mvc.async.request-timeout` 설정 없음)이 끝내므로, 30초 넘게 기다리는 `execute`(`waitForSeconds=45`)와
+    `signal/sync`(`timeoutMillis=40000`)는 30초에 500(`message` 없음, `AsyncRequestTimeoutException`)이다(upstream 관측). archon도
+    같은 응답이고, 그래서 요청 하나가 연결 프로세스를 잡고 저장소를 읽는 시간은 클라이언트가 떠나도 30초까지다. upstream의
+    타이머는 읽는 중에도 울리므로, 읽기는 별도 프로세스에서 하고 마감까지 끝나지 않으면 죽이고 마감의 응답을 한다(느린
+    데이터베이스). 마감 뒤의 대체 읽기도 30초 상한이 끊고, 시간 초과가 30초와 같으면 대체 읽기에 한 틱(100ms)을 준다.
+  - 변환 실패는 Spring 문구 그대로 500이다. `status` 경로 값은 `TaskResult.Status` 상수(앞뒤 공백 무시)이고, 공백뿐이면
+    `"Required URI template variable 'status' for method parameter type Status is present but converted to null"`이다.
+    `returnStrategy`가 공백뿐이면 기본값, 반복되면 첫 값을 바꾸고 문구의 원래 형이 `java.lang.String[]`이다. 값은 100자에서
+    UTF-16 단위로 자르고 `" (truncated)..."`를 붙인다(잘린 서로게이트 쌍의 반쪽은 넣지 않음, upstream은 이스케이프로 씀).
+    공백 판정은 Java `String#trim`(U+0020 이하)이다. `timeoutMillis`는 Java `long` 범위다. `execute`의 `version`이 공백뿐이면 `null`이라
+    `version == 0`에서 NPE 500, 인라인 정의의 `_systemMetadata`가 맵이 아니면 JVM의 `ClassCastException` 문구 500이다. 인라인
+    정의 없이 이름이 공백이면 `POST /api/workflow`처럼 400 `"Workflow name must be specified when searching for a definition"`이다.
+  - sync ref 갱신의 메서드 검증(`@Valid TaskResult`)은 따로 하지 않는다. 대기 태스크에서 만든 결과는 두 ID가 늘 있다.
+  - 그래서 `lib/archon_web/request.ex`(결정 8의 6e 파일 목록 밖)에 `convert_int/4`(필수가 아닌 경로 값, `execute`의 `version`.
+    필수 경로 값은 6c의 `path_integer/2`), `values/2`(반복 쿼리 값)를 더했다. `timeoutMillis`는 6b의 `long/4`로 읽는다. 기존 함수의 동작은 같다.
 
 ### 6. metadata와 bulk
 
