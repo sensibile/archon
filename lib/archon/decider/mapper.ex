@@ -27,6 +27,7 @@ defmodule Archon.Decider.Mapper do
     ForkJoin,
     Join,
     Simple,
+    StartWorkflow,
     SubWorkflow,
     Switch,
     UserDefined,
@@ -56,6 +57,7 @@ defmodule Archon.Decider.Mapper do
     "JOIN" => Join,
     "DO_WHILE" => DoWhile,
     "SUB_WORKFLOW" => SubWorkflow,
+    "START_WORKFLOW" => StartWorkflow,
     "WAIT" => Wait
   }
 

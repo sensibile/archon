@@ -42,7 +42,8 @@ defmodule Archon.Runtime.Step do
   Decide loop, scheduling and termination follow upstream `WorkflowExecutorOps`
   (`Archon.Runtime.Step.Decide`, `Archon.Runtime.Step.Schedule`,
   `Archon.Runtime.Step.Terminate`); asynchronous system tasks are evaluated by the process itself
-  (`Archon.Runtime.Step.Async`, `Archon.Runtime.Step.SubWorkflow`); the next `:wake` is
+  (`Archon.Runtime.Step.Async`, `Archon.Runtime.Step.SubWorkflow`,
+  `Archon.Runtime.Step.StartWorkflow`); the next `:wake` is
   `Archon.Runtime.Step.Postpone`; `:recover` is `Archon.Runtime.Step.Recover`; the lifecycle
   operations are `Archon.Runtime.Step.Lifecycle`.
   """
@@ -59,6 +60,7 @@ defmodule Archon.Runtime.Step do
     Lifecycle,
     Postpone,
     Recover,
+    StartWorkflow,
     State,
     SubWorkflow,
     Tasks,
@@ -136,9 +138,16 @@ defmodule Archon.Runtime.Step do
   end
 
   defp handle({:sub_workflow_started, task_id, result}, state) do
-    case State.task(state, task_id) do
-      %{status: :scheduled} = task -> {:ok, sub_workflow_started(state, task, result)}
-      _gone -> {:ok, state}
+    case Async.attempt(state, task_id, nil) do
+      nil -> {:ok, state}
+      task -> {:ok, started(state, SubWorkflow.started(state, task, result))}
+    end
+  end
+
+  defp handle({:workflow_started, task_id, result}, state) do
+    case Async.attempt(state, task_id, nil) do
+      nil -> {:ok, state}
+      task -> {:ok, started(state, StartWorkflow.started(state, task, result))}
     end
   end
 
@@ -176,17 +185,17 @@ defmodule Archon.Runtime.Step do
 
   defp handle({:rerun_parent, request}, state), do: Lifecycle.rerun_parent(state, request)
 
-  # What AsyncSystemTaskExecutor does after SubWorkflow#start returned.
-  defp sub_workflow_started(state, task, result) do
-    case SubWorkflow.started(state, task, result) do
-      :ignore -> state
-      {:retry, state} -> state
-      {:done, task} -> settle_if(Async.dispose(state, task, true))
+  # What AsyncSystemTaskExecutor does after a start returned. A task that goes on (a transient
+  # error) is evaluated again when its callback is over, as upstream postpones its message.
+  defp started(state, :ignore), do: state
+  defp started(_state, {:retry, state}), do: state
+
+  defp started(state, {:done, task}) do
+    case Async.finish(state, task) do
+      {state, true} -> Decide.settle(state)
+      {state, false} -> State.pull(state, Postpone.wake_at(state.wf, state.env))
     end
   end
-
-  defp settle_if({state, true}), do: Decide.settle(state)
-  defp settle_if({state, false}), do: state
 
   # createWorkflowModel: a running workflow created now.
   defp new_workflow(%Workflow{} = workflow, now) do
@@ -229,9 +238,11 @@ defmodule Archon.Runtime.Step do
 
   # A child start asked for earlier in the step is dropped when the same step ended its task
   # (the parent terminated): the child termination already ran before the commit, so a start
-  # after it would leave the child running (ADR 0018, decision 8).
-  defp still_wanted?(state, {:start_sub_workflow, task_id, _start}),
-    do: match?(%{status: :scheduled}, State.task(state, task_id))
+  # after it would leave the child running (ADR 0018, decision 8). A START_WORKFLOW task ended
+  # that way does not start its workflow either, as upstream's executor cancels it first.
+  defp still_wanted?(state, {start, task_id, _start})
+       when start in [:start_sub_workflow, :start_workflow],
+       do: match?(%{status: :scheduled}, State.task(state, task_id))
 
   defp still_wanted?(_state, _effect), do: true
 

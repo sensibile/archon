@@ -81,7 +81,8 @@ defmodule Archon.Decider.SystemTasks do
         async_complete: true,
         start_idempotent?: true
       },
-      "WAIT" => %Spec{module: SystemTask.Wait, async?: true}
+      "WAIT" => %Spec{module: SystemTask.Wait, async?: true},
+      "START_WORKFLOW" => %Spec{async?: true, start_idempotent?: true}
     }
   end
 

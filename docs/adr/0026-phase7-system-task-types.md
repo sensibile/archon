@@ -380,6 +380,33 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     문구 `"inputParameters.http_request or inputParameters.uri field is required for taskType: HTTP taskName: <name>"`)을 옮긴다(7a의
     조회 연결을 쓴다).
 
+- **조각 7f에서 정한 것(2026-11-03).**
+  - 공통 비동기 경로: 시작이 프로세스 밖의 일인 타입은 `Step.Async`의 시작 모듈 표(`SUB_WORKFLOW` → `Step.SubWorkflow`,
+    `START_WORKFLOW` → `Step.StartWorkflow`)에 있고, 모듈은 `start(state, task) :: {:started, state} | {:failed, task}`다. `:started`는
+    효과를 올리고, 효과는 `pollCount`·`startTime` 커밋 뒤에 돈다. 결과 이벤트는 `Async.attempt(state, task_id, poll_count)`로 태스크를
+    찾고(`SCHEDULED`이고, 이벤트에 `pollCount`가 있으면 같을 때만. 아니면 버림) `Async.finish/2`로 끝낸다. 결정하지 않고 끝나면(일시적
+    오류) 그 태스크의 재평가 시각으로 타이머를 당긴다(`Postpone.wake_at`). 7g는 HTTP 시작 모듈을 이 표에 넣고
+    `{:http_completed, task_id, poll_count, result}`를 `attempt/3`에 `poll_count`를 넘겨 거른다.
+  - 응답 시간 초과의 예외는 `SUB_WORKFLOW` 이름 대신 표의 `start_idempotent?`다(upstream `isStartIdempotent`).
+  - 복구는 `Async.pass(state, :recover)`다. `:wake`처럼 지연이 끝난 태스크를 평가하고, 시작 멱등 타입의 `SCHEDULED`·`pollCount` > 0
+    태스크는 지연과 상관없이 바로 다시 시작한다(`startDelay`가 있는 `START_WORKFLOW`도 바로). 그래서 시작 오류로 기다리던
+    `SUB_WORKFLOW`(`subWorkflowLaunchError`)도 복구에서는 바로 다시 시작한다. `:wake`는 지금처럼 지연을 지킨다. 멱등이 아닌 타입은
+    복구가 다시 시작하지 않는다. 진행 중 HTTP를 고르는 자리에서 거르는 것과 그 마감(`Step.Postpone`)은 7g 몫이다.
+    `Postpone.compute/2`(upstream `computePostpone`)는 바꾸지 않았다.
+  - 최상위 시작(`POST /api/workflow`)의 첫 결정이 올린 `START_WORKFLOW` 시작은 `SUB_WORKFLOW`처럼 답한 뒤로 미룬다. 같은 단계에서
+    태스크가 끝나면(종료) 시작 효과를 버린다.
+  - `START_WORKFLOW`의 표 항목은 `module: nil`(upstream 기본 `execute`), `async_complete: :by_task`(upstream 기본)다.
+  - 변환 실패 문구는 archon codec의 첫 오류다(`"Error reading StartWorkflowRequest. must be object"`). Jackson 문구는 재현하지 않는다
+    (의도적 차이, 7h가 목록에 옮긴다). 시작 REST(`WorkflowController`)처럼 정의 없이 이름이 공백이면 `"Workflow name must be
+    specified when searching for a definition"`, 입력 없이 외부 입력 경로가 있으면 `"Unable to download payload from external
+    storage path: <path>"`로 `FAILED`다. 일시적 오류는 upstream처럼 `reasonForIncompletion`·출력을 바꾸지 않는다.
+  - 제자리 재실행(rerun은 태스크 ID와 재시도 횟수를 그대로 둔다)에서는 고정 ID가 첫 실행의 워크플로우를 돌려준다. upstream rerun은
+    새 워크플로우를 시작하므로, 돌려받은 워크플로우의 `createTime`이 태스크의 `scheduledTime`보다 이르면(rerun이 `scheduledTime`을
+    새로 찍는다) `startworkflow:<워크플로우 ID>:<태스크 ID>:<재시도 횟수>:<scheduledTime>` 해시로 한 번 더 시작한다. 같은 실행 안의
+    효과 재실행은 여전히 같은 워크플로우를 받는다.
+  - 픽스처: `START_WORKFLOW` 재생 단계는 NOOP에 기대므로 7b가 머지되기 전에는 건너뛴다. 시작하는 쪽은 `Archon.StepReplay` 방식의
+    단계 시험이 `p7_start_workflow_get`·`_invalid_get`·`_missing_get`과 같다(`test/archon/runtime/step/start_workflow_test.exs`).
+
 ### 8. 골든 픽스처와 재생(조각 7a가 한 번에 캡처)
 
 - 7a가 열두 타입의 시나리오 전부를 `scripts/contract/capture_fixtures.sh` 끝에 더하고 upstream 서버(기준 SHA 빌드, 빈 SQLite)에서

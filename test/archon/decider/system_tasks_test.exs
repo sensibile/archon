@@ -20,7 +20,7 @@ defmodule Archon.Decider.SystemTasksTest do
       registry = SystemTasks.default()
 
       assert Enum.sort(Map.keys(registry)) ==
-               ~w(DECISION DO_WHILE FORK JOIN SUB_WORKFLOW SWITCH WAIT)
+               ~w(DECISION DO_WHILE FORK JOIN START_WORKFLOW SUB_WORKFLOW SWITCH WAIT)
 
       # FORK_JOIN is the workflow task's type; its task's is FORK.
       refute SystemTasks.system_task?(registry, "FORK_JOIN")
@@ -31,10 +31,11 @@ defmodule Archon.Decider.SystemTasksTest do
       registry = SystemTasks.default()
 
       assert Enum.filter(Map.keys(registry), &SystemTasks.async?(registry, &1)) |> Enum.sort() ==
-               ~w(JOIN SUB_WORKFLOW WAIT)
+               ~w(JOIN START_WORKFLOW SUB_WORKFLOW WAIT)
 
-      assert Enum.filter(Map.keys(registry), &SystemTasks.start_idempotent?(registry, &1)) ==
-               ["SUB_WORKFLOW"]
+      # START_WORKFLOW's start is idempotent in Archon only (ADR 0026, decision 7).
+      assert Enum.filter(Map.keys(registry), &SystemTasks.start_idempotent?(registry, &1))
+             |> Enum.sort() == ["START_WORKFLOW", "SUB_WORKFLOW"]
 
       refute SystemTasks.async?(registry, "SIMPLE")
       assert SystemTasks.async_complete?(registry, %Task{task_type: "SUB_WORKFLOW"})

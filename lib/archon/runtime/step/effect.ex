@@ -16,6 +16,9 @@ defmodule Archon.Runtime.Step.Effect do
     * `{:start_sub_workflow, task_id, start}` - starts the child of a `SUB_WORKFLOW` task with
       `Archon.Runtime.start_workflow_idempotent/1`. The result goes back to the step as
       `{:sub_workflow_started, task_id, result}`.
+    * `{:start_workflow, task_id, start}` - starts the workflow of a `START_WORKFLOW` task with
+      `Archon.Runtime.start_workflow_idempotent/1` (ADR 0026, decision 7). The result goes back
+      to the step as `{:workflow_started, task_id, result}`.
     * `{:terminate_sub_workflow, workflow_id, reason}` - sends `{:cancel_by_parent, reason, nil}`
       to a child. A child that does not exist counts as done (ADR 0018, decision 5). In `post`
       it is `{:terminate_sub_workflow, workflow_id, reason, parent_end_count}`, with the parent's
@@ -68,6 +71,7 @@ defmodule Archon.Runtime.Step.Effect do
           | {:queue_remove, String.t(), String.t()}
           | {:queue_postpone, String.t(), String.t(), integer(), non_neg_integer()}
           | {:start_sub_workflow, String.t(), start()}
+          | {:start_workflow, String.t(), start()}
           | {:terminate_sub_workflow, String.t(), String.t()}
           | {:terminate_sub_workflow, String.t(), String.t(), non_neg_integer()}
           | {:notify_parent, String.t(), String.t() | nil, Workflow.t() | nil}
