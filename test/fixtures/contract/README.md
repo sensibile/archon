@@ -11,8 +11,10 @@ BASE_URL=http://localhost:18080 scripts/contract/capture_fixtures.sh
 ```
 
 HTTP 태스크 픽스처는 고정 응답 stub([`test/support/http_stub.ex`](../../support/http_stub.ex))를 부른다. 스크립트가
-`MIX_ENV=test mix run`으로 `127.0.0.1:18299`에 띄운다(`HTTP_STUB`로 이미 떠 있는 stub를 줄 수 있다). 재생은 픽스처의 이
-주소를 시험 안에서 띄운 stub 주소로 바꾼다.
+`MIX_ENV=test mix run`으로 `127.0.0.1:18299`에 띄운다(그 주소에 이미 떠 있으면 `HTTP_STUB=http://127.0.0.1:18299`. 다른 주소는
+거절한다). 재생은 픽스처의 이 주소를 시험 안에서 띄운 stub 주소로 바꾼다. stub의 상태 코드 299 사유 문구는 Plug의 컴파일 시간
+설정(`config/test.exs`의 `config :plug, :statuses`)이라, 그 줄이 없던 `_build/test`에서는 `MIX_ENV=test mix deps.compile plug
+--force`가 한 번 필요하다.
 
 ## 형식
 
@@ -129,7 +131,7 @@ Phase 6 단계는 조각 6a~6g가 구현하는 동안 미구현 액션으로 가
 경로도 비교한다.
 
 아래는 Phase 7(MVP 밖 시스템 태스크 타입, [ADR 0026](../../../docs/adr/0026-phase7-system-task-types.md) 결정 8)의 첫 조각
-7a가 열두 타입의 시나리오를 한 번에 캡처해 더한 것이다(160개, 모두 521개). 이름은 모두 `p7_<타입>_*`이고 정의 이름은
+7a가 열두 타입의 시나리오를 한 번에 캡처해 더한 것이다(160개, 모두 520개). 이름은 모두 `p7_<타입>_*`이고 정의 이름은
 `archon_p7_*`, 워커 태스크는 `archon_p7_worker`다. 시나리오는 정의 등록 → 시작 → 멈춘 워크플로우 GET이고, GET은
 `workflowDefinition`까지 비교한다(DYNAMIC·HTTP 매퍼의 정의 변경). 캡처에서 ADR과 다르게 확인한 upstream 응답은 ADR 0026 결정
 4·8 끝에 있다.
@@ -148,7 +150,7 @@ Phase 6 단계는 조각 6a~6g가 구현하는 동안 미구현 액션으로 가
 | `p7_start_workflow_*` | 시작한 워크플로우(GET 포함), 검증 실패, `startWorkflow` 없음 |
 | `p7_http_*` | stub 대상 JSON·POST(헤더 포함)·글자·수 body, 299, 4xx 짧은·긴·빈 body, 503, 연결 거부, `uri`·`method` 없음, `asyncComplete`, 덮이는 `inputParameters.asyncComplete`, 등록 400 |
 
-7a가 다시 캡처한 기존 361개는 `normalize/1` 기준으로 순서만 달랐다(bulk 오류 맵의 키, `workflow_correlated_paused_closed`,
+7a가 다시 캡처한 기존 360개는 `normalize/1` 기준으로 순서만 달랐다(bulk 오류 맵의 키, `workflow_correlated_paused_closed`,
 `route_later_tasks_search`). `task_update_v2_invalid_both`는 두 오류 순서가 바뀌어 기존 캡처를 남겼다. Phase 7 단계는
 `types:` 옵션을 달아 그 타입의 매퍼가 생길 때까지 건너뛴다(7h가 옵션을 없앤다).
 

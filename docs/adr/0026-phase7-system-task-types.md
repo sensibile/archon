@@ -126,6 +126,9 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     `start`(`IN_PROGRESS`)는 behaviour로 옮겼고 `Step.Async`가 SUB_WORKFLOW 밖의 비동기 시작에서 부른다.
   - `start`는 `Step.Schedule.start_sync/2`가 동기 타입 예약 직후에, 그리고 rerun 대상이 동기 시스템 태스크일 때
     `Step.Lifecycle`이 부른다(upstream `rerunWF`도 `start`를 부른다). rerun 대상은 `start` 뒤에도 `SCHEDULED`일 때만 큐에 넣는다.
+    다만 archon은 이전부터 rerun 대상을 먼저 `SCHEDULED`로 두는데, upstream `rerunWF`는 동기 시스템 태스크의 상태를 바꾸지 않고
+    (`FORK`는 `COMPLETED`로 남음) `FORK_JOIN_DYNAMIC`은 `COMPLETED`로 둔다. 7a는 동작을 바꾸지 않으므로 이 차이는 FORK rerun을
+    옮기는 7c가 맞춘다(`p7_fjd_rerun_fork_get`).
   - `Result`의 태스크는 `changed?`와 상관없이 상태에 넣고, `workflow`가 오면 그 자리에서 `State.save_workflow`를 부른다
     (`Step.Schedule.apply_result/2`). upstream `SetVariable`이 `execute` 안에서 `updateWorkflow`를 부르는 것과 같은 시점이다.
   - 조회 둘의 기본값은 `Context`·`Step.Env` 모두 "없음"이고(순수 시험이 저장소를 읽지 않게), 메타데이터 저장소를 읽는 함수는
@@ -204,7 +207,9 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
   `true`를 답하고, 바꾼 `WorkflowTask`를 돌려주는 태스크의 `workflow_task`에 넣는다(upstream에서 태스크와 정의가 같은 객체를
   가리키는 것과 같다). `Archon.Decider.decide/2`는 예약할 태스크 가운데 그런 타입의 `workflow_task`가 정의의 같은 ref 태스크와
   다르면 정의에 써 넣고(`WorkflowDef.replace_task/2`, 중첩 포함) `Outcome.changed_workflow_tasks`에 담는다. `Step.Decide`는 그 결정에서
-  바로 워크플로우를 저장한다. 7c·7g는 매퍼에서 콜백과 `workflow_task`만 채운다.
+  바로 워크플로우를 저장한다. 7c·7g는 매퍼에서 콜백과 `workflow_task`만 채운다. 판정은 예약할 태스크 전체(재시도 사본 포함)를
+  보므로, 매퍼는 재시도 사본의 `workflow_task`가 정의와 달라지지 않게 한다(DO_WHILE 반복 안의 DYNAMIC은 upstream에서 정의가
+  아니라 사본을 바꾼다. 7c가 확인한다).
   캡처는 정의 없는 이름도 보여 준다. upstream은 시작 때 정의가 없는 모든 태스크에 기본 태스크 정의(이름은 정의의 태스크 이름
   `archon_p7_dynamic`)를 채우므로(`MetadataMapperService`), DYNAMIC 매퍼는 늘 그 정의를 쓰고 `"Invalid task specified ..."`로
   끝나지 않는다. 정의 없는 이름(`archon_p7_missing`)의 태스크가 그 타입으로 `SCHEDULED`에 남는다(`p7_dynamic_missing_get`).
@@ -405,8 +410,8 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   타입을 넣으면 자기 단계가 켜지고, 시나리오를 고치지 않는다. 7h가 이 옵션을 없앤다.
 - 결정 루프 단위의 재생(`Archon.StepReplay`)도 타입마다 더한다. 이것은 각 조각이 자기 시험 파일로 한다.
 
-- **조각 7a에서 정한 것과 캡처에서 확인한 것(2026-11-02).** 픽스처는 `p7_<타입>_*` 160개다(기존 361개와 한 번에 캡처, 모두
-  521개). 기존 픽스처는 `normalize/1` 기준으로 같았고, 다른 것은 순서뿐이다(bulk 오류 맵의 키, 순서 없는 목록
+- **조각 7a에서 정한 것과 캡처에서 확인한 것(2026-11-02).** 픽스처는 `p7_<타입>_*` 160개다(기존 360개와 한 번에 캡처, 모두
+  520개). 기존 픽스처는 `normalize/1` 기준으로 같았고, 다른 것은 순서뿐이다(bulk 오류 맵의 키, 순서 없는 목록
   `workflow_correlated_paused_closed`·Later 경로 `route_later_tasks_search`). `task_update_v2_invalid_both`의 두 오류 순서는
   6a처럼 기존 캡처를 남겼다. 재생 장치는 단계 옵션 `types:`, `until: :settled`(워크플로우 상태·태스크 수·각 태스크 상태가
   픽스처와 같을 때까지 다시 읽음), stub 주소 치환(`new_state(http_stub: url)`, 캡처 주소 `http://127.0.0.1:18299`)이다.

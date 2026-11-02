@@ -39,6 +39,23 @@ defmodule Archon.Runtime.Step.SystemTaskRegistryTest do
     end
   end
 
+  # An asynchronous type: `start` puts the task IN_PROGRESS and its input into the variables.
+  defmodule AsyncLike do
+    @behaviour SystemTask
+
+    @impl true
+    def start(workflow, task, _context) do
+      %SystemTask.Result{
+        changed?: true,
+        task: %{task | status: :in_progress},
+        workflow: %{workflow | variables: Map.merge(workflow.variables, task.input_data)}
+      }
+    end
+
+    @impl true
+    def execute(_workflow, task, _context), do: SystemTask.unchanged(task)
+  end
+
   @now 1_000_000
 
   defp env do
@@ -51,7 +68,9 @@ defmodule Archon.Runtime.Step.SystemTaskRegistryTest do
         "id-#{:counters.get(counter, 1)}"
       end,
       system_tasks:
-        Map.put(SystemTasks.default(), "ARCHON_SET", %SystemTasks.Spec{module: SetLike})
+        SystemTasks.default()
+        |> Map.put("ARCHON_SET", %SystemTasks.Spec{module: SetLike})
+        |> Map.put("ARCHON_ASYNC", %SystemTasks.Spec{module: AsyncLike, async?: true})
     )
   end
 
@@ -132,6 +151,15 @@ defmodule Archon.Runtime.Step.SystemTaskRegistryTest do
     assert %Task{status: :in_progress} = Enum.find(stored.tasks, &(&1.task_type == "JOIN"))
     assert saved.variables == %{"keep" => 1, "v" => 2}
     assert stored.variables == saved.variables
+  end
+
+  test "an asynchronous type's start runs when the process evaluates it, saving its workflow" do
+    workflow = start([task("ARCHON_ASYNC", "async", input_parameters: %{"v" => 3})])
+
+    assert [%Task{task_type: "ARCHON_ASYNC", status: :in_progress, poll_count: 1}] =
+             workflow.tasks
+
+    assert workflow.variables == %{"keep" => 1, "v" => 3}
   end
 
   test "a type without start or execute leaves the task as it is" do

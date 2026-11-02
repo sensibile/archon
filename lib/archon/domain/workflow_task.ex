@@ -149,7 +149,7 @@ defmodule Archon.Domain.WorkflowTask do
     do: {:ok, new}
 
   def replace(%__MODULE__{type: type} = task, new) when type in ["DECISION", "SWITCH"] do
-    cases = Enum.sort(task.decision_cases || %{})
+    cases = Enum.to_list(task.decision_cases || %{})
 
     with :error <- replace_in_cases(task, cases, new),
          {:ok, default} <- replace_in_list(task.default_case, new) do
@@ -191,7 +191,7 @@ defmodule Archon.Domain.WorkflowTask do
     end
   end
 
-  # collect_tasks/1 order: the cases in Map.values/1 order of the decision cases.
+  # collect_tasks/1 order: the cases in the map's own order, as Map.values/1 gives them.
   defp replace_in_cases(_task, [], _new), do: :error
 
   defp replace_in_cases(task, [{key, list} | rest], new) do

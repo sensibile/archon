@@ -179,15 +179,19 @@ defmodule Archon.Runtime.Step.Schedule do
   """
   @spec start_sync(State.t(), Task.t()) :: State.t()
   def start_sync(%State{env: env} = state, %Task{task_id: id}) do
-    task = State.task(state, id)
+    case State.task(state, id) do
+      nil ->
+        state
 
-    state =
-      case SystemTask.start(state.wf, task, Env.context(env)) do
-        nil -> state
-        result -> apply_result(state, result)
-      end
+      task ->
+        state =
+          case SystemTask.start(state.wf, task, Env.context(env)) do
+            nil -> state
+            result -> apply_result(state, result)
+          end
 
-    State.save_current(state, id)
+        State.save_current(state, id)
+    end
   end
 
   @doc """

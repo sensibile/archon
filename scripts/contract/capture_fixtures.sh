@@ -4,8 +4,8 @@
 # Usage: BASE_URL=http://localhost:8080 scripts/contract/capture_fixtures.sh [out_dir]
 #
 # The HTTP task fixtures call a fixed-response stub (test/support/http_stub.ex). The script starts
-# it on 127.0.0.1:18299 (MIX_ENV=test mix run) unless HTTP_STUB names a running one; the replay
-# expects that address in the fixtures (ArchonWeb.ContractCase).
+# it on 127.0.0.1:18299 (MIX_ENV=test mix run) unless HTTP_STUB=http://127.0.0.1:18299 says one
+# already runs there; the replay expects that address in the fixtures (ArchonWeb.ContractCase).
 #
 # The server must start empty (fresh SQLite file). Each exchange is written as one JSON file:
 #   {"request": {"method", "path", "body"}, "response": {"status", "content_type", "body"}}
@@ -24,6 +24,10 @@ mkdir -p "$OUT"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+if [[ -n "${HTTP_STUB:-}" && "$HTTP_STUB" != http://127.0.0.1:18299 ]]; then
+  echo "HTTP_STUB must be http://127.0.0.1:18299, the address the replay expects" >&2
+  exit 1
+fi
 if [[ -z "${HTTP_STUB:-}" ]]; then
   MIX_ENV=test mix run --no-start -e '{:ok, _apps} = Application.ensure_all_started(:bandit)
     {:ok, _pid, _url} = Archon.HttpStub.start(18299)

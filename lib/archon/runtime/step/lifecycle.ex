@@ -633,7 +633,9 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
     # addTaskToQueue; an asynchronous system task is evaluated when due. A synchronous one is
     # started in place (for SWITCH, DECISION, FORK and DO_WHILE that changes nothing) and, while
-    # still SCHEDULED, pushed as upstream does (the decide loop runs it).
+    # still SCHEDULED, pushed (the decide loop runs it). Upstream's rerunWF does not make a
+    # synchronous system task SCHEDULED first: it keeps the status it had (ADR 0026, decision 2,
+    # a difference left to slice 7c, which reruns FORK tasks of FORK_JOIN_DYNAMIC).
     state =
       cond do
         Schedule.async?(env, task) ->
