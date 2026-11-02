@@ -27,7 +27,8 @@ defmodule Archon.Decider.Mapper.ForkJoinDynamic do
 
   Each branch is mapped by its own type's mapper (`Archon.Decider.tasks_to_be_scheduled/5`).
   When the workflow already has a task with the fork's reference name the branches are not made
-  again and the `JOIN` waits on nothing. The definition must follow the fork with a `JOIN`.
+  again and the `JOIN` waits on nothing. The definition must follow the fork with a `JOIN`; that
+  is checked first, and a branch list that leads back to a fork being mapped ends the workflow.
 
   Upstream casts `forkTaskWorkflow`, `forkTaskWorkflowVersion`, `forkTaskType` and
   `forkTaskName` to strings and throws outside its termination path when one is not; here such a
@@ -48,11 +49,14 @@ defmodule Archon.Decider.Mapper.ForkJoinDynamic do
     workflow = context.workflow
     input = context.task_input
 
+    # The JOIN is looked up before the branches (upstream after them): a dynamic fork among the
+    # branches then needs a reference of the definition followed by a JOIN, which bounds the
+    # nesting a branch list can ask for (ADR 0026, decision 4).
     with :ok <- not_nested_in_itself(wt, context),
+         {:ok, join} <- join_task(workflow, wt),
          {:ok, branches, inputs} <- branches(wt, input, context),
          {:ok, branches, branch_tasks, join_on} <-
-           schedule_branches(wt, branches, inputs, context),
-         {:ok, join} <- join_task(workflow, wt) do
+           schedule_branches(wt, branches, inputs, context) do
       {:ok, [fork(context, branches) | branch_tasks] ++ [join(context, join, join_on)]}
     end
   end

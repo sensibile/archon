@@ -53,6 +53,20 @@ defmodule Archon.Decider.DynamicMapperTest do
 
   defp reason({:terminate, %Termination{reason: reason}}), do: reason
 
+  # Runs `fun` in a process with a heap limit and a timeout, for inputs that once mapped forever.
+  defp guarded(fun) do
+    task =
+      Elixir.Task.async(fn ->
+        Process.flag(:max_heap_size, %{size: 5_000_000, kill: true, error_logger: false})
+        fun.()
+      end)
+
+    case Elixir.Task.yield(task, 5_000) || Elixir.Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      other -> flunk("the mapping did not end: #{inspect(other)}")
+    end
+  end
+
   describe "DYNAMIC" do
     defp dynamic(extra \\ []) do
       struct!(
@@ -348,11 +362,42 @@ defmodule Archon.Decider.DynamicMapperTest do
         }
       }
 
-      input = %{"tasks" => [Map.put(nested, "taskReferenceName", "loop")], "inputs" => %{}}
+      # a branch with the fork's own reference, which the definition follows with a JOIN
+      input = %{"tasks" => [nested], "inputs" => %{}}
 
-      assert reason(schedule(workflow([wt, join()], input), wt)) ==
+      assert reason(guarded(fn -> schedule(workflow([wt, join()], input), wt) end)) ==
                "No dynamic tasks could be created for the Workflow: wf.2/wf, Dynamic Fork Task: " <>
-                 "inner/loop attempted to create a duplicate task reference name: loop"
+                 "inner/fjd attempted to create a duplicate task reference name: fjd"
+    end
+
+    # Without forkTaskName (or with a dynamic fork already in the workflow) the branch names
+    # grow at each level, so only the JOIN check ends it. Guarded: a regression would not end.
+    test "a simple-form branch list that leads back to a fork ends at the JOIN check" do
+      element = %{
+        "forkTaskType" => "FORK_JOIN_DYNAMIC",
+        "forkTaskInputs" => "${workflow.input.list}"
+      }
+
+      running_fork = %Task{
+        reference_task_name: "other",
+        status: :completed,
+        workflow_task: fjd(element)
+      }
+
+      for {fork_input, tasks} <- [
+            {element, []},
+            {Map.put(element, "forkTaskName", "n"), [running_fork]}
+          ] do
+        wt = fjd(fork_input)
+
+        result =
+          guarded(fn ->
+            schedule(workflow([wt, join()], %{"list" => [fork_input]}, tasks: tasks), wt)
+          end)
+
+        assert reason(result) ==
+                 "Dynamic join definition is not followed by a join task.  Check the workflow definition."
+      end
     end
 
     test "two branches that make the same reference name terminate it" do

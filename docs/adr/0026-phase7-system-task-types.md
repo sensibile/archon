@@ -280,6 +280,10 @@ DYNAMIC이 풀어 낸 이름 등)으로 찾는다. upstream에서도 DYNAMIC·FO
     duplicate task reference name: <ref>"`로 종료한다. 한 FORK가 이미 만든 ref를 다른 가지가 다시 만들어도 같은 문구로 종료한다
     (upstream은 둘 다 만들고 `dedupAndAddTasks`가 하나를 버린다). 같은 하위 목록을 나눠 쓰는 가지가 곱절로 불어나는 것도 이것이
     막는다.
+    간단 형태는 이름이 없거나 워크플로우에 이미 동적 포크가 있으면 가지 ref가 단계마다 길어져(`_fjd_0`, `__fjd_0_0`, ...) 같은 ref
+    검사를 피하므로(자체 리뷰 지적), 다음 JOIN 검사를 가지 매핑보다 먼저 한다. 그러면 가지 안의 동적 포크는 정의에서 바로 뒤에
+    JOIN이 오는 ref여야 하므로 중첩이 정의의 유한한 ref로 묶인다. 생기는 차이는 JOIN도 없고 가지도 잘못됐을 때 JOIN 문구가 먼저
+    나오는 것뿐이다(upstream은 가지 오류가 먼저).
   - SUB_WORKFLOW 매퍼는 버전이 없을 때 `latest_workflow_versions`, 없으면 `workflow_def_lookup.(name, nil)`의 버전을 쓴다. 간단 형태의
     `forkTaskWorkflow` 가지가 이 경로를 탄다.
   - **rerun.** FORK_JOIN_DYNAMIC이 만든 FORK 태스크의 rerun은 upstream `finalizeRerun`의 첫 분기다. 뒤 태스크와 FORK 자신을 지우고
