@@ -189,7 +189,15 @@ defmodule Archon.Runtime.RerunTest do
         end
       )
 
-      rerun = Elixir.Task.async(fn -> rerun(parent, re_run_from_task_id: t1.task_id) end)
+      rerun =
+        Elixir.Task.async(fn ->
+          rerun(parent,
+            re_run_from_task_id: t1.task_id,
+            workflow_input: %{"late" => true},
+            correlation_id: "rerun-late"
+          )
+        end)
+
       assert_receive {:held, runner, {:revive_parent, ^parent, _task}}, 2_000
 
       # the worker finishes the task while the rerun waits on the child's outbox
@@ -202,6 +210,8 @@ defmodule Archon.Runtime.RerunTest do
       Process.sleep(200)
       assert workflow(parent).status == :completed
       assert workflow(parent).end_count == parent_wf.end_count
+      # case 3 still gave the top workflow what the request asked of it
+      assert %Workflow{input: %{"late" => true}, correlation_id: "rerun-late"} = workflow(parent)
     end
 
     test "the input and correlation ID go to the top workflow only" do

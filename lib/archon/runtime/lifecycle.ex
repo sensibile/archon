@@ -259,18 +259,16 @@ defmodule Archon.Runtime.Lifecycle do
   defp rerun_above({{%Workflow{} = wf, task_id}, below}, :ok, input, correlation_id) do
     await_outbox(below)
 
-    # The workflow below completed again meanwhile and told this one, whose own notices then
-    # went up: the rerun has run its course (case 3 would reopen a completed workflow).
-    if completed?(below),
-      do: {:halt, :ok},
-      else: rerun_parent(wf, task_id, input, correlation_id)
+    # The workflow below completed again meanwhile and told this one: case 3 only takes the
+    # input and correlation ID (a completed workflow is not reopened), and the walk goes on.
+    rerun_parent(wf, task_id, input, correlation_id, completed?(below))
   end
 
   defp completed?(id) do
     match?({:ok, %Workflow{status: :completed}}, Runtime.get_workflow(id, false))
   end
 
-  defp rerun_parent(%Workflow{} = wf, task_id, input, correlation_id) do
+  defp rerun_parent(%Workflow{} = wf, task_id, input, correlation_id, below_completed?) do
     id = wf.workflow_id
     task = Enum.find(wf.tasks, &(&1.task_id == task_id))
 
@@ -281,7 +279,8 @@ defmodule Archon.Runtime.Lifecycle do
       last_retried_time: wf.last_retried_time,
       task_status: task.status,
       task_update_time: task.update_time,
-      task_retried: task.retried
+      task_retried: task.retried,
+      below_completed: below_completed?
     }
 
     case not_found_as(WorkflowServer.rerun_parent(id, request), id) do

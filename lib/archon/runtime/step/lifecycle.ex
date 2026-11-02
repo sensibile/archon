@@ -647,6 +647,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
         update_time: 0,
         end_time: 0,
         output_data: %{},
+        external_output_payload_storage_path: nil,
         retried: false,
         executed: false,
         poll_count: 0
@@ -702,7 +703,8 @@ defmodule Archon.Runtime.Step.Lifecycle do
           last_retried_time: integer(),
           task_status: Task.status(),
           task_update_time: integer(),
-          task_retried: boolean()
+          task_retried: boolean(),
+          below_completed: boolean()
         }
 
   @doc """
@@ -718,16 +720,17 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
   The message comes once the outbox below is empty, which is later than upstream's write. A task
   that moved on since it was read (`task_status`, `task_update_time`, `task_retried`) is left as
-  it is, and so
-  is the workflow: the child already completed again and told it (so the workflow may have
-  completed too), or the task was retried meanwhile. The rerun below stands either way.
+  it is, and so is the workflow's state: the child already completed again and told it (so the
+  workflow may have completed too; `below_completed` says so when the task cannot tell), or the
+  task was retried meanwhile. The workflow only takes the input and correlation ID then. The
+  rerun below stands either way.
   """
   @spec rerun_parent(State.t(), rerun_parent()) :: {reply(), State.t()}
   def rerun_parent(%State{now: now} = state, %{task_id: task_id} = request) do
     case State.task(state, task_id) do
       %Task{task_type: "SUB_WORKFLOW"} = task ->
-        if moved_on?(task, request),
-          do: {:ok, state},
+        if request.below_completed or moved_on?(task, request),
+          do: {:ok, take_fields(state, request)},
           else: rerun_parent_task(state, task, request, now)
 
       _gone ->
@@ -743,6 +746,19 @@ defmodule Archon.Runtime.Step.Lifecycle do
          (task.status != request.task_status or task.update_time != request.task_update_time))
   end
 
+  # rerunWF's input and correlation ID without the rest of case 3.
+  defp take_fields(%State{wf: wf} = state, request) do
+    updated =
+      if request.correlation_id, do: %{wf | correlation_id: request.correlation_id}, else: wf
+
+    updated =
+      if request.workflow_input, do: %{updated | input: request.workflow_input}, else: updated
+
+    if updated == wf,
+      do: state,
+      else: state |> State.put_workflow(updated) |> State.save_workflow()
+  end
+
   defp rerun_parent_task(state, %Task{} = task, request, now) do
     state = rerun_workflow(state, request)
     state = put_last_retried_time(state, request.last_retried_time)
@@ -750,6 +766,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
     task = %{
       reset(task, now)
       | output_data: task.output_data,
+        external_output_payload_storage_path: task.external_output_payload_storage_path,
         start_time: now,
         status: :in_progress,
         reason_for_incompletion: nil
