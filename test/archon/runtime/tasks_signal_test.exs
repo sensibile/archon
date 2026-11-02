@@ -151,9 +151,111 @@ defmodule Archon.Runtime.TasksSignalTest do
       assert Tasks.signal(parent, :completed, %{"s" => 9}) == {:ok, wait.task_id}
       assert %Task{status: :completed, output_data: %{"s" => 9}} = task(child, "wait1_ref")
     end
+
+    # TaskServiceImpl#findPendingBlockingTask: a child without a blocked task leaves the search
+    # to the next running SUB_WORKFLOW task.
+    test "passes over a child without a WAIT task to the next running SUB_WORKFLOW task" do
+      {:ok, definition} =
+        WorkflowDef.from_json(%{
+          "name" => "archon_test_gap_signal_fork",
+          "version" => 1,
+          "schemaVersion" => 2,
+          "timeoutPolicy" => "ALERT_ONLY",
+          "timeoutSeconds" => 0,
+          "tasks" => [
+            %{
+              "name" => "fork",
+              "taskReferenceName" => "fork_ref",
+              "type" => "FORK_JOIN",
+              "forkTasks" => [
+                [
+                  %{
+                    "name" => "archon_ops_sub_once",
+                    "taskReferenceName" => "idle_sub_ref",
+                    "type" => "SUB_WORKFLOW",
+                    "subWorkflowParam" => %{"name" => "archon_ops_idle", "version" => 1}
+                  }
+                ],
+                [
+                  %{
+                    "name" => "archon_ops_sub_once",
+                    "taskReferenceName" => "waits_sub_ref",
+                    "type" => "SUB_WORKFLOW",
+                    "subWorkflowParam" => %{"name" => "archon_ops_waits", "version" => 1}
+                  }
+                ]
+              ]
+            },
+            %{
+              "name" => "join",
+              "taskReferenceName" => "join_ref",
+              "type" => "JOIN",
+              "joinOn" => ["idle_sub_ref", "waits_sub_ref"]
+            }
+          ]
+        })
+
+      :ok = Runtime.metadata().update_workflow_def(definition)
+      parent = start("archon_test_gap_signal_fork")
+
+      [idle, waits] =
+        for ref <- ["idle_sub_ref", "waits_sub_ref"] do
+          eventually(fn ->
+            with %Task{} = sub <- task(parent, ref),
+                 id when is_binary(id) <- Task.sub_workflow_id(sub),
+                 do: id
+          end)
+        end
+
+      eventually(fn -> task(idle, "idle_ref") end)
+      wait = eventually(fn -> task(waits, "wait1_ref") end)
+
+      assert [
+               %Task{reference_task_name: "idle_sub_ref"},
+               %Task{reference_task_name: "waits_sub_ref"}
+             ] =
+               Enum.filter(workflow(parent).tasks, &(&1.task_type == "SUB_WORKFLOW"))
+
+      assert Tasks.signal(parent, :completed, %{"s" => 3}) == {:ok, wait.task_id}
+      assert %Task{status: :completed, output_data: %{"s" => 3}} = task(waits, "wait1_ref")
+      assert %Task{status: :scheduled} = task(idle, "idle_ref")
+    end
   end
 
   describe "signal/3 and children it cannot use" do
+    # ADR 0025 decision 5 with the ownership check of ADR 0024 decision 2: a SUB_WORKFLOW task
+    # whose stored child ID names a workflow of another parent and task does not reach that
+    # workflow's WAIT task.
+    test "a child of another parent and task is passed over, and its WAIT task is left alone" do
+      owner = start("archon_ops_signal_parent")
+      child = child(owner)
+      wait = eventually(fn -> task(child, "wait1_ref") end)
+      stored = workflow(owner)
+      id = "archon-test-gap-" <> Runtime.new_id()
+
+      tasks =
+        for %Task{} = task <- stored.tasks,
+            do: %{task | task_id: Runtime.new_id(), workflow_instance_id: id}
+
+      assert [%Task{task_type: "SUB_WORKFLOW", status: :in_progress} = sub] = tasks
+      assert Task.sub_workflow_id(sub) == child
+
+      :ok =
+        Runtime.store().commit(id, %Archon.Runtime.Commit{
+          create: %{stored | workflow_id: id, tasks: tasks}
+        })
+
+      on_exit(fn -> Runtime.store().remove_workflow(id) end)
+
+      assert Tasks.signal(id, :completed, %{"s" => 1}) == {:ok, nil}
+
+      assert %Task{task_id: task_id, status: :in_progress, output_data: output} =
+               task(child, "wait1_ref")
+
+      assert task_id == wait.task_id
+      refute Map.has_key?(output, "s")
+    end
+
     test "a child removed from the store is not found, as upstream's read" do
       parent = start("archon_ops_signal_parent")
       child = child(parent)
