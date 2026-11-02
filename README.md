@@ -63,7 +63,8 @@ upstream과 의도적으로 다른 점(전체 목록은 ADR 0023과 ADR 0025의 
   끝나지 않으면 아무것도 지우지 않고 500 `retryable` 참으로 답한다. bulk remove·terminate-remove는 ID마다 이 대기를 한다.
 - body를 읽지 않는 retry·restart·resetcallbacks는 브라우저가 교차 출처로 표시한 요청(`Sec-Fetch-Site`, 없으면 `Origin`과
   `Host`)을 403으로 거절한다. SDK·curl처럼 그 헤더를 보내지 않는 클라이언트는 upstream과 같다.
-- `resumeSubworkflowTasks` retry가 실행 중인 자식에 닿으면 404다(upstream은 그 자식을 재시도한다). skiptask는 쿼리로
+- `resumeSubworkflowTasks` retry가 실행 중인 자식에 닿으면 404다(upstream은 그 자식을 재시도한다). rerun은 MVP 밖 태스크
+  타입인 동적 FORK 분기를 옮기지 않는다. skiptask는 쿼리로
   `taskInput`·`taskOutput`을 채우는 Spring 바인딩을 옮기지 않는다. remove는 보관본을 남기지 않는다(upstream 기본 서버와 같은 응답).
 - correlated, `running/{name}`, `latest-versions` 목록은 정해진 순서다. `validate`는 Archon이 거절하는 스키마 정의를 등록 전에
   400으로 알려 준다. bulk의 소수 ID는 부동소수 글자로 바뀐다. task 실행 로그(`/api/tasks/{taskId}/log`)는 Later다.

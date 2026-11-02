@@ -24,7 +24,9 @@ defmodule Archon.Domain.ContractRoundTripTest do
 
   # Which domain model each fixture body decodes to. Every fixture is listed so that a newly
   # captured one cannot be skipped silently; [] means the exchange carries no domain object.
-  # {:list, model} is a list body, {:map, model} a map whose values are lists of the model.
+  # {:list, model} is a list body, {:map, model} a map whose values are lists of the model; an
+  # empty one (workflow_correlated_post_empty, metadata_workflow_versions_missing) only shows the
+  # shape, its populated siblings exercise the model.
   @models %{
     "metadata_get_taskdef" => [response: TaskDef],
     "metadata_get_workflow" => [response: WorkflowDef],

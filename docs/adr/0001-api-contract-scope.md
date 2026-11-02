@@ -24,6 +24,8 @@ Archon은 기존 Conductor 워커·SDK·UI가 그대로 붙는 REST/JSON 호환 
   경로에 응답하지 않는다(404). 응답 형태를 지어내지 않는다.
 - **Unsupported**: upstream 내부 구조(sweeper, 분산 저장소 정합성, Java 설정 노출)를 전제로 해서
   Archon 설계에 대응하는 동작이 없다. 구현하지 않으며, 필요해지면 새 ADR로 다시 판단한다.
+- **Phase 6**(2026-11-02 비고): Later 중 [ADR 0025](0025-phase6-workflow-operations-rest.md)가 구현한 경로. MVP처럼 골든 픽스처로
+  응답 형태를 고정했다.
 
 집계(경로 기준): MVP 19, Later 69, Unsupported 4. (비고: 2026-11-02 Phase 6이 Later 33개를 구현해 지금은 MVP 19,
 Phase 6 33, Later 36, Unsupported 4다. "Phase 6" 분류는 MVP처럼 구현되어 골든 픽스처로 응답을 고정한 경로다.) MVP 19개 중 `/api/health`는 `/health`의 별칭이라

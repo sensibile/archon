@@ -72,8 +72,8 @@ defmodule ArchonWeb.ServerTest do
     assert Codec.enum_name(workflow.status) == "TERMINATED"
   end
 
-  # The origin check reads the host and port the server took from the Host header (ADR 0025,
-  # decision 3), which only a real request sets.
+  # The origin check compares with the host and port a real client sends in its Host header
+  # (ADR 0025, decision 3).
   test "a workflow pauses, resumes and is terminated and removed", %{base: base} do
     assert {200, "text/plain;charset=UTF-8", id} =
              request(:post, base <> "/api/workflow/archon_simple", "{}")
@@ -81,16 +81,21 @@ defmodule ArchonWeb.ServerTest do
     assert {200, nil, ""} = request(:put, base <> "/api/workflow/#{id}/pause", "")
     assert {:ok, %{status: :paused}} = Archon.Runtime.get_workflow(id, false)
     assert {200, nil, ""} = request(:put, base <> "/api/workflow/#{id}/resume", "")
+    assert {:ok, %{status: :running}} = Archon.Runtime.get_workflow(id, false)
 
     same_origin = [{~c"origin", String.to_charlist(base)}]
 
     assert {204, nil, ""} =
-             request(:post, base <> "/api/workflow/#{id}/resetcallbacks", "", same_origin)
+             request(:post, base <> "/api/workflow/#{id}/resetcallbacks", "",
+               headers: same_origin
+             )
 
     other_origin = [{~c"origin", ~c"http://archon.example"}]
 
     assert {403, "application/json", body} =
-             request(:post, base <> "/api/workflow/#{id}/resetcallbacks", "", other_origin)
+             request(:post, base <> "/api/workflow/#{id}/resetcallbacks", "",
+               headers: other_origin
+             )
 
     assert %{"message" => "Cross-origin request refused"} = JSON.decode!(body)
 
@@ -105,22 +110,18 @@ defmodule ArchonWeb.ServerTest do
              JSON.decode!(body)
 
     assert {500, "application/json", body} =
-             request(:post, base <> "/api/workflow/archon_simple", "{}", ~c"text/plain")
+             request(:post, base <> "/api/workflow/archon_simple", "{}",
+               content_type: ~c"text/plain"
+             )
 
     assert %{"message" => "Content-Type 'text/plain;charset=UTF-8' is not supported"} =
              JSON.decode!(body)
   end
 
-  defp request(method, url, body \\ nil, content_type_or_headers \\ ~c"application/json")
+  defp request(method, url, body \\ nil, opts \\ []) do
+    content_type = Keyword.get(opts, :content_type, ~c"application/json")
+    headers = Keyword.get(opts, :headers, [])
 
-  defp request(method, url, body, headers)
-       when is_list(headers) and headers != [] and is_tuple(hd(headers)),
-       do: send_request(method, url, body, ~c"application/json", headers)
-
-  defp request(method, url, body, content_type),
-    do: send_request(method, url, body, content_type, [])
-
-  defp send_request(method, url, body, content_type, headers) do
     request =
       if body,
         do: {String.to_charlist(url), headers, content_type, body},

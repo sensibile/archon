@@ -18,7 +18,7 @@ defmodule ArchonWeb.ContractCase do
     * `{:poll_until, name}` - repeat the request until it answers 200 (a task arrived), then
       compare the last answer.
     * `{:batch_poll_until, name}` - repeat until the answer is a non-empty list.
-    * `{:wait_status, name, status}` or `{:wait_status, name, status, opts}` - wait until the
+    * `{:wait_status, name, status}` - wait until the
       workflow whose ID fixture `name` answered (a start's text body) reaches `status`. It reads
       `Archon.Runtime` directly, as the script's wait is not a fixture.
 
