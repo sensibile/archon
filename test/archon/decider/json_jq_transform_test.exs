@@ -14,7 +14,7 @@ defmodule Archon.Decider.JsonJqTransformTest do
   use ExUnit.Case, async: true
 
   alias Archon.Decider
-  alias Archon.Decider.{Context, SystemTask}
+  alias Archon.Decider.{Context, Mapper, SystemTask, SystemTasks}
   alias Archon.Decider.SystemTask.JsonJqTransform
   alias Archon.Domain.{Task, TaskDef, Workflow, WorkflowDef, WorkflowTask}
   alias Archon.Script
@@ -130,6 +130,13 @@ defmodule Archon.Decider.JsonJqTransformTest do
   end
 
   describe "beyond the upstream tests" do
+    test "both tables have the type: a mapper and a synchronous system task" do
+      assert Mapper.module_for("JSON_JQ_TRANSFORM") == Mapper.JsonJqTransform
+
+      assert %SystemTasks.Spec{module: JsonJqTransform, async?: false} =
+               SystemTasks.spec(SystemTasks.default(), "JSON_JQ_TRANSFORM")
+    end
+
     test "no queryExpression, or a null one, fails the task without running anything" do
       for input <- [%{"a" => 1}, %{"queryExpression" => nil}] do
         %SystemTask.Result{changed?: true, task: task} =
