@@ -380,7 +380,9 @@ archon에 이미 있는 것과 새로 필요한 것은 다음과 같다(archon `
     - 변환 순서는 Spring 그대로 body, 쿼리 값, 서비스의 메서드 검증이다. 빈 body와 `[]`에 잘못된 `useLatestDefinitions`가 오면
       각각 body 없음 500과 쿼리 변환 500이고, 검증 400은 둘 다 통과한 뒤다. body 없음 문구의 핸들러 서명과 검증 경로
       (`pauseWorkflow.arg0`, `deleteWorkflow.arg0`, `terminateRemove.arg0` 등)는 액션마다 upstream 메서드 이름이다.
-    - ID의 숫자·불리언은 그 글자로 바뀐다(`[1, true]`는 ID `"1"`, `"true"`). 객체·배열 원소는 `"JSON parse error: ..."` 500이다.
+    - ID의 정수·불리언은 그 글자로 바뀐다(`[1, true]`는 ID `"1"`, `"true"`). 소수는 upstream이 적힌 글자 그대로(`1e3`, `1.50`)
+      쓰지만 archon은 부동소수 글자(`"1000.0"`, `"1.5"`)다. 공용 코덱의 기존 동작이고 그런 ID는 어차피 없다.
+      객체·배열 원소는 `"JSON parse error: ..."` 500이다.
     - `null` ID는 upstream에서 없는 ID처럼 실패하고, 그 `null` 키를 Jackson이 쓰지 못해 응답이 500 `"Could not write JSON:
       Null key for a Map not allowed in JSON (use a converting NullKeySerializer?)"`이다. 다른 ID의 작업은 이미 끝난 뒤다.
       archon도 다른 ID를 모두 처리한 뒤 같은 500을 준다.
