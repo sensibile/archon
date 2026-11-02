@@ -41,8 +41,9 @@ defmodule Archon.StepReplay do
 
   @doc """
   An env at the next clock reading. Unless `opts` give them, the lookups read the definitions
-  the fixtures registered (`fixture_task_def/1`, `fixture_workflow_def/2`), as the server's store
-  would.
+  the fixtures registered (`fixture_task_def/1`, `fixture_workflow_def/2`). They know every
+  registration of the whole capture and no deletion, so a step replayed early finds a definition
+  the capture registered later; give a lookup in `opts` when that matters.
   """
   @spec env(:counters.counters_ref(), keyword()) :: Env.t()
   def env(clock, opts \\ []) do
