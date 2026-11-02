@@ -119,8 +119,8 @@ GET이 답한 태스크 ID로 갱신한다. 상태를 바꾸지 않는 오류를
 바꿔 비교한다), `workflow_execute_completed_blocking_task`의 문구에 든 JVM 람다 클래스 이름(재생은 `message`를 뺀다)이다. 두 번
 캡처해 비교했다.
 
-Phase 6 단계 중 아직 구현하지 않은 액션으로 가는 단계와 그 액션의 결과에 기대는 단계(`requires:`)는 재생에서 건너뛴다. 각 조각이
-자기 컨트롤러의 `unimplemented/0` 목록을 비우면 그 단계가 돈다. 6a가 캡처하면서 찾은 Archon의 차이 하나(`workflow_get_top_failed`:
+Phase 6 단계는 조각 6a~6g가 구현하는 동안 미구현 액션으로 가는 단계를 건너뛰었고, 6h가 그 장치를 없애 지금은 모든 단계가 돈다.
+6a가 캡처하면서 찾은 Archon의 차이 하나(`workflow_get_top_failed`:
 실패한 자식의 출력을 합친 SUB_WORKFLOW 태스크의 `subWorkflowId`)는 upstream `toTask`처럼 맞췄고(ADR 0024 결정 6), 재생은 그
 경로도 비교한다.
 

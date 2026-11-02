@@ -42,11 +42,6 @@ defmodule ArchonWeb.SignalController do
   alias Archon.Runtime.Tasks
   alias ArchonWeb.SignalResponder
 
-  # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
-  Module.register_attribute(__MODULE__, :unimplemented, persist: true)
-
-  @unimplemented []
-
   @task_resource "com.netflix.conductor.rest.controllers.TaskResource"
   @status_type "com.netflix.conductor.common.metadata.tasks.TaskResult$Status"
   @strategy_type "org.conductoross.conductor.model.WorkflowSignalReturnStrategy"
@@ -66,10 +61,6 @@ defmodule ArchonWeb.SignalController do
                      "com.netflix.conductor.common.metadata.workflow.StartWorkflowRequest)"
 
   @statuses [:in_progress, :failed, :failed_with_terminal_error, :completed, :canceled]
-
-  @doc "The actions not implemented yet."
-  @spec unimplemented() :: [atom()]
-  def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
 
   @doc """
   `POST /api/tasks/{workflowId}/{taskRefName}/{status}` (`updateTask`, `workerid` query, the output

@@ -18,10 +18,9 @@ defmodule ArchonWeb.ContractCase do
     * `{:poll_until, name}` - repeat the request until it answers 200 (a task arrived), then
       compare the last answer.
     * `{:batch_poll_until, name}` - repeat until the answer is a non-empty list.
-    * `{:wait_status, name, status}` or `{:wait_status, name, status, opts}` - wait until the
+    * `{:wait_status, name, status}` - wait until the
       workflow whose ID fixture `name` answered (a start's text body) reaches `status`. It reads
-      `Archon.Runtime` directly, as the script's wait is not a fixture. The only option is
-      `requires:` (below).
+      `Archon.Runtime` directly, as the script's wait is not a fixture.
 
   A fixture request body is sent as JSON, except a string, which is sent as the raw text it holds
   (the capture script stores a body that is not a JSON object, array, number or boolean as a
@@ -49,16 +48,6 @@ defmodule ArchonWeb.ContractCase do
       body, then compare the last answer, for a state the capture waited for (a child started).
       `path` is a list of keys and list indexes; `condition` is `:present` (not `nil`),
       `{:length, n}` or the value itself.
-
-  ## Phase 6 actions not implemented yet
-
-  ADR 0025 (decision 7) captured the fixtures of every Phase 6 route before the slices implement
-  them. A step whose request reaches an action its controller lists in `unimplemented/0` is
-  skipped (the action answers the 404 of a path without a handler meanwhile). A step that only
-  holds after such an action ran (a GET after a pause, an ID that only a skipped step binds)
-  names those actions with `requires: [{controller, action}]` and is skipped while any of them is
-  in its controller's list. A slice empties its controller's list and the steps run; slice 6h
-  removes the mechanism.
 
   `steps/2` cuts a part of the scenario. Run them with `replay/2`, threading the state from one
   call to the next.
@@ -105,14 +94,12 @@ defmodule ArchonWeb.ContractCase do
   @attempt_ms 25
 
   @type condition :: :present | {:length, non_neg_integer()} | term()
-  @type action :: {module(), atom()}
   @type exchange_opts :: [
           expect: :no_route,
           ignore: [[String.t() | non_neg_integer()]],
           only: :expected_names | :bound_ids,
           unordered: boolean(),
-          until: [{[String.t() | non_neg_integer()], condition()}],
-          requires: [action()]
+          until: [{[String.t() | non_neg_integer()], condition()}]
         ]
   @type step ::
           {:exchange, String.t()}
@@ -120,7 +107,6 @@ defmodule ArchonWeb.ContractCase do
           | {:poll_until, String.t()}
           | {:batch_poll_until, String.t()}
           | {:wait_status, String.t(), String.t()}
-          | {:wait_status, String.t(), String.t(), [requires: [action()]]}
 
   @type state :: %{ids: %{String.t() => String.t()}, actuals: %{String.t() => String.t()}}
 
@@ -139,28 +125,9 @@ defmodule ArchonWeb.ContractCase do
   @jackson_message [ignore: [["message"]]]
   @expected_names [only: :expected_names]
 
-  # Phase 6 (ADR 0025, decision 7): lists in no defined order, and the actions a step needs.
+  # Phase 6 (ADR 0025, decision 7): lists in no defined order.
   @names_unordered [only: :expected_names, unordered: true]
   @ids_unordered [only: :bound_ids, unordered: true]
-  @life ArchonWeb.WorkflowLifecycleController
-  @signal ArchonWeb.SignalController
-  @bulk ArchonWeb.WorkflowBulkController
-  @meta ArchonWeb.MetadataController
-  @after_pause [requires: [{@life, :pause}]]
-  @after_skip [requires: [{@life, :skip_task}]]
-  @after_reset [requires: [{@life, :reset_callbacks}]]
-  @after_restart [requires: [{@life, :restart}]]
-  @after_rerun [requires: [{@life, :rerun}]]
-  @after_ref_update [requires: [{@signal, :update_by_ref}]]
-  @after_ref_updates [requires: [{@signal, :update_by_ref}, {@signal, :update_by_ref_sync}]]
-  @bulk_chain [{@bulk, :pause}, {@bulk, :resume}, {@bulk, :terminate}, {@bulk, :retry}]
-  # The ref workflow it removes was completed by reference updates.
-  @bulk_terminate_remove [
-    {@bulk, :restart},
-    {@bulk, :remove},
-    {@signal, :update_by_ref},
-    {@signal, :update_by_ref_sync} | @bulk_chain
-  ]
   @child_started [until: [{["tasks", 0, "subWorkflowId"], :present}]]
   @one_task [until: [{["tasks"], {:length, 1}}]]
   @two_tasks [until: [{["tasks"], {:length, 2}}]]
@@ -430,12 +397,9 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "task_signal_sync_timeout"},
     {:exchange, "task_signal_sync_no_wait"},
     {:exchange, "task_signal_no_wait"},
-    {:exchange, "workflow_get_signal_no_wait",
-     requires: [{@signal, :signal_sync}, {@signal, :signal}]},
-    {:exchange, "task_signal", requires: [{@signal, :execute}]},
-    {:exchange, "workflow_get_signaled",
-     until: [{["tasks", 1, "status"], "IN_PROGRESS"}],
-     requires: [{@signal, :execute}, {@signal, :signal}]},
+    {:exchange, "workflow_get_signal_no_wait"},
+    {:exchange, "task_signal"},
+    {:exchange, "workflow_get_signaled", until: [{["tasks", 1, "status"], "IN_PROGRESS"}]},
     {:exchange, "workflow_start_signal_parent"},
     {:exchange, "workflow_get_signal_parent", @child_started},
     {:exchange, "workflow_get_signal_child", @first_in_progress},
@@ -443,40 +407,39 @@ defmodule ArchonWeb.ContractCase do
     # task updates by reference
     {:exchange, "workflow_start_ref"},
     {:exchange, "task_ref_update"},
-    {:exchange, "workflow_get_ref_updated", @two_tasks ++ @after_ref_update},
-    {:exchange, "task_ref_update_sync", @after_ref_update},
-    {:exchange, "task_ref_update_done", @after_ref_updates},
+    {:exchange, "workflow_get_ref_updated", @two_tasks},
+    {:exchange, "task_ref_update_sync"},
+    {:exchange, "task_ref_update_done"},
     {:exchange, "workflow_start_loop"},
     {:exchange, "task_ref_update_loop"},
-    {:exchange, "workflow_get_loop_second",
-     [until: [{["tasks"], {:length, 3}}]] ++ @after_ref_update},
-    {:exchange, "task_ref_update_loop_second", @after_ref_update},
-    {:wait_status, "workflow_start_loop", "COMPLETED", @after_ref_update},
-    {:exchange, "workflow_get_loop_completed", @after_ref_update},
+    {:exchange, "workflow_get_loop_second", [until: [{["tasks"], {:length, 3}}]]},
+    {:exchange, "task_ref_update_loop_second"},
+    {:wait_status, "workflow_start_loop", "COMPLETED"},
+    {:exchange, "workflow_get_loop_completed"},
     # pause and resume
     {:exchange, "workflow_start_life"},
     {:exchange, "workflow_start_life_v2"},
     {:exchange, "workflow_get_life_v2"},
     {:exchange, "workflow_pause"},
-    {:exchange, "workflow_get_paused", @after_pause},
-    {:exchange, "workflow_pause_paused", @after_pause},
-    {:exchange, "workflow_skiptask_paused", @after_pause},
-    {:exchange, "workflow_running_ops", @ids_unordered ++ @after_ref_updates},
+    {:exchange, "workflow_get_paused"},
+    {:exchange, "workflow_pause_paused"},
+    {:exchange, "workflow_skiptask_paused"},
+    {:exchange, "workflow_running_ops", @ids_unordered},
     {:exchange, "workflow_running_ops_time", @ids_unordered},
-    {:exchange, "workflow_correlated_paused", @ids_unordered ++ @after_pause},
-    {:exchange, "workflow_correlated_paused_closed", @ids_unordered ++ @after_pause},
-    {:exchange, "workflow_resume", @after_pause},
-    {:exchange, "workflow_get_resumed", requires: [{@life, :pause}, {@life, :resume}]},
+    {:exchange, "workflow_correlated_paused", @ids_unordered},
+    {:exchange, "workflow_correlated_paused_closed", @ids_unordered},
+    {:exchange, "workflow_resume"},
+    {:exchange, "workflow_get_resumed"},
     # skiptask
     {:exchange, "workflow_start_skip"},
     {:exchange, "workflow_get_skip"},
     {:exchange, "workflow_skiptask"},
-    {:exchange, "workflow_get_skipped", @after_skip},
-    {:exchange, "workflow_skiptask_again", @after_skip},
-    {:exchange, "workflow_tasks_skipped", @after_skip},
-    {:exchange, "task_update_skip_a", @after_skip},
-    {:wait_status, "workflow_start_skip", "COMPLETED", @after_skip},
-    {:exchange, "workflow_get_skip_completed", @after_skip},
+    {:exchange, "workflow_get_skipped"},
+    {:exchange, "workflow_skiptask_again"},
+    {:exchange, "workflow_tasks_skipped"},
+    {:exchange, "task_update_skip_a"},
+    {:wait_status, "workflow_start_skip", "COMPLETED"},
+    {:exchange, "workflow_get_skip_completed"},
     # resetcallbacks
     {:exchange, "workflow_start_callback"},
     {:poll_until, "task_poll_callback"},
@@ -484,8 +447,8 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "workflow_get_callback"},
     {:exchange, "task_poll_callback_postponed"},
     {:exchange, "workflow_resetcallbacks"},
-    {:exchange, "workflow_get_callback_reset", @after_reset},
-    {:exchange, "task_poll_callback_reset", @after_reset},
+    {:exchange, "workflow_get_callback_reset"},
+    {:exchange, "task_poll_callback_reset"},
     # retry and restart
     {:exchange, "workflow_start_retry"},
     {:exchange, "workflow_get_retry"},
@@ -493,14 +456,14 @@ defmodule ArchonWeb.ContractCase do
     {:wait_status, "workflow_start_retry", "FAILED"},
     {:exchange, "workflow_get_retry_failed"},
     {:exchange, "workflow_retry"},
-    {:exchange, "workflow_get_retried", requires: [{@life, :retry}]},
+    {:exchange, "workflow_get_retried"},
     {:exchange, "workflow_start_restart"},
     {:exchange, "workflow_terminate_restart"},
     {:exchange, "workflow_restart"},
-    {:exchange, "workflow_get_restarted", @after_restart},
-    {:exchange, "workflow_terminate_restarted", @after_restart},
-    {:exchange, "workflow_restart_latest", @after_restart},
-    {:exchange, "workflow_get_restarted_latest", @after_restart},
+    {:exchange, "workflow_get_restarted"},
+    {:exchange, "workflow_terminate_restarted"},
+    {:exchange, "workflow_restart_latest"},
+    {:exchange, "workflow_get_restarted_latest"},
     # rerun: from a task, from the start, from a SUB_WORKFLOW, from a child's task
     {:exchange, "workflow_start_rerun"},
     {:exchange, "workflow_get_rerun"},
@@ -509,23 +472,23 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "task_update_rerun_b"},
     {:wait_status, "workflow_start_rerun", "COMPLETED"},
     {:exchange, "workflow_rerun_from_task"},
-    {:exchange, "workflow_get_rerun_from_task", @after_rerun},
-    {:exchange, "workflow_terminate_rerun", @after_rerun},
-    {:exchange, "workflow_rerun", @after_rerun},
-    {:exchange, "workflow_get_rerun_whole", @after_rerun},
+    {:exchange, "workflow_get_rerun_from_task"},
+    {:exchange, "workflow_terminate_rerun"},
+    {:exchange, "workflow_rerun"},
+    {:exchange, "workflow_get_rerun_whole"},
     {:exchange, "workflow_start_parent"},
     {:exchange, "workflow_get_parent", @child_started},
     {:exchange, "workflow_get_parent_child", @one_task},
     {:exchange, "task_update_parent_child"},
     {:wait_status, "workflow_start_parent", "FAILED"},
     {:exchange, "workflow_rerun_sub_workflow"},
-    {:exchange, "workflow_get_rerun_sub_workflow", @child_started ++ @after_rerun},
-    {:exchange, "workflow_get_rerun_new_child", @one_task ++ @after_rerun},
-    {:exchange, "task_update_rerun_new_child", @after_rerun},
-    {:wait_status, "workflow_start_parent", "FAILED", @after_rerun},
-    {:exchange, "workflow_rerun_child_task", @after_rerun},
-    {:exchange, "workflow_get_rerun_child_parent", @after_rerun},
-    {:exchange, "workflow_get_rerun_child", @after_rerun},
+    {:exchange, "workflow_get_rerun_sub_workflow", @child_started},
+    {:exchange, "workflow_get_rerun_new_child", @one_task},
+    {:exchange, "task_update_rerun_new_child"},
+    {:wait_status, "workflow_start_parent", "FAILED"},
+    {:exchange, "workflow_rerun_child_task"},
+    {:exchange, "workflow_get_rerun_child_parent"},
+    {:exchange, "workflow_get_rerun_child"},
     # a task in the first child of a retried SUB_WORKFLOW (top, mid, child)
     {:exchange, "workflow_start_top"},
     {:exchange, "workflow_get_top", @child_started},
@@ -540,24 +503,23 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "workflow_get_mid_failed"},
     {:exchange, "workflow_get_top_failed"},
     {:exchange, "workflow_rerun_retried_child"},
-    {:exchange, "workflow_get_rerun_top", @after_rerun},
-    {:exchange, "workflow_get_rerun_mid", [until: [{["status"], "FAILED"}]] ++ @after_rerun},
-    {:exchange, "workflow_get_rerun_child_first",
-     [until: [{["status"], "TERMINATED"}]] ++ @after_rerun},
+    {:exchange, "workflow_get_rerun_top"},
+    {:exchange, "workflow_get_rerun_mid", [until: [{["status"], "FAILED"}]]},
+    {:exchange, "workflow_get_rerun_child_first", [until: [{["status"], "TERMINATED"}]]},
     # remove and terminate-remove
     {:exchange, "workflow_start_remove"},
     {:exchange, "workflow_get_remove"},
     {:exchange, "task_update_remove_a"},
     {:wait_status, "workflow_start_remove", "FAILED"},
     {:exchange, "workflow_remove"},
-    {:exchange, "workflow_get_removed", requires: [{@life, :remove}]},
+    {:exchange, "workflow_get_removed"},
     {:exchange, "workflow_remove_removed"},
     {:exchange, "workflow_start_remove_running"},
     {:exchange, "workflow_remove_no_archive"},
-    {:exchange, "workflow_get_removed_running", requires: [{@life, :remove}]},
+    {:exchange, "workflow_get_removed_running"},
     {:exchange, "workflow_start_terminate_remove"},
     {:exchange, "workflow_terminate_remove"},
-    {:exchange, "workflow_get_terminate_removed", requires: [{@life, :terminate_remove}]},
+    {:exchange, "workflow_get_terminate_removed"},
     # bulk: each step after the first mixed one needs the ones before it
     {:exchange, "workflow_bulk_pause_empty"},
     {:exchange, "workflow_bulk_pause_too_many"},
@@ -565,24 +527,23 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "workflow_start_bulk_1"},
     {:exchange, "workflow_start_bulk_2"},
     {:exchange, "workflow_bulk_pause"},
-    {:exchange, "workflow_bulk_pause_single", requires: Enum.take(@bulk_chain, 1)},
-    {:exchange, "workflow_bulk_resume", requires: Enum.take(@bulk_chain, 1)},
-    {:exchange, "workflow_bulk_terminate", requires: Enum.take(@bulk_chain, 2)},
-    {:exchange, "workflow_bulk_retry", requires: Enum.take(@bulk_chain, 3)},
-    {:exchange, "workflow_bulk_restart", requires: @bulk_chain},
-    {:exchange, "workflow_get_bulk_restarted", requires: [{@bulk, :restart}]},
-    {:exchange, "workflow_bulk_remove", requires: [{@bulk, :restart} | @bulk_chain]},
-    {:exchange, "workflow_get_bulk_removed", requires: [{@bulk, :remove}]},
-    {:exchange, "workflow_get_bulk_terminate_remove", @after_ref_updates},
-    {:exchange, "workflow_bulk_terminate_remove", requires: @bulk_terminate_remove},
-    {:exchange, "workflow_get_bulk_terminate_removed",
-     requires: [{@bulk, :terminate_remove} | @bulk_terminate_remove]},
+    {:exchange, "workflow_bulk_pause_single"},
+    {:exchange, "workflow_bulk_resume"},
+    {:exchange, "workflow_bulk_terminate"},
+    {:exchange, "workflow_bulk_retry"},
+    {:exchange, "workflow_bulk_restart"},
+    {:exchange, "workflow_get_bulk_restarted"},
+    {:exchange, "workflow_bulk_remove"},
+    {:exchange, "workflow_get_bulk_removed"},
+    {:exchange, "workflow_get_bulk_terminate_remove"},
+    {:exchange, "workflow_bulk_terminate_remove"},
+    {:exchange, "workflow_get_bulk_terminate_removed"},
     # deleting definitions
     {:exchange, "metadata_delete_workflow"},
-    {:exchange, "metadata_get_workflow_deleted", requires: [{@meta, :delete_workflow}]},
-    {:exchange, "metadata_get_workflow_after_delete", requires: [{@meta, :delete_workflow}]},
+    {:exchange, "metadata_get_workflow_deleted"},
+    {:exchange, "metadata_get_workflow_after_delete"},
     {:exchange, "metadata_delete_taskdef"},
-    {:exchange, "metadata_get_taskdef_deleted", requires: [{@meta, :delete_task_def}]}
+    {:exchange, "metadata_get_taskdef_deleted"}
   ]
 
   @doc "Every captured exchange in capture order, with the waits between them."
@@ -667,47 +628,9 @@ defmodule ArchonWeb.ContractCase do
     :ok
   end
 
-  @doc """
-  Replays `steps`, asserting every response; returns the ID mapping for the next steps. A step
-  `skip?/1` is true for is left out.
-  """
+  @doc "Replays `steps`, asserting every response; returns the ID mapping for the next steps."
   @spec replay([step()], state()) :: state()
-  def replay(steps, state \\ new_state()),
-    do:
-      Enum.reduce(steps, state, fn step, state ->
-        if skip?(step), do: state, else: run(step, state)
-      end)
-
-  @doc """
-  Whether `step` waits for a Phase 6 action not implemented yet: its request reaches one, or one
-  of its `requires:` is one (see the moduledoc).
-  """
-  @spec skip?(step()) :: boolean()
-  def skip?({:wait_status, _name, _status}), do: false
-
-  def skip?({:wait_status, _name, _status, opts}),
-    do: Enum.any?(opts[:requires] || [], &unimplemented?/1)
-
-  def skip?({kind, name}), do: skip?({kind, name, []})
-
-  def skip?({_kind, name, opts}) do
-    Enum.any?(opts[:requires] || [], &unimplemented?/1) or
-      unimplemented?(route(Contract.fixture(name)["request"]))
-  end
-
-  defp route(%{"method" => method, "path" => path}) do
-    case Phoenix.Router.route_info(ArchonWeb.Router, method, URI.parse(path).path, "localhost") do
-      %{plug: controller, plug_opts: action} when is_atom(action) -> {controller, action}
-      :error -> nil
-    end
-  end
-
-  defp unimplemented?({controller, action}) do
-    Code.ensure_loaded?(controller) and function_exported?(controller, :unimplemented, 0) and
-      action in controller.unimplemented()
-  end
-
-  defp unimplemented?(nil), do: false
+  def replay(steps, state \\ new_state()), do: Enum.reduce(steps, state, &run/2)
 
   defp run({:exchange, name}, state), do: run({:exchange, name, []}, state)
 
@@ -728,9 +651,6 @@ defmodule ArchonWeb.ContractCase do
 
   defp run({:batch_poll_until, name}, state),
     do: repeat(name, state, fn actual -> match?([_ | _], actual.body) end, [])
-
-  defp run({:wait_status, name, status, _opts}, state),
-    do: run({:wait_status, name, status}, state)
 
   defp run({:wait_status, name, status}, state) do
     %{"response" => %{"body" => captured}} = Contract.fixture(name)
