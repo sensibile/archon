@@ -261,6 +261,13 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     `hasExceededResponseTimeout`과 같음)부터 잰다. 실행기 대기열에서 아직 보내지 않은 요청은 마감이 지나면 보내지 않고 버린다. 그 뒤 재시도는
     보통의 태스크 재시도 규칙이다.
   - 재평가 시각(`Step.Postpone`)은 진행 중인 HTTP 태스크의 위 마감이다.
+  - 지금 `Step.Async`의 `run`은 동시 실행 한도(`Tasks.exceeds_in_progress_limit?/2`)를 응답 시간 초과보다 먼저 본다. 한도는 시작을
+    막는 검사이므로, 이미 시작한(`pollCount` > 0) 시작 비멱등 태스크에는 마감 판정을 한도보다 먼저 한다. 그래야 다른 태스크가 자리를
+    쥐고 있어도 마감에 `TIMED_OUT`이 된다. 7f가 이 순서를 바꾸고 시험한다(DYNAMIC으로 만든 `concurrentExecLimit` 1인 HTTP).
+  - **실행 취소.** 태스크가 마감으로 `TIMED_OUT`이 되거나 종료·일시정지 없이 끝나(종료 요청의 `CANCELED` 등) 결과가 쓸모없어지면,
+    워크플로우 프로세스는 실행기에 그 요청의 취소를 보내고 실행기는 감독 Task를 끝내 자리를 돌려준다. 또 실행기는 요청마다 전체
+    실행 시간 상한(그 태스크의 위 마감)을 두어, `readTimeOut`보다 짧은 간격으로 조금씩 보내는 대상이 자리를 계속 쥐지 못하게 한다.
+    upstream `HttpTask`는 읽기 시간 상한만 있고 `cancel`도 요청을 끊지 않는다(의도적 차이).
 - **결과(7f·7g).** 결과는 이벤트로 돌아와 그 태스크가 아직 같은 시도(`SCHEDULED`, 같은 `pollCount`)일 때만 반영한다. 이미
   끝났거나(종료로 `CANCELED`, 위 `TIMED_OUT` 등) 다른 시도면 버린다. 태스크가 끝나면(또는 `asyncComplete`로 `IN_PROGRESS`가 되면) 그
   이벤트 처리가 결정을 돌린다.
@@ -392,6 +399,7 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
 - **HTTP 응답 헤더 이름**(결정 7): 소문자다(Mint). upstream은 서버가 보낸 대소문자다.
 - **HTTP 전송 오류 문구**(결정 7): 연결 거부·시간 초과는 Spring 메시지의 앞부분만 맞추고 원인 문구는 archon 문구다. 4xx·5xx의
   메시지는 맞춘다.
+- **HTTP 요청의 전체 시간 상한과 취소**(결정 7): 태스크 마감에 요청을 끊고 실행기 자리를 돌려준다. upstream은 읽기 시간 상한만 있다.
 - **HTTP 빈도 한도**(결정 7): `rateLimitPerFrequency`를 적용하지 않는다(worker 태스크와 같음).
 - **INLINE의 `python` 평가기**(결정 1): 없다(ADR 0015 결정 5).
 - **INLINE 평가기 풀 오류**(결정 5): upstream에 대응이 없다. 재시도 가능한 `FAILED`다.
