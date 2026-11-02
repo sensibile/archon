@@ -38,9 +38,13 @@ defmodule Archon.Runtime.Step.SubWorkflow do
   `subworkflow:<parent ID>:<task ID>:<retry count>`.
   """
   @spec child_id(String.t(), Task.t()) :: String.t()
-  def child_id(parent_id, %Task{task_id: task_id, retry_count: retry_count}) do
-    <<a::48, _::4, b::12, _::2, c::62>> =
-      :crypto.hash(:md5, "subworkflow:#{parent_id}:#{task_id}:#{retry_count}")
+  def child_id(parent_id, %Task{task_id: task_id, retry_count: retry_count}),
+    do: name_uuid("subworkflow:#{parent_id}:#{task_id}:#{retry_count}")
+
+  @doc "The name-based (version 3) UUID of `name`, as Java's `UUID.nameUUIDFromBytes`."
+  @spec name_uuid(String.t()) :: String.t()
+  def name_uuid(name) do
+    <<a::48, _::4, b::12, _::2, c::62>> = :crypto.hash(:md5, name)
 
     <<a::48, 3::4, b::12, 2::2, c::62>>
     |> Base.encode16(case: :lower)

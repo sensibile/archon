@@ -630,7 +630,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
     later = for t <- state.wf.tasks, t.seq > task.seq, do: t.task_id
     state = State.delete_tasks(state, later)
 
-    task = %{reset(task, now) | start_time: 0, status: :scheduled}
+    task = rerun_scheduled_time(%{reset(task, now) | start_time: 0, status: :scheduled}, task)
     task = if request.task_input, do: %{task | input_data: request.task_input}, else: task
     state = State.save_task(state, task)
 
@@ -672,6 +672,15 @@ defmodule Archon.Runtime.Step.Lifecycle do
         {:terminate, termination, state}
     end
   end
+
+  # A START_WORKFLOW's workflow ID comes from its scheduledTime (Step.StartWorkflow), so a rerun
+  # in the millisecond the task was first scheduled must still take another one (ADR 0026,
+  # decision 7, slice 7f).
+  defp rerun_scheduled_time(%Task{task_type: "START_WORKFLOW"} = rerun, %Task{} = before)
+       when before.scheduled_time >= rerun.scheduled_time,
+       do: %{rerun | scheduled_time: before.scheduled_time + 1}
+
+  defp rerun_scheduled_time(rerun, _before), do: rerun
 
   # addTaskToQueue for an asynchronous system task: evaluated at once without a callback delay,
   # else when the delay is over (the next :wake), as repair_canceled does.

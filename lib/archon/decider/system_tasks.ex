@@ -83,6 +83,7 @@ defmodule Archon.Decider.SystemTasks do
         start_idempotent?: true
       },
       "WAIT" => %Spec{module: SystemTask.Wait, async?: true},
+      "START_WORKFLOW" => %Spec{async?: true, start_idempotent?: true},
       "TERMINATE" => %Spec{module: SystemTask.Terminate},
       "SET_VARIABLE" => %Spec{module: SystemTask.SetVariable},
       "NOOP" => %Spec{module: SystemTask.Noop},

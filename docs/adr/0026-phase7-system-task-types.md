@@ -449,11 +449,12 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   `{:start_workflow, task_id, start}`를 올린다. 커밋 뒤 `Effects.run`이 `Runtime.start_workflow_idempotent/1`로 시작하고 결과를 이벤트
   `{:workflow_started, task_id, result}`로 되먹인다(하위 워크플로우와 같은 경로). 되먹임은 같은 메시지 처리 안이라 그 사이 다른
   시도가 끼지 않으므로 이벤트에 `pollCount`를 싣지 않는다. 새 워크플로우 ID는 `child_id/2`와 같은 방식의 해시
-  (`startworkflow:<워크플로우 ID>:<태스크 ID>:<재시도 횟수>`)라 효과가 다시 돌아도 하나만 생긴다. 이미 있는 워크플로우를 돌려받아도
+  (`startworkflow:<워크플로우 ID>:<태스크 ID>:<재시도 횟수>:<scheduledTime>`, 조각 7f에서 `scheduledTime`을 더함)라 효과가 다시
+  돌아도 하나만 생긴다. 이미 있는 워크플로우를 돌려받아도
   소유권은 확인하지 않는다. upstream·archon 모두 `triggeringWorkflowId`를 워크플로우에 저장하지 않아 비교할 값이 없고, 그 ID는
   `startworkflow:` 접두의 해시이며 `StartWorkflowRequest`에는 워크플로우 ID 필드가 없어 시작 REST의 호출자가 ID를 정할 수 없으므로
   다른 호출자가 같은 ID를 먼저 만들 수 없다. 요청의 `idempotencyKey`·`idempotencyStrategy`는 upstream처럼 읽기만 하고 시작에 쓰지
-  않는다(`Archon.Domain.StartWorkflowRequest`와 같음). 같은 태스크의 재실행은 고정 ID가 막는다.
+  않는다(`Archon.Domain.StartWorkflowRequest`와 같음). 같은 실행 안의 재실행은 고정 ID가 막는다.
   `taskToDomain`·`correlationId` 기본값은 시작한 워크플로우의 것이고, `triggeringWorkflowId`만 적고 부모 필드는 넣지 않는다(upstream처럼
   따로 도는 워크플로우). 성공은 출력 `workflowId`, `COMPLETED`. 일시적 오류(`{:error, {:exit, _}}` 등)는 태스크를 `SCHEDULED`로 두고 다시
   시도하며, 그 밖의 오류는 메시지로 `FAILED`다. 검증 위반이 여럿이면 upstream은 Java `Set` 순서로 잇는다. archon은 경로 순으로
@@ -502,6 +503,40 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   - 타입 제약: upstream HTTP 규칙(`http_request`, 최상위 `uri`·`method`, 또는 태스크 정의 `inputTemplate`의 `http_request` 중 하나,
     문구 `"inputParameters.http_request or inputParameters.uri field is required for taskType: HTTP taskName: <name>"`)을 옮긴다(7a의
     조회 연결을 쓴다).
+
+- **조각 7f에서 정한 것(2026-11-03).**
+  - 공통 비동기 경로: 시작이 프로세스 밖의 일인 타입은 `Step.Async`의 시작 모듈 표(`SUB_WORKFLOW` → `Step.SubWorkflow`,
+    `START_WORKFLOW` → `Step.StartWorkflow`)에 있고, 모듈은 `start(state, task) :: {:started, state} | {:failed, task}`다. `:started`는
+    효과를 올리고, 효과는 `pollCount`·`startTime` 커밋 뒤에 돈다. 결과 이벤트는 `Async.attempt(state, task_id, poll_count)`로 태스크를
+    찾고(`SCHEDULED`이고, 이벤트에 `pollCount`가 있으면 같을 때만. 아니면 버림) `Async.finish/2`로 끝낸다. 결정하지 않고 끝나면(일시적
+    오류) 그 태스크의 재평가 시각으로 타이머를 당긴다(`Postpone.wake_at`). 7g는 HTTP 시작 모듈을 이 표에 넣고
+    `{:http_completed, task_id, poll_count, result}`를 `attempt/3`에 `poll_count`를 넘겨 거른다.
+  - 응답 시간 초과의 예외는 `SUB_WORKFLOW` 이름 대신 표의 `start_idempotent?`다(upstream `isStartIdempotent`).
+  - 복구는 `Async.pass(state, :recover)`다. `:wake`처럼 지연이 끝난 태스크를 평가하고, 시작 멱등 타입의 `SCHEDULED`·`pollCount` > 0
+    태스크는 지연과 상관없이 바로 다시 시작한다(`startDelay`가 있는 `START_WORKFLOW`도 바로). 그래서 시작 오류로 기다리던
+    `SUB_WORKFLOW`(`subWorkflowLaunchError`)도 복구에서는 바로 다시 시작한다. `:wake`는 지금처럼 지연을 지킨다. 멱등이 아닌 타입은
+    복구가 다시 시작하지 않는다. 진행 중 HTTP를 고르는 자리에서 거르는 것과 그 마감(`Step.Postpone`)은 7g 몫이다.
+    `Postpone.compute/2`(upstream `computePostpone`)는 바꾸지 않았다.
+  - 최상위 시작(`POST /api/workflow`)의 첫 결정이 올린 `START_WORKFLOW` 시작은 `SUB_WORKFLOW`처럼 답한 뒤로 미룬다. 같은 단계에서
+    태스크가 끝나면(종료) 시작 효과를 버린다.
+  - `START_WORKFLOW`의 표 항목은 `module: nil`(upstream 기본 `execute`), `async_complete: :by_task`(upstream 기본)다.
+  - 변환 실패 문구는 archon codec의 첫 오류다(`"Error reading StartWorkflowRequest. must be object"`). Jackson 문구는 재현하지 않는다
+    (의도적 차이, 7h가 목록에 옮긴다). 시작 REST(`WorkflowController`)처럼 정의 없이 이름이 공백이면 `"Workflow name must be
+    specified when searching for a definition"`, 입력 없이 외부 입력 경로가 있으면 `"Unable to download payload from external
+    storage path: <path>"`로 `FAILED`다. 일시적 오류는 upstream처럼 `reasonForIncompletion`·출력을 바꾸지 않는다.
+  - ID에 태스크의 `scheduledTime`을 넣는다(위 문장을 고침). 처음에는 `startworkflow:<워크플로우 ID>:<태스크 ID>:<재시도 횟수>`만
+    썼는데, 제자리 재실행(rerun은 태스크 ID와 재시도 횟수를 그대로 둔다)에서 고정 ID가 첫 실행의 워크플로우를 돌려주어 upstream
+    rerun처럼 새 워크플로우가 생기지 않았다. 돌려받은 워크플로우의 `createTime`과 태스크의 `scheduledTime`을 비교해 rerun을 가리는
+    방식은 같은 밀리초의 rerun(Codex 교차 r1 P2)과 노드 재시작 사이 시계 역행(자체 리뷰 r1 P2)에서 틀려 VER-005 상향 조건이 되었고,
+    조정 세션이 이 안을 골랐다(2026-11-03). `scheduledTime`은 태스크와 함께 저장되므로 크래시 뒤 효과 재실행과 복구 재시작은 같은
+    워크플로우를 받고, rerun은 `scheduledTime`을 새로 찍어 새 워크플로우를 만든다. rerun의 `finalizeRerun`이 다시 `SCHEDULED`로
+    두는 다른 참조의 `START_WORKFLOW`(`scheduledTime`을 새로 찍지 않음)는, 워크플로우를 만든 뒤 취소된 경우 그 워크플로우로
+    `COMPLETED`가 된다.
+  - 처음 예약된 밀리초 안의 rerun은 `scheduledTime`이 같아 옛 ID가 된다(Codex 교차 r2 P2, 같은 주장의 반복이라 VER-005 상향,
+    조정 세션 결정 2026-11-03). 그래서 `START_WORKFLOW`를 제자리에서 다시 돌리는 rerun(`Step.Lifecycle`)은 `scheduledTime`을
+    `max(now, 이전 scheduledTime + 1)`로 찍는다. 그 경우에만 `scheduledTime`이 1ms 늦게 보인다.
+  - 픽스처: `START_WORKFLOW` 재생 단계는 NOOP에 기대므로 7b가 머지되기 전에는 건너뛴다. 시작하는 쪽은 `Archon.StepReplay` 방식의
+    단계 시험이 `p7_start_workflow_get`·`_invalid_get`·`_missing_get`과 같다(`test/archon/runtime/step/start_workflow_test.exs`).
 
 ### 8. 골든 픽스처와 재생(조각 7a가 한 번에 캡처)
 

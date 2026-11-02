@@ -20,6 +20,8 @@ defmodule Archon.Runtime.Step.Event do
     * `{:child_changed, task_id, child}` - a child workflow of a `SUB_WORKFLOW` task changed.
     * `{:sub_workflow_started, task_id, result}` - the result of a `:start_sub_workflow` effect:
       `{:ok, child}`, `{:error, :transient, message}` or `{:error, message}`.
+    * `{:workflow_started, task_id, result}` - the result of a `:start_workflow` effect (a
+      `START_WORKFLOW` task), as `:sub_workflow_started`'s.
     * `{:failure_workflow_started, {:error, message}}` - the failure workflow did not start.
     * `{:terminate, reason}` - a termination request (`DELETE /api/workflow/{id}`).
     * `{:cancel_by_parent, reason, parent_end_count}` - the parent workflow ended. A child that
@@ -58,6 +60,7 @@ defmodule Archon.Runtime.Step.Event do
           | :recover
           | {:child_changed, String.t(), Workflow.t()}
           | {:sub_workflow_started, String.t(), sub_workflow_result()}
+          | {:workflow_started, String.t(), sub_workflow_result()}
           | {:failure_workflow_started, {:error, String.t()}}
           | {:terminate, String.t() | nil}
           | {:cancel_by_parent, String.t(), non_neg_integer() | nil}

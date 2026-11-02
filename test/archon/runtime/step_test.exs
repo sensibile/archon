@@ -589,7 +589,8 @@ defmodule Archon.Runtime.StepTest do
                output_data: %{"subWorkflowLaunchError" => "busy"}
              } = task(stored, "sub")
 
-      assert post == []
+      # the timer is pulled to the retry (ADR 0026, decision 7)
+      assert post == [{:wake_before, @now + 30_000}]
 
       {:ok, _stored, [], post} = run(stored, :wake, env(now: @now + 30_000))
       assert [{:start_sub_workflow, ^task_id, _start} | _] = post
