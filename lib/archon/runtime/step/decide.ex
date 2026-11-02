@@ -100,8 +100,14 @@ defmodule Archon.Runtime.Step.Decide do
   defp apply_outcome(%State{env: env} = state, %Outcome{} = outcome) do
     scheduled = Schedule.set_task_domains(outcome.tasks_to_be_scheduled, state.wf, env)
     {state, new} = Schedule.dedup_and_add(state, scheduled)
-    {state, started?} = Schedule.schedule(state, new)
 
+    case Schedule.schedule(state, new) do
+      {:terminate, termination, state} -> Terminate.by_decider(state, termination)
+      {state, started?} -> apply_scheduled(state, scheduled, outcome, new, started?)
+    end
+  end
+
+  defp apply_scheduled(state, scheduled, outcome, new, started?) do
     case execute_sync(state, scheduled, outcome.tasks_to_be_updated) do
       {:ok, state, updated, executed?} ->
         changed? = started? or executed?
@@ -149,12 +155,9 @@ defmodule Archon.Runtime.Step.Decide do
       {:ok, %DoWhile{} = result} ->
         state = State.delete_tasks(state, result.removed_task_ids)
 
-        if result.changed? do
-          state = State.put_task(state, result.task)
-          {:ok, schedule_next_iteration(state, result.tasks_to_be_scheduled), true}
-        else
-          {:ok, state, false}
-        end
+        if result.changed?,
+          do: next_iteration(State.put_task(state, result.task), result.tasks_to_be_scheduled),
+          else: {:ok, state, false}
 
       {:terminate, %Termination{} = termination} ->
         {:terminate, termination, state}
@@ -168,11 +171,14 @@ defmodule Archon.Runtime.Step.Decide do
   end
 
   # WorkflowExecutorOps#scheduleNextIteration: domains, scheduleTask, then the tasks join the
-  # workflow.
-  defp schedule_next_iteration(%State{env: env} = state, tasks) do
+  # workflow. A failed scheduleTask terminates the workflow.
+  defp next_iteration(%State{env: env} = state, tasks) do
     tasks = Schedule.set_task_domains(tasks, state.wf, env)
-    {state, _started?} = Schedule.schedule(state, tasks)
-    state
+
+    case Schedule.schedule(state, tasks) do
+      {:terminate, termination, state} -> {:terminate, termination, state}
+      {state, _started?} -> {:ok, state, true}
+    end
   end
 
   # endExecution: a TERMINATE task with a FAILED or TERMINATED terminationStatus terminates the

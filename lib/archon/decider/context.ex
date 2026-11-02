@@ -28,8 +28,9 @@ defmodule Archon.Decider.Context do
     * `workflow_def_lookup` - reads a workflow definition by name and version (`nil`: the
       latest), for a sub-workflow name only the input gives (`FORK_JOIN_DYNAMIC`). Replaces
       `MetadataDAO#getWorkflowDef`/`getLatestWorkflowDef`; `{:error, :not_found}` by default.
-    * `evaluate_jq` - runs a jq query over a JSON value and answers its results. Answers an
-      evaluator-not-available error until the jq engine exists (ADR 0026, decision 6).
+    * `evaluate_jq` - runs a jq query over a JSON value and answers its results
+      (`JSON_JQ_TRANSFORM`); `Archon.Jq.evaluate/2` (the `archon_jq` pool) by default. Like
+      `evaluate_script`, a computation that changes no state (ADR 0026, decision 6).
 
     The two lookups read the store as upstream's mappers do, without remembering an answer
     within a decide, and like `evaluate_script` change no state (ADR 0026, decision 2, which
@@ -43,7 +44,7 @@ defmodule Archon.Decider.Context do
 
   alias Archon.Decider.SystemTasks
   alias Archon.Domain.{Codec, TaskDef, WorkflowDef}
-  alias Archon.Script
+  alias Archon.{Jq, Script}
 
   @typedoc "The `task_def_lookup` function."
   @type task_def_lookup :: (String.t() -> {:ok, TaskDef.t()} | {:error, :not_found})
@@ -86,10 +87,9 @@ defmodule Archon.Decider.Context do
         }
 
   @doc """
-  Builds a context. `now` is required; `new_id`, `jitter`, `evaluate_script` and `system_tasks`
-  default to UUID v4, uniform jitter, `Archon.Script.evaluate/3` and
-  `Archon.Decider.SystemTasks.default/0`; the lookups find nothing and `evaluate_jq` answers
-  `no_jq/2`.
+  Builds a context. `now` is required; `new_id`, `jitter`, `evaluate_script`, `evaluate_jq` and
+  `system_tasks` default to UUID v4, uniform jitter, `Archon.Script.evaluate/3`,
+  `Archon.Jq.evaluate/2` and `Archon.Decider.SystemTasks.default/0`; the lookups find nothing.
   """
   @spec new(keyword()) :: t()
   def new(opts) do
@@ -100,7 +100,7 @@ defmodule Archon.Decider.Context do
       evaluate_script: Keyword.get(opts, :evaluate_script, &Script.evaluate/3),
       task_def_lookup: Keyword.get(opts, :task_def_lookup, &no_task_def/1),
       workflow_def_lookup: Keyword.get(opts, :workflow_def_lookup, &no_workflow_def/2),
-      evaluate_jq: Keyword.get(opts, :evaluate_jq, &no_jq/2),
+      evaluate_jq: Keyword.get(opts, :evaluate_jq, &Jq.evaluate/2),
       task_defs: Keyword.get(opts, :task_defs, %{}),
       latest_workflow_versions: Keyword.get(opts, :latest_workflow_versions, %{}),
       system_tasks: Keyword.get(opts, :system_tasks, SystemTasks.default()),
@@ -116,11 +116,6 @@ defmodule Archon.Decider.Context do
   @doc "A `workflow_def_lookup` that finds nothing."
   @spec no_workflow_def(String.t(), integer() | nil) :: {:error, :not_found}
   def no_workflow_def(_name, _version), do: {:error, :not_found}
-
-  @doc "The `evaluate_jq` until the jq engine exists (ADR 0026, decision 6): an evaluator error."
-  @spec no_jq(String.t(), Codec.json()) :: {:error, Script.Error.t()}
-  def no_jq(_query, _input),
-    do: {:error, %Script.Error{kind: :request, reason: "no jq evaluator is available"}}
 
   @doc "A random (version 4) UUID in its canonical lowercase form."
   @spec uuid4() :: String.t()

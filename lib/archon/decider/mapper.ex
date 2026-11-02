@@ -31,10 +31,12 @@ defmodule Archon.Decider.Mapper do
     Human,
     Inline,
     Join,
+    JsonJqTransform,
     Lambda,
     Noop,
     SetVariable,
     Simple,
+    StartWorkflow,
     SubWorkflow,
     Switch,
     Terminate,
@@ -65,6 +67,7 @@ defmodule Archon.Decider.Mapper do
     "JOIN" => Join,
     "DO_WHILE" => DoWhile,
     "SUB_WORKFLOW" => SubWorkflow,
+    "START_WORKFLOW" => StartWorkflow,
     "WAIT" => Wait,
     "DYNAMIC" => Dynamic,
     "FORK_JOIN_DYNAMIC" => ForkJoinDynamic,
@@ -74,7 +77,8 @@ defmodule Archon.Decider.Mapper do
     "HUMAN" => Human,
     "EXCLUSIVE_JOIN" => ExclusiveJoin,
     "INLINE" => Inline,
-    "LAMBDA" => Lambda
+    "LAMBDA" => Lambda,
+    "JSON_JQ_TRANSFORM" => JsonJqTransform
   }
 
   @doc "The mapper for a task type, `UserDefined` when none is registered."

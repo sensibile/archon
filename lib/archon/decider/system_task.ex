@@ -18,7 +18,10 @@ defmodule Archon.Decider.SystemTask do
   (`Archon.Decider.SystemTasks`):
 
     * `start/3` (optional) - upstream `start`. The runtime calls it once, right after it
-      schedules a synchronous system task (`Archon.Runtime.Step.Schedule`).
+      schedules a synchronous system task (`Archon.Runtime.Step.Schedule`). It answers
+      `{:error, reason}` where upstream's `start` throws: the scheduling then fails and the
+      workflow terminates (`Error scheduling tasks: ...`). `reason` stands for upstream's exception,
+      which upstream only logs.
     * `execute/3` - upstream `execute`. The decide loop calls it for a synchronous system task
       that is not terminal; the workflow process calls it for an asynchronous one it evaluates.
 
@@ -49,7 +52,7 @@ defmodule Archon.Decider.SystemTask do
           }
   end
 
-  @callback start(Workflow.t(), Task.t(), Context.t()) :: Result.t()
+  @callback start(Workflow.t(), Task.t(), Context.t()) :: Result.t() | {:error, String.t()}
   @callback execute(Workflow.t(), Task.t(), Context.t()) :: Result.t()
   @optional_callbacks start: 3
 
@@ -63,9 +66,9 @@ defmodule Archon.Decider.SystemTask do
 
   @doc """
   Upstream `start` of the task's system task type, or `nil` when the type has none (upstream's
-  default `start` does nothing).
+  default `start` does nothing). `{:error, reason}` is a `start` that throws upstream.
   """
-  @spec start(Workflow.t(), Task.t(), Context.t()) :: Result.t() | nil
+  @spec start(Workflow.t(), Task.t(), Context.t()) :: Result.t() | {:error, String.t()} | nil
   def start(%Workflow{} = workflow, %Task{} = task, %Context{} = context) do
     case module(context, task) do
       nil ->

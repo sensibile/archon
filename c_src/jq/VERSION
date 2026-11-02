@@ -1,0 +1,98 @@
+jq 1.8.2 and oniguruma 6.9.10, vendored unmodified for archon_jq (ADR 0026, decision 6).
+
+jq 1.8.2
+tag: jq-1.8.2 (commit 34f7186b86743a083a589741b6cea95293524108)
+source: https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-1.8.2.tar.gz
+tarball sha256: 71b8d6e8f5fe81f6c6d0d110e3892251f6ce76ed095abd315e26e6e1193af3af (1959950 bytes)
+  (the same value as the release's sha256sum.txt and the GitHub release asset digest)
+copied from the tarball: COPYING, the library sources of src/ (not main.c, jq_test.c,
+inject_errors.c, lexer.l, parser.y, which the library build does not use) and vendor/decNumber/.
+
+oniguruma 6.9.10
+tag: v6.9.10 (commit 4ef89209a239c1aea328cf13c05a2807e5c146d1)
+source: https://github.com/kkos/oniguruma/releases/download/v6.9.10/onig-6.9.10.tar.gz
+tarball sha256: 2a5cfc5ae259e4e97f86b68dfffc152cdaffe94e2060b770cb827238d769fc05 (979159 bytes)
+  (the same value as the release's onig-6.9.10.tar.gz.sha256)
+copied from the tarball into oniguruma/: COPYING and the sources of the UTF-8 build jq uses
+(src/). Its src/ is the same as the vendor/oniguruma/src/ jq 1.8.2 ships, apart from the
+autotools files.
+
+Build configuration (what configure would generate) is Archon's, in c_src/archon_jq/include/.
+Generated at build time: src/builtin.inc from src/builtin.jq, as jq's own Makefile does.
+
+Files (sha256, path relative to this directory):
+ad2b4a266b2268939c1446979759706077421cf906a203aa188c6f396e8cfd74  COPYING
+70ba5469ea0bab6e18a32d7009068f996503168d27be57747e08da34337ff26f  oniguruma/COPYING
+f734cc6e17a9c423d15db4509beba03c13d67dc6baf93f43184068a65082ace8  oniguruma/src/ascii.c
+bceb20b139315fbe2fb02e58f3b499107d5d4c2dc9953c677c332ccb1cb305ef  oniguruma/src/oniguruma.h
+0f22d86a07412093ce12df15d0b88db02fa21bf409d623738102c805b2580a49  oniguruma/src/regcomp.c
+cc33829f2a4279c96ca96d97c6d29d9f6ac65dc7ea0c5494f3b34bc43566585e  oniguruma/src/regenc.c
+da808283c9d13aa641a3507d86098273afeb723da9ab2eadae176a388dec4564  oniguruma/src/regenc.h
+eced9d8be1c24c88dbb490668eadac75903e4bdce5f89fda6815f5c4f1ddccc0  oniguruma/src/regerror.c
+51d9456a6b8fc4330b4f5030642265fd7e12524f05223b446b3444bd3fecf03c  oniguruma/src/regexec.c
+53683bb1c4d1b787856cce013cc01fa54b917997e96d4471b1c74915bf0b7c00  oniguruma/src/regext.c
+676be021dafaf99eaab375b283fb42dc59a31a33d68a6d42dbb15d08defbfd3b  oniguruma/src/regint.h
+f4b5ef44a888c7150a304d27aef2ffe85d4f8fb2cee220240644be4c62a905d3  oniguruma/src/regparse.c
+a34f5de2e0d8f65923ac4aa93bfabdc93d952d01b8c9f1c489d3cc25e9c040a3  oniguruma/src/regparse.h
+11e750804c89ff3a4524c70c4bec8caa77da04c12c161385a6d701460456277c  oniguruma/src/regsyntax.c
+bb70c4886681a3c17d312f3e23a17f75a613bb8dfc90bfcbb562a71809159a0d  oniguruma/src/regtrav.c
+f2a0cc84446e64d202bd9627f4c9924c4d338f0c2ed9fc642a9caefe2757301d  oniguruma/src/regversion.c
+c3e73faab1ef6dc0a8524dde9b71c9a7eedc78edd70232c794ca936b0d83ca27  oniguruma/src/st.c
+5a44a44d08dfa64a571cff168878378c3b4bc630e303c12ba99ac99d353595ef  oniguruma/src/st.h
+381aacfe8feaf7d307c0a729bbb2a903e706866cb3c99a5422f003ff7fa97dff  oniguruma/src/unicode.c
+21663445ace4f64775506f3fc53332a96e1b2b9f509b63eeb5462913daeb6d73  oniguruma/src/unicode_egcb_data.c
+1a965892c78598ed0d7c7adad0021dc774d6278c727692b8b2300804de70f043  oniguruma/src/unicode_fold1_key.c
+70b6f9185984408b308bb9d441333c5be95d36853fa60294ec0d08c274d5088c  oniguruma/src/unicode_fold2_key.c
+1e026d61dbd1e1300feecfeb5788f62cd2e388cf9a0c3b666e389bc3cf449369  oniguruma/src/unicode_fold3_key.c
+690b14e8f84ff1345ec38657ab41a0c630dea37b99fb39519d9789ddf2558a55  oniguruma/src/unicode_fold_data.c
+6f69e9852bf746acfc3847c9789225d4ba1f085f1852ca00fcab7fa912982f52  oniguruma/src/unicode_property_data.c
+27bf4f37819b67b43d2a223a0a251978335d1c44a0ec02b4f907fba32b002058  oniguruma/src/unicode_property_data_posix.c
+521fc37c8626e811c3c8042b848c4289f775dbae58b8422dfc5ad1447e2e98a9  oniguruma/src/unicode_unfold_key.c
+9530ddf3208658a05bf33d36249bc6b9d8e500f54cfa2c8552762d42314244ba  oniguruma/src/unicode_wb_data.c
+8927e4b2e64fd188592a95ecf56f2d6c7bb0bcb5721b6d2fd446c20c10a7ddf4  oniguruma/src/utf8.c
+0a29617dbf74a6fdabf644f5da82269113fef69bb46efaa3b232515d90305342  src/builtin.c
+8209acae8137d401e646a509c5c21481547de06b39b8d0597285fe56b2701354  src/builtin.h
+b8a5fd9579be9b51c9a04e6620f8c1655539aa57eea33a84e202a8dea401f2a4  src/builtin.jq
+240d60fd0a62588066e13eb7e2961ce341338a33aea14c2e4b91c5be90d2e8bb  src/bytecode.c
+503a25b451dd8f5881e3aaf4d60af65f0aae2b2cba69a48ea61be386f5aea2dc  src/bytecode.h
+4ac446f5e38ad723e83cf763a9b7841a38ffdbf995dcf176e69d31ea6eaaa8c8  src/compile.c
+77080169fa80ca9bdd6ab26f781a6b643258870534cbddf59d52ab792085c335  src/compile.h
+08092864ce27c09ceb3788813a3d9c056aa9130eb513558e30865356a8d7c9a8  src/exec_stack.h
+8069c06b05f5220a705977f612ae79557e272fba22bd4fc92e69e35a04ad5a16  src/execute.c
+976689e8c3dc0b4b7d7bba50dc560277c638694681a356be61ae93787b335f8d  src/jq.h
+c1913f6d74642ae91113653acb3defbd46482f708a80c309f98a7cb1e44f0483  src/jq_parser.h
+a40433614bcf7e344a4256c4aaab7acd4ff3fd09b04e3caefd4e3eb102cbacc2  src/jv.c
+5b3cfa6962768d38a2f205fb51ff3a01aac2a4e5b4136f80fbe795b1e70bc46f  src/jv.h
+5d12924a46e282ea034971432e4598ed249ebf94079750355f97b8daa3db5e59  src/jv_alloc.c
+f81b21241419331ecbf5ea4298a8947fed87931395641071cbd9694f714d058b  src/jv_alloc.h
+fb7a4fff8f89ba06e8b9bab4c8047e5f118d971d790060388e028811f6d42cb2  src/jv_aux.c
+93512a115bb86140a378c118d832d6b35f03d93e50d350500edb213502440f0f  src/jv_dtoa.c
+e78b44bc56f0e9b3c65acd8703b5e0a20dad2b497a15fa2daee08c9472b4d72b  src/jv_dtoa.h
+8da8837721354c03555b7a13f3f4cf62849a6d0995eb5c2dd83b831f5f5e3afb  src/jv_dtoa_tsd.c
+48b40d50f36e6aa75ac4cd1b76639b0fb1f0b284ebd21098d91deb62a4bbd76d  src/jv_dtoa_tsd.h
+8477300403e71ca87b65b8fcd340d63f2a35e8a0498157bde70edc5c26ac2d4c  src/jv_file.c
+3ba36daee76f99543761f1fe6a6f1d261e6ecfecb8578136cd32c76d093ff40b  src/jv_parse.c
+fc5e327477da85691f79c186507da754b520c77883f8da31a2d8ed63a0a51b45  src/jv_print.c
+b83327d46a5707bda1b301af4a45fde67963046977bc9843dd4a73bdca8a6563  src/jv_private.h
+a9f8457779813b8766fe72a34d6e2a3e8f11052eaf08bdfe8f3efafff36eb525  src/jv_thread.h
+680110a66a1a119c0a15cbd4a5fb91e9a060c9a33ff23745f33fd188c3a46462  src/jv_unicode.c
+67f29a42aaa62604633007058e5e3d1169b36166cbba32e9bc200e6e9fd16a0a  src/jv_unicode.h
+c46c76aada9e0bd7e48f9daa427ae51ee6688e32872aa61ae624e8d2524108d6  src/jv_utf8_tables.h
+570d924dc17f65721fb3e3eaeb880bdf753abc1de07470186b8a2907fed9d2ea  src/lexer.c
+2fb94bb1459a1f0de66023a7ffd3543849845acca9fa571cee4cb5487d742426  src/lexer.h
+13aaee9c9537fdd2acf1105f3bc7de86b953ae4a77bd7a04b07d2ad84ea7e95d  src/libm.h
+07592a2aca011fa0ec6c0be9ea2cb280e74cc9db325c15a3688674828bc25c63  src/linker.c
+08f1df5fcf23171036d0f9636697ed03eb2d5b8feebe743a765732f676effa68  src/linker.h
+0ef8cad81d328b679be805696af0fefcce43e95e231e95b34b6dd8ff5b64f91d  src/locfile.c
+0cbf98475507e3bb0524c045bb4fe48bb6b2ef5ef9b88840f58ce935c04c0bc2  src/locfile.h
+07fe179fcf4d177a94f08f5fb4e56b077eb98833d0c98aff15970c4ab69542bc  src/opcode_list.h
+1a619d4a8e7c46d286165b44f7d380d234eebe61d45bedc0d4f06a00714fd4a9  src/parser.c
+a8a32cd4da1ce205cc8ba03001db1709791634015c51736c6e49d1aa80078b9e  src/parser.h
+1f413a1ffeb9194f246f7d9079169d41126686ca212d7b262a1d7b8cf783be06  src/util.c
+fd8adf652fb1c09a3b14354124909384dea01637182cfcfdb3f471a960b9414b  src/util.h
+a660ed37d7da6c591a13b472eef3d79814f23ef941afc83f3ddd5e5abbc02835  src/version.h
+fd3cb9f0fd775949f7c2d018ba6c6a2cc483198c2b9340c8608d2bb2817d3521  vendor/decNumber/decContext.c
+24e56975f89adbe1558042a735387c7ecf8493fb72ca2b24de51afd2e421053a  vendor/decNumber/decContext.h
+906dbffecf2c7007127557421cf4e1625c6060d6d3b362cef5afcea1f954c493  vendor/decNumber/decNumber.c
+0f7a9b64736350bb7ae581803b2b580ed0bdb42a4daefc2f8e0b82b94cad4d3c  vendor/decNumber/decNumber.h
+fb17acfdd8b07a4023e6eb3a31c053864e3f45a1d0d3a689df75dcec55fd5398  vendor/decNumber/decNumberLocal.h

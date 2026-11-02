@@ -202,8 +202,11 @@ defmodule Archon.Runtime.Step.Lifecycle do
     {state, _new} = Schedule.dedup_and_add(state, rescheduled)
     state = State.save_tasks(state, state.wf.tasks)
     rescheduled = Enum.map(rescheduled, &(State.task(state, &1.task_id) || &1))
-    {state, _started?} = Schedule.schedule(state, rescheduled)
-    state
+
+    case Schedule.schedule(state, rescheduled) do
+      {:terminate, termination, state} -> Terminate.by_decider(state, termination)
+      {state, _started?} -> state
+    end
   end
 
   # taskToBeRescheduled
@@ -657,7 +660,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
     later = for t <- state.wf.tasks, t.seq > task.seq, do: t.task_id
     state = State.delete_tasks(state, later)
 
-    task = %{reset(task, now) | start_time: 0, status: :scheduled}
+    task = rerun_scheduled_time(%{reset(task, now) | start_time: 0, status: :scheduled}, task)
     task = if request.task_input, do: %{task | input_data: request.task_input}, else: task
     state = State.save_task(state, task)
 
@@ -671,16 +674,42 @@ defmodule Archon.Runtime.Step.Lifecycle do
           due_now(state, task)
 
         Schedule.sync_system_task?(env, task) ->
-          state = Schedule.start_sync(state, task)
-          started = State.task(state, task.task_id)
-          if started.status == :scheduled, do: Schedule.push(state, started), else: state
+          start_rerun(state, task)
 
         true ->
           Schedule.push(state, task)
       end
 
-    finalize_rerun(state, task)
+    case state do
+      # A start that fails ends the workflow, as it does in the decide loop (ADR 0026,
+      # decision 6).
+      {:terminate, termination, state} ->
+        state |> finalize_rerun(task) |> Terminate.by_decider(termination)
+
+      state ->
+        finalize_rerun(state, task)
+    end
   end
+
+  defp start_rerun(state, task) do
+    case Schedule.start_sync(state, task) do
+      {:ok, state} ->
+        started = State.task(state, task.task_id)
+        if started.status == :scheduled, do: Schedule.push(state, started), else: state
+
+      {:terminate, termination, state} ->
+        {:terminate, termination, state}
+    end
+  end
+
+  # A START_WORKFLOW's workflow ID comes from its scheduledTime (Step.StartWorkflow), so a rerun
+  # in the millisecond the task was first scheduled must still take another one (ADR 0026,
+  # decision 7, slice 7f).
+  defp rerun_scheduled_time(%Task{task_type: "START_WORKFLOW"} = rerun, %Task{} = before)
+       when before.scheduled_time >= rerun.scheduled_time,
+       do: %{rerun | scheduled_time: before.scheduled_time + 1}
+
+  defp rerun_scheduled_time(rerun, _before), do: rerun
 
   # addTaskToQueue for an asynchronous system task: evaluated at once without a callback delay,
   # else when the delay is over (the next :wake), as repair_canceled does.

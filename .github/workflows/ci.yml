@@ -41,8 +41,9 @@ jobs:
         env:
           ARCHON_BACKEND: postgres
 
-  # archon_js under AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer (ADR 0015).
-  # Every job already builds archon_js with warnings as errors through `mix compile`.
+  # archon_js (ADR 0015) and archon_jq (ADR 0026, decision 6) under AddressSanitizer,
+  # UndefinedBehaviorSanitizer and LeakSanitizer. Every job already builds both with warnings as
+  # errors through `mix compile`.
   c-sanitize:
     runs-on: ubuntu-latest
     steps:
@@ -54,6 +55,14 @@ jobs:
           test/archon/decider/mapper_test.exs test/archon/domain/task_type_constraint_test.exs
         env:
           ARCHON_JS_EXECUTABLE: priv/archon_js-sanitize
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+      - run: make ARCHON_JQ_SANITIZE=1
+      - run: >-
+          mix test test/archon/jq_test.exs test/archon/decider/json_jq_transform_test.exs
+          test/archon/decider/json_jq_transform_replay_test.exs
+        env:
+          ARCHON_JQ_EXECUTABLE: priv/archon_jq-sanitize
           ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
 

@@ -83,13 +83,15 @@ defmodule Archon.Decider.SystemTasks do
         start_idempotent?: true
       },
       "WAIT" => %Spec{module: SystemTask.Wait, async?: true},
+      "START_WORKFLOW" => %Spec{async?: true, start_idempotent?: true},
       "TERMINATE" => %Spec{module: SystemTask.Terminate},
       "SET_VARIABLE" => %Spec{module: SystemTask.SetVariable},
       "NOOP" => %Spec{module: SystemTask.Noop},
       "HUMAN" => %Spec{module: SystemTask.Human},
       "EXCLUSIVE_JOIN" => %Spec{module: SystemTask.ExclusiveJoin},
       "INLINE" => %Spec{module: SystemTask.Inline},
-      "LAMBDA" => %Spec{module: SystemTask.Lambda}
+      "LAMBDA" => %Spec{module: SystemTask.Lambda},
+      "JSON_JQ_TRANSFORM" => %Spec{module: SystemTask.JsonJqTransform}
     }
   end
 

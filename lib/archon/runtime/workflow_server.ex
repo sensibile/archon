@@ -607,7 +607,8 @@ defmodule Archon.Runtime.WorkflowServer do
   defp reply_reason(reason), do: reason
 
   # Step, pre effects, commit, post effects, then the events the effects fed back.
-  # `defer?` keeps SUB_WORKFLOW starts for after the answer (a top-level start). `budget` is
+  # `defer?` keeps SUB_WORKFLOW and START_WORKFLOW starts for after the answer (a top-level
+  # start). `budget` is
   # the step runs this message may still make, shared by every fed-back event; the rest is
   # returned.
 
@@ -803,7 +804,8 @@ defmodule Archon.Runtime.WorkflowServer do
     end
   end
 
-  defp post_step({:start_sub_workflow, _task_id, _start} = effect, acc, true) do
+  defp post_step({start, _task_id, _start} = effect, acc, true)
+       when start in [:start_sub_workflow, :start_workflow] do
     {:ok, state, events, deferred} = acc
     {:cont, {:ok, state, events, [effect | deferred]}}
   end

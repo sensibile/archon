@@ -5,15 +5,16 @@
 #
 # Ported from conductor-oss core/src/test/java/com/netflix/conductor/validations/
 # WorkflowTaskTypeConstraintTest.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
-# Modified by sensibile: rewritten as ExUnit tests; the HTTP, KAFKA_PUBLISH and JSON_JQ_TRANSFORM
-# cases are not ported because those rules are not implemented yet (ADR 0014), and the
-# setType executable-validation case has no Elixir counterpart. Script syntax checks run on the
+# Modified by sensibile: rewritten as ExUnit tests; the HTTP and KAFKA_PUBLISH cases are not
+# ported because those rules are not implemented yet (ADR 0014), the mocked MetadataDAO of the
+# JSON_JQ_TRANSFORM cases is a task_def_lookup option (ADR 0026, decision 6), and the setType
+# executable-validation case has no Elixir counterpart. Script syntax checks run on the
 # archon_js pool (ADR 0015).
 
 defmodule Archon.Domain.TaskTypeConstraintTest do
   use ExUnit.Case, async: true
 
-  alias Archon.Domain.{SubWorkflowParams, WorkflowDef, WorkflowTask}
+  alias Archon.Domain.{SubWorkflowParams, TaskDef, WorkflowDef, WorkflowTask}
 
   # createSampleWorkflowTask
   defp sample(attrs) do
@@ -28,8 +29,8 @@ defmodule Archon.Domain.TaskTypeConstraintTest do
     )
   end
 
-  defp messages(task) do
-    case WorkflowTask.validate(task) do
+  defp messages(task, opts \\ []) do
+    case WorkflowTask.validate(task, opts) do
       :ok -> []
       {:error, errors} -> errors |> Enum.map(&elem(&1, 1)) |> Enum.sort()
     end
@@ -248,6 +249,43 @@ defmodule Archon.Domain.TaskTypeConstraintTest do
           input_parameters: %{"terminationStatus" => "COMPLETED"}
         )
 
+      assert messages(task) == []
+    end
+  end
+
+  describe "WorkflowTaskTypeConstraintTest JSON_JQ_TRANSFORM" do
+    # getTaskDef answers the given task definition for every name.
+    defp lookup(task_def), do: [task_def_lookup: fn _name -> {:ok, task_def} end]
+
+    @jq_required "inputParameters.queryExpression field is required for taskType: " <>
+                   "JSON_JQ_TRANSFORM taskName: encode"
+
+    test "testWorkflowTaskTypeJSONJQTransform" do
+      task = sample(type: "JSON_JQ_TRANSFORM", input_parameters: %{"queryExpression" => "."})
+      assert messages(task, lookup(%TaskDef{})) == []
+    end
+
+    test "testWorkflowTaskTypeJSONJQTransformWithQueryParamMissing" do
+      assert messages(sample(type: "JSON_JQ_TRANSFORM"), lookup(%TaskDef{})) == [@jq_required]
+    end
+
+    test "testWorkflowTaskTypeJSONJQTransformWithQueryParamInTaskDef" do
+      task_def = %TaskDef{name: "encode", input_template: %{"queryExpression" => "."}}
+      assert messages(sample(type: "JSON_JQ_TRANSFORM"), lookup(task_def)) == []
+    end
+
+    test "an embedded task definition comes before the lookup, and no lookup finds nothing" do
+      embedded = %TaskDef{name: "encode", input_template: %{"queryExpression" => "."}}
+      task = sample(type: "JSON_JQ_TRANSFORM", task_definition: embedded)
+      assert messages(task, lookup(%TaskDef{})) == []
+
+      assert messages(sample(type: "JSON_JQ_TRANSFORM")) == [@jq_required]
+      not_found = [task_def_lookup: fn _name -> {:error, :not_found} end]
+      assert messages(sample(type: "JSON_JQ_TRANSFORM"), not_found) == [@jq_required]
+    end
+
+    test "the key is enough: a null queryExpression passes (containsKey)" do
+      task = sample(type: "JSON_JQ_TRANSFORM", input_parameters: %{"queryExpression" => nil})
       assert messages(task) == []
     end
   end

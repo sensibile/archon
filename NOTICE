@@ -17,3 +17,21 @@ MIT License:
   Copyright (c) 2023-2026 Saúl Ibarra Corretgé
 
   The full license text is in c_src/quickjs-ng/LICENSE.
+
+This product includes jq (https://github.com/jqlang/jq), vendored unmodified in c_src/jq/
+(version and checksums in c_src/jq/VERSION), licensed under the MIT License:
+
+  Copyright (C) 2012 Stephen Dolan
+
+jq incorporates David M. Gay's dtoa.c (Copyright (c) 1991, 2000, 2001 by Lucent Technologies),
+the decNumber library (Copyright (c) 1995-2005 International Business Machines Corporation and
+others, ICU License) and code from Heimdal (Portions Copyright (c) 2016 Kungliga Tekniska
+Högskolan). The full license texts are in c_src/jq/COPYING.
+
+This product includes Oniguruma (https://github.com/kkos/oniguruma), vendored unmodified in
+c_src/jq/oniguruma/ (version and checksums in c_src/jq/VERSION), licensed under the BSD
+2-Clause License:
+
+  Copyright (c) 2002-2021  K.Kosako  <kkosako0@gmail.com>
+
+  The full license text is in c_src/jq/oniguruma/COPYING.

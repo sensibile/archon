@@ -39,5 +39,10 @@ __pycache__/
 
 /priv/archon_js-sanitize
 
+# The jq evaluator binary built by elixir_make (ADR 0026, decision 6).
+/priv/archon_jq
+
+/priv/archon_jq-sanitize
+
 # Object files of a direct `make` run.
 /obj/

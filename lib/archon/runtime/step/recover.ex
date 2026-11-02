@@ -21,8 +21,10 @@ defmodule Archon.Runtime.Step.Recover do
       itself (the parent's child termination may have been lost);
     * `SCHEDULED` worker tasks without a queue message are pushed again, with what is left of
       their callback delay;
-    * pending asynchronous system tasks are evaluated as on `:wake` (a `SUB_WORKFLOW` start that
-      did not finish is started again with the same ID, a child that ended is reflected);
+    * pending asynchronous system tasks are evaluated as on `:wake`, and a start-idempotent one
+      that was started but is still `SCHEDULED` is started again at once (a `SUB_WORKFLOW` or
+      `START_WORKFLOW` start that did not finish runs again with the same ID; a child that ended
+      is reflected; ADR 0026, decision 7);
     * the workflow is decided, and when it is running without a task that is not terminal, its
       last task is marked not executed and it is decided again.
 
@@ -49,7 +51,7 @@ defmodule Archon.Runtime.Step.Recover do
         Terminate.by_parent(state, reason)
 
       true ->
-        {state, _decide?} = Async.pass(state, :wake)
+        {state, _decide?} = Async.pass(state, :recover)
         state |> Decide.settle() |> unstick() |> repair_queues()
     end
   end
