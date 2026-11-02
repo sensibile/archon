@@ -14,8 +14,10 @@ defmodule ArchonWeb.WorkflowBulkControllerTest do
 
   @moduletag :capture_log
 
+  alias Archon.Domain.Codec
   alias Archon.Runtime
   alias Archon.RuntimeCase
+  alias ArchonWeb.Request
 
   @handler "public com.netflix.conductor.common.model.BulkResponse<java.lang.String> " <>
              "com.netflix.conductor.rest.controllers.WorkflowBulkResource."
@@ -94,8 +96,8 @@ defmodule ArchonWeb.WorkflowBulkControllerTest do
 
     for bad <- [%{}, []] do
       list = List.replace_at(ids, 1000, bad) ++ [%{"x" => 1}]
-      {:error, errors} = Archon.Domain.Codec.cast({:list, :string}, list, [])
-      {:server_error, expected} = ArchonWeb.Request.codec_error(errors)
+      {:error, errors} = Codec.cast({:list, :string}, list, [])
+      {:server_error, expected} = Request.codec_error(errors)
 
       assert server_error(bulk(:put, "pause", Jason.encode!(list))) == expected
       assert expected =~ "[1000]"
