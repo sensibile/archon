@@ -223,6 +223,38 @@ defmodule Archon.Runtime.TasksSignalTest do
   end
 
   describe "signal/3 and children it cannot use" do
+    # ADR 0024, decision 2: a SUB_WORKFLOW task whose stored child ID names a workflow of another
+    # parent and task does not reach that workflow's WAIT task.
+    test "a child of another parent and task is passed over, and its WAIT task is left alone" do
+      owner = start("archon_ops_signal_parent")
+      child = child(owner)
+      wait = eventually(fn -> task(child, "wait1_ref") end)
+      stored = workflow(owner)
+      id = "archon-test-gap-" <> Runtime.new_id()
+
+      tasks =
+        for %Task{} = task <- stored.tasks,
+            do: %{task | task_id: Runtime.new_id(), workflow_instance_id: id}
+
+      assert [%Task{task_type: "SUB_WORKFLOW", status: :in_progress} = sub] = tasks
+      assert Task.sub_workflow_id(sub) == child
+
+      :ok =
+        Runtime.store().commit(id, %Archon.Runtime.Commit{
+          create: %{stored | workflow_id: id, tasks: tasks}
+        })
+
+      on_exit(fn -> Runtime.store().remove_workflow(id) end)
+
+      assert Tasks.signal(id, :completed, %{"s" => 1}) == {:ok, nil}
+
+      assert %Task{task_id: task_id, status: :in_progress, output_data: output} =
+               task(child, "wait1_ref")
+
+      assert task_id == wait.task_id
+      refute Map.has_key?(output, "s")
+    end
+
     test "a child removed from the store is not found, as upstream's read" do
       parent = start("archon_ops_signal_parent")
       child = child(parent)
