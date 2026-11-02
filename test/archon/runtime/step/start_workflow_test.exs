@@ -359,6 +359,32 @@ defmodule Archon.Runtime.Step.StartWorkflowTest do
       rerun = %{task | scheduled_time: @now + 60_000}
       assert StartWorkflow.workflow_id("wf", rerun) != StartWorkflow.workflow_id("wf", task)
     end
+
+    # Codex cross review r2: a rerun in the millisecond the task was first scheduled.
+    test "a rerun in the millisecond of the first scheduling still asks for another workflow" do
+      {stored, _post} = start(%{"request" => @request})
+      task = only_task(stored)
+      first = StartWorkflow.workflow_id("wf", task)
+
+      {:ok, done, _pre, _post} =
+        run(stored, {:workflow_started, task.task_id, {:ok, %Workflow{workflow_id: first}}}, @now)
+
+      assert done.status == :completed
+
+      request = %{
+        task_id: task.task_id,
+        task_input: nil,
+        workflow_input: nil,
+        correlation_id: nil
+      }
+
+      {:ok, rerun, _pre, post} = run(done, {:rerun, request}, @now)
+
+      assert %Task{scheduled_time: scheduled} = only_task(rerun)
+      assert scheduled == @now + 1
+      assert [%{workflow_id: second}] = starts(post)
+      assert second != first
+    end
   end
 
   describe "the recovery and the response timeout" do

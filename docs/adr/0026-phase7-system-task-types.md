@@ -437,6 +437,9 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     워크플로우를 받고, rerun은 `scheduledTime`을 새로 찍어 새 워크플로우를 만든다. rerun의 `finalizeRerun`이 다시 `SCHEDULED`로
     두는 다른 참조의 `START_WORKFLOW`(`scheduledTime`을 새로 찍지 않음)는, 워크플로우를 만든 뒤 취소된 경우 그 워크플로우로
     `COMPLETED`가 된다.
+  - 처음 예약된 밀리초 안의 rerun은 `scheduledTime`이 같아 옛 ID가 된다(Codex 교차 r2 P2, 같은 주장의 반복이라 VER-005 상향,
+    조정 세션 결정 2026-11-03). 그래서 `START_WORKFLOW`를 제자리에서 다시 돌리는 rerun(`Step.Lifecycle`)은 `scheduledTime`을
+    `max(now, 이전 scheduledTime + 1)`로 찍는다. 그 경우에만 `scheduledTime`이 1ms 늦게 보인다.
   - 픽스처: `START_WORKFLOW` 재생 단계는 NOOP에 기대므로 7b가 머지되기 전에는 건너뛴다. 시작하는 쪽은 `Archon.StepReplay` 방식의
     단계 시험이 `p7_start_workflow_get`·`_invalid_get`·`_missing_get`과 같다(`test/archon/runtime/step/start_workflow_test.exs`).
 
