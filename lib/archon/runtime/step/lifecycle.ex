@@ -642,7 +642,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
     case Decider.tasks_to_be_scheduled(state.wf, wt, 0, nil, Env.context(env)) do
       {:ok, tasks} ->
-        tasks = Schedule.set_task_domains(tasks, state.wf, env)
+        # finalizeRerun schedules them without setTaskDomains.
         {state, new} = Schedule.dedup_and_add(state, tasks)
         {state, _started?} = Schedule.schedule(state, new)
         state |> push_parents(true) |> Decide.settle()

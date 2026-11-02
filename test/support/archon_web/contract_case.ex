@@ -173,7 +173,7 @@ defmodule ArchonWeb.ContractCase do
   # whether and how often it did varies between captures of the same steps.
   @fjd_join_poll [ignore: [["tasks", 3, "pollCount"], ["tasks", 3, "updateTime"]]]
   # The canceled JOIN a retry runs again keeps its endTime in upstream's retry code as here, but
-  # the capture shows 0 (the retry raced the JOIN's own evaluation there).
+  # the capture shows 0, for a reason not found (ADR 0026, decision 4).
   @fjd_retried_join [
     ignore: [["tasks", 3, "pollCount"], ["tasks", 3, "updateTime"], ["tasks", 3, "endTime"]]
   ]

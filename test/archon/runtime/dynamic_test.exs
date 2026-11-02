@@ -168,8 +168,27 @@ defmodule Archon.Runtime.DynamicTest do
       [rerun_branch] = scheduled(id, 1)
       assert rerun_branch.task_id == branch.task_id
       assert rerun_branch.input_data == %{"a" => 20}
-      # upstream's seq-based removal takes the JOIN (seq 4) with it
+
+      # upstream's seq-based removal takes the JOIN (seq 4) with it; nothing schedules it again,
+      # so the workflow stays RUNNING once the branch completes (checkForWorkflowCompletion wants a
+      # terminal task for every task of the definition)
       assert task(id, "join") == nil
+      update(id, rerun_branch, :completed)
+      assert %Task{status: :completed} = task(id, "_p7c_worker_1")
+      assert %Workflow{status: :running} = workflow(id)
+      assert task(id, "join") == nil
+    end
+
+    test "a rerun from the FORK whose mapper terminates fails the workflow" do
+      id = start("p7c_fork", %{"inputs" => [%{"a" => 1}]})
+      complete_all(id, 1)
+      fork = task(id, "fjd")
+
+      assert rerun(id, re_run_from_task_id: fork.task_id, workflow_input: %{}) == :ok
+
+      wf = await_status(id, :failed)
+      assert wf.reason_for_incompletion =~ ~r/^Dynamic tasks could not be created/
+      assert task(id, "fjd") == nil
     end
 
     test "an update of a dynamic branch is never lazy" do

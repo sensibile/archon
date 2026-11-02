@@ -227,7 +227,7 @@ defmodule Archon.Decider.Mapper.ForkJoinDynamic do
 
     case Map.get(input, param) do
       %{"dynamicTasks" => tasks} when is_list(tasks) ->
-        if Enum.all?(tasks, &is_map/1),
+        if Enum.all?(tasks, &legacy_task?/1),
           do: legacy_tasks(tasks, context),
           else: no_dynamic_tasks(param, input)
 
@@ -239,17 +239,21 @@ defmodule Archon.Decider.Mapper.ForkJoinDynamic do
     end
   end
 
+  # A DynamicForkJoinTask Jackson converts: an object whose input is an object or null.
+  defp legacy_task?(%{} = task), do: is_map(Map.get(task, "input", %{})) or task["input"] == nil
+  defp legacy_task?(_task), do: false
+
   defp legacy_tasks(tasks, context) do
     branches =
       Enum.map(tasks, fn task ->
-        name = task["taskName"]
+        name = string(task["taskName"])
 
         task_def =
           if is_binary(name) and String.trim(name) != "", do: task_def(name, context)
 
         %WorkflowTask{
           task_reference_name: string(task["referenceName"]),
-          name: string(name),
+          name: name,
           type: string(Map.get(task, "type", "SIMPLE")),
           task_definition: task_def
         }

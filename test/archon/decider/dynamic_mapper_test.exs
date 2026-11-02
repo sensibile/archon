@@ -270,6 +270,28 @@ defmodule Archon.Decider.DynamicMapperTest do
                  "{dynamic=null} has no dynamic tasks to be scheduled"
     end
 
+    test "the old form whose task or input is not an object terminates it, a number name is looked up" do
+      wt =
+        fjd(%{"dynamic" => "${workflow.input.dynamic}"}, dynamic_fork_join_tasks_param: "dynamic")
+
+      for tasks <- [[%{"taskName" => "w", "referenceName" => "r", "input" => "s"}], ["x"]] do
+        assert reason(
+                 schedule(workflow([wt, join()], %{"dynamic" => %{"dynamicTasks" => tasks}}), wt)
+               ) =~
+                 ~r/^Dynamic tasks could not be created. The value of dynamic from task's input /
+      end
+
+      input = %{"dynamic" => %{"dynamicTasks" => [%{"taskName" => 5, "referenceName" => "r"}]}}
+      assert {:ok, [_fork, r, _join]} = schedule(workflow([wt, join()], input), wt)
+      assert {r.task_type, r.workflow_task.task_definition.name} == {"5", "5"}
+    end
+
+    test "a null forkTaskInputs element is a branch with a null input" do
+      wt = fjd(%{"forkTaskName" => "w", "forkTaskInputs" => [nil]})
+      assert {:ok, [_fork, branch, _join]} = schedule(workflow([wt, join()], %{}), wt)
+      assert branch.input_data == %{"input" => nil, "__index" => 0}
+    end
+
     # ForkJoinDynamicTaskMapperTest#getDynamicForkTasksAndInputException
     test "inputs that are not a map terminate the workflow" do
       wt = param_form()
