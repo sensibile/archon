@@ -138,6 +138,22 @@ defmodule Archon.Runtime.HttpRuntimeTest do
     assert task(id, "http_ref").poll_count == 1
   end
 
+  test "a late result of another attempt leaves the attempt in flight", %{url: url} do
+    id = start_http(url, "/hang")
+    assert_receive {:target, "/hang"}, 2000
+    pid = WorkflowServer.whereis(id)
+    %Task{task_id: task_id, poll_count: 1, start_time: started} = task(id, "http_ref")
+    assert %{^task_id => {1, ^started}} = :sys.get_state(pid).http
+
+    stale = {:ok, %{status: 200, headers: [], body: "{}"}}
+    assert :ok = WorkflowServer.http_completed(id, task_id, 1, started - 1, stale)
+
+    assert %{^task_id => {1, ^started}} = :sys.get_state(pid).http
+    assert %Task{status: :scheduled} = task(id, "http_ref")
+    assert :ok = Runtime.terminate_workflow(id, "stop")
+    idle_executor()
+  end
+
   test "the result reaches the process that replaced the one that asked", %{url: url} do
     id = start_http(url, "/sleep/300")
     assert_receive {:target, "/sleep/300"}, 2000
