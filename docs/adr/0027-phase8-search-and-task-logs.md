@@ -98,14 +98,13 @@ archon에 이미 있는 것(`541865c` 기준):
     (`ExecutionDAOFacade.java:443-444, 627-628`, `SqliteIndexDAO.java:345-355, 370-385`). archon은 같은 트랜잭션에서 지운다.
     `keepLastN`으로 이미 지운 태스크의 색인 행은 남는다(upstream과 같음).
   - 그래서 `Store.remove_workflow/1`이 archive 여부를 받도록 바뀐다(`remove_workflow/2`, `WorkflowServer`의 호출 자리 포함).
-- **기존 데이터.** 마이그레이션은 표만 만든다. 요약은 앱 코드(결정 3)가 만들어야 하므로, `Archon.Release.migrate/0` 뒤에 부르는
-  `Archon.Release.backfill_search_index/0`이 색인 표를 만든 마이그레이션이 밀리초 단위로 기록한 경계 시각(마이그레이션이 작은 표에 `now()`를 epoch 밀리초로 넣는다.
-  `schema_migrations.inserted_at`은 초 단위라 쓰지 않는다. 경계는 DB 시계이고 행의 시각은 앱 시계이지만 마이그레이션 중에는 런타임이
-  돌지 않으므로 경계 근처에 새 행이 없다) 이전에 만들어진
-  워크플로우와, 그 시각 이전에 예약된(`scheduledTime`) 태스크만 `create_time`·ID 순 배치로 `ON CONFLICT DO NOTHING`으로 채운다(이미 있는 행은 건너뛰므로 중단 뒤 다시 불러도 된다. 배포 뒤 생긴 태스크, 특히 일부러 색인하지 않은 예약만 된
-  태스크는 건드리지 않는다). 그 이전 태스크는 처음 저장 뒤 갱신됐는지 알 수 없으므로 모두 채운다(백필 한 번의 차이). 부르는 자리
-  (릴리스 절차, `docs/operations.md`)는 8c가 정해 적는다. 백필은 마이그레이션처럼 릴리스 작업이라 노드 펜스를 거치지 않는다
-  (`ON CONFLICT DO NOTHING`이라 실행 중인 커밋을 덮지 않는다).
+- **기존 데이터(BOSS 2026-11-04 결정: 시계 비교 없이 한 번만).** 마이그레이션은 표와 완료 표시용 작은 표만 만든다. 요약은 앱
+  코드(결정 3)가 만들어야 하므로 `Archon.Release.backfill_search_index/0`이 채운다. 이 함수는 릴리스의 마이그레이션 단계(`Archon.Release.migrate/0`
+  바로 뒤, 앱이 워크플로우를 처리하기 전)에서 한 번 돌고, 끝나면 완료 표시를 남긴다. 완료 표시가 있으면 아무것도 하지 않는다. 그때
+  저장소에 있는 행은 모두 배포 전 행이므로 시각을 비교하지 않고 모든 워크플로우와 태스크를 `create_time`·ID 순 배치로
+  `ON CONFLICT DO NOTHING`으로 채운다(중단되면 완료 표시가 없으니 다시 돌려 이어서 채운다). 배포 전 태스크는 처음 저장 뒤 갱신됐는지
+  알 수 없으므로 모두 채운다(백필 한 번의 차이). 부르는 자리(릴리스 절차, `docs/operations.md`)는 8c가 정해 적는다. 백필은
+  마이그레이션처럼 앱 기동 전 릴리스 작업이라 노드 펜스를 거치지 않는다.
 - **비용.** 색인은 요약 JSON(입력·출력 포함)을 한 번 더 저장하므로 쓰기량이 늘어난다. upstream 기본 서버와 같은 비용이며 받아들인다.
   비동기 색인 설정(`asyncIndexingEnabled`)은 옮기지 않는다.
 
@@ -129,7 +128,8 @@ archon에 이미 있는 것(`541865c` 기준):
 
 - `Archon.Search.Query`가 `query`·`freeText`·`sort`를 맥락 절의 문법대로 구문 트리(절 목록, freeText, 정렬 목록)로 바꾼다. 순수
   모듈이고 두 저장소가 같이 쓴다. `SqliteIndexQueryBuilder`의 세부를 그대로 옮긴다: camelCase → snake_case, `,`로 나눈 뒤 공백을
-  자르지 않음과 Java `split`의 끝 빈 항목 버림, `_time` 값 변환이 허용 목록 검사보다 먼저이고 첫 값만 변환(숫자가 아니면 오류),
+  자르지 않음과 Java `split`의 끝 빈 항목 버림, `_time` 값 변환이 허용 목록 검사보다 먼저이고 첫 값만 변환(숫자가 아니면 오류. 둘째부터의 값은 upstream에서 변환되지 않은 글자라
+  UTC 시각 글자와 맞지 않으므로 archon도 그 값을 맞지 않는 값으로 다룬다),
   모르는 필드의 절과 잘못된 정렬 항목은 버림.
 - **오류.** 잘못된 절(`IllegalArgumentException`), 숫자가 아닌 시각 값(`NumberFormatException`), 허용 목록에 있지만 그 표에 없는
   필드·정렬 필드(upstream SQLite의 SQL 오류)의 HTTP 상태와 문구는 8a 캡처가 정답이고 그대로 맞춘다.
@@ -141,7 +141,8 @@ archon에 이미 있는 것(`541865c` 기준):
 - `=`의 `*` 와일드카드도 대소문자 무시 LIKE(SQLite와 같음, 같은 `ESCAPE ''`).
 - **순서.** upstream SQLite는 `ORDER BY`가 없거나 동점일 때 실행 계획에 따라 순서가 정해진다(ID만 고르는 `-v2`는 기본 키 순, 요약을
   고르면 rowid 순, `IN`은 값별, 인덱스 열 정렬의 동점은 rowid 역순 등). archon은 계획에 기대지 않고 `ORDER BY <sort 항목>, seq`로
-  정한다(정렬이 없으면 `seq`, 처음 색인한 순서). 정해지지 않은 순서는 의도적 차이로 두고, 8a 시나리오는 그 순서에 기대지 않게
+  정한다(정렬이 없으면 `seq`, 처음 색인한 순서). NULL의 자리는 SQLite와 같게 `ASC`는 `NULLS FIRST`, `DESC`는 `NULLS LAST`다(Postgres
+  기본값의 반대, 메모리 평가도 같다). 정해지지 않은 순서는 의도적 차이로 두고, 8a 시나리오는 그 순서에 기대지 않게
   짠다(유일한 정렬 키, 결과 하나, 또는 재생의 `unordered: true`).
 - **페이징.** `LIMIT size OFFSET start`. upstream SQLite처럼 음수 `size`는 제한 없음, 음수 `start`는 0으로 다룬다(Postgres는 음수를
   오류로 내므로 바꿔 넣는다). `totalHits`는 같은 조건의 개수.
@@ -256,7 +257,7 @@ ADR 0023·0025·0026의 목록에 더해 다음이 생긴다.
 - **`TaskResult.logs`의 `null` 원소**(결정 6): 버린다. upstream은 태스크를 저장한 뒤 500이다.
 - **비동기 색인과 요약 JSON 직렬화 설정**(결정 2·3): 옮기지 않는다. upstream 기본값의 동작만 있다.
 - **archiveWorkflow=false의 색인 삭제 시점**(결정 2): 같은 트랜잭션. upstream은 비동기다.
-- **백필한 태스크 색인**(결정 2): 마이그레이션 전부터 있던 태스크는 갱신 여부와 상관없이 모두 색인한다.
+- **백필한 태스크 색인**(결정 2): 배포 전부터 있던 태스크는 갱신 여부와 상관없이 모두 색인한다.
 - **POST 로그의 교차 출처 거절**(결정 6): 브라우저가 교차 출처로 표시한 요청은 403. 두 헤더를 보내지 않는 클라이언트는 upstream과 같다.
   상속 위험: HTTP 포트에 닿는 브라우저 밖 클라이언트는 임의 태스크 ID에 요청마다 8MB까지 로그를 쌓을 수 있다(upstream과 같은 신뢰
   모델, ADR 0024 결정 4). 8f가 README 배포 절에 적는다(포트를 외부에 열면 인증하는 역프록시 뒤에 둘 것).
