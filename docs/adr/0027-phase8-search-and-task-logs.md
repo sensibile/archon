@@ -113,8 +113,8 @@ archon에 이미 있는 것(`541865c` 기준):
 ### 3. 요약 모델
 
 - `Archon.Domain.WorkflowSummary`와 `Archon.Domain.TaskSummary`를 upstream 생성자(`new WorkflowSummary(Workflow)`,
-  `new TaskSummary(Task)`, `ExecutionDAOFacade`가 `workflowModel.toWorkflow()`·`taskModel.toTask()`로 부름)대로. 그래서 입력은 REST의
-  `Workflow`·`Task` 모양이다 만든다. 필드 순서는 upstream Jackson 직렬화 순서다. upstream getter로 직렬화되는 파생 값도
+  `new TaskSummary(Task)`, `ExecutionDAOFacade`가 `workflowModel.toWorkflow()`·`taskModel.toTask()`로 부름)대로 만든다. 그래서 입력은
+  REST의 `Workflow`·`Task` 모양이다. 필드 순서는 upstream Jackson 직렬화 순서다. upstream getter로 직렬화되는 파생 값도
   포함한다(`inputSize`·`outputSize`는 Java `String.length()`, 곧 UTF-16 단위 길이).
 - 시각은 `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'`(GMT) 글자. `WorkflowSummary`의 `startTime`은 `createTime`, `endTime`은 0보다 클 때만,
   `executionTime`은 끝 − 시작. `TaskSummary`의 시각은 0이어도 epoch 글자로 찍는다. `queueWaitTime`은 upstream `Task` 계산을 따르되
