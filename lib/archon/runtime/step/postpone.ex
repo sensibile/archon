@@ -106,10 +106,7 @@ defmodule Archon.Runtime.Step.Postpone do
           do: Async.due_time(task) - now
 
     # ADR 0026, decision 7: a started HTTP task is evaluated at the end of its response timeout.
-    deadlines =
-      for %Task{task_type: "HTTP", status: :scheduled, poll_count: count} = task <- tasks,
-          count > 0,
-          do: Http.deadline(task) - now
+    deadlines = for task <- tasks, started_http?(task), do: Http.deadline(task) - now
 
     now + max(earliest(delays ++ deadlines, compute(workflow, env)), 1000)
   end

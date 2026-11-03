@@ -389,23 +389,28 @@ defmodule Archon.Runtime.Step.HttpTest do
       {task, _workflow} = complete(ok(200, quoted))
       assert task.output_data["response"]["body"] == %{"s" => String.duplicate("[", 2000)}
 
-      # A float is limited by its length (Jackson 2.18.8 measured: one more character at the top
-      # level than inside an array).
-      {task, _workflow} = complete(ok(200, "1." <> String.duplicate("1", 1000)))
-      assert is_float(task.output_data["response"]["body"])
+      # A float is limited by its digits (integer, fraction and exponent; a lone 0 integer part
+      # counts none), the boundaries measured with Jackson 2.18.8.
+      for text <- [
+            "[1.5e-" <> String.duplicate("1", 998) <> "]",
+            ~s({"a":1.5e-) <> String.duplicate("1", 998) <> "}",
+            "[0." <> String.duplicate("1", 1000) <> "]",
+            "[1." <> String.duplicate("1", 999) <> "]",
+            "1." <> String.duplicate("1", 999) <> "\n"
+          ] do
+        {task, _workflow} = complete(ok(200, text))
+        refute is_binary(task.output_data["response"]["body"]), text
+      end
 
       for text <- [
-            "1." <> String.duplicate("1", 1001),
-            "1.5e" <> String.duplicate("1", 999),
-            "[1." <> String.duplicate("1", 1000) <> "]"
+            "[1.5e-" <> String.duplicate("1", 999) <> "]",
+            "[0." <> String.duplicate("1", 1001) <> "]",
+            "[1." <> String.duplicate("1", 1000) <> "]",
+            "1." <> String.duplicate("1", 1000) <> "\n"
           ] do
         {task, _workflow} = complete(ok(200, text))
         assert task.output_data["response"]["body"] == text
       end
-
-      {task, _workflow} = complete(ok(200, "[-1." <> String.duplicate("1", 999) <> "]"))
-      assert [value] = task.output_data["response"]["body"]
-      assert is_float(value)
     end
 
     test "a text body without a charset is read as ISO-8859-1, JSON as UTF-8" do

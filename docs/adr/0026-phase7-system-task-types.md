@@ -661,8 +661,8 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     태스크에 이유를 다 두고 `Task.to_json/2`(upstream `TaskModel#toTask`)에서 자른다. 3xx처럼 2xx·4xx·5xx가 아니면 body 없이
     `No response from the remote service`로 `FAILED`다. 2xx body는 `content-type`의 charset, 없으면 JSON은 UTF-8·그 밖은 ISO-8859-1로
     읽는다(`StringHttpMessageConverter`). JSON 판정은 Jackson 2.18 기본 `StreamReadConstraints`를 따라 중첩 1000을 넘거나
-    1000자리를 넘는 정수, 1001자(부호 빼고, 최상위 값이면 1002자)를 넘는 실수가 있으면 파싱 실패로 원문 글자다(Jackson 2.18.8을
-    실행해 경계를 쟀다). 이 검사를 디코딩 전에 해서, body 상한 안의 응답이 디코딩으로
+    1000자리를 넘는 정수, 정수·소수·지수 자릿수 합이 1000을 넘는 실수(정수부가 `0` 하나면 0으로 셈, `ParserBase#resetFloat`)가
+    있으면 파싱 실패로 원문 글자다(Jackson 2.18.8을 실행해 경계를 쟀다). 이 검사를 디코딩 전에 해서, body 상한 안의 응답이 디코딩으로
     끝없는 구조를 만들지 못하게 한다. 연결 거부는 캡처 문구(`Connect to <scheme>://<host>:<port> failed: Connection refused (connect
     failed)`)와 같게, 연결·읽기 시간 초과는 `Connect timed out`·`Read timed out`, 이름 풀이 실패는 `<host>: Name or service not known`이다.
   - 4xx·5xx 문구의 상태 문구는 서버가 보낸 것이 아니라 Spring 표의 것이다(Mint는 사유 문구를 주지 않는다). 표에 없는 4xx·5xx는 빈
@@ -773,7 +773,8 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
 - **HTTP 요청의 전체 시간 상한과 취소**(결정 7): 쓰이지 않는 요청을 끊고 요청마다 전체 시간 상한(60초)을 둔다. upstream은 읽기 시간 상한만 있다. 방법은 결정 7 끝 "조각 7g에서
   정한 것".
 - **HTTP 응답 body의 JSON 판정**(결정 7, 조각 7g): JSON 값 뒤에 다른 글자가 있으면(`42 abc`) 원문 글자다. upstream Jackson
-  `readTree`는 첫 값만 읽는다(`42.0`).
+  `readTree`는 첫 값만 읽는다(`42.0`). 수 길이 제약은 자릿수 1000으로 재고, Jackson이 입력 끝에 닿은 수에만 한 자리 더 허용하는
+  버퍼 경계 차이는 따르지 않는다. double 범위를 넘는 지수(`1e999`)는 원문 글자다(Jackson은 `Infinity`).
 - **HTTP charset**(결정 7, 조각 7g): 응답 body는 ISO-8859-1과 UTF-8만 읽고 요청 문자열 body도 그 둘로만 쓴다. 다른 charset
   (windows-1252, UTF-16, `ISO8859_1` 같은 별칭 등)을 밝히면 UTF-8로 읽고 쓴다. upstream은 JVM이 아는 charset이면 그것으로 읽고 쓰며,
   모르는 charset을 밝힌 `contentType`은 보내기 전에 미디어 타입 오류로 실패한다(archon은 charset 이름을 검사하지 않는다).
