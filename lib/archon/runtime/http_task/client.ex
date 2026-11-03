@@ -308,10 +308,18 @@ defmodule Archon.Runtime.HttpTask.Client do
       else: inflated(response, window, limits)
   end
 
+  # The decompressed body gets what the redirected responses left of the body limit.
   defp inflated(%{headers: headers, body: body} = response, window, limits) do
-    with {:ok, body} <- inflate(body, window, limits.max_body) do
-      headers = Enum.reject(headers, fn {name, _value} -> name in @decoded_drops end)
-      {:ok, %{response | headers: headers, body: body}}
+    case inflate(body, window, limits.max_body - Map.get(limits, :read, 0)) do
+      {:ok, body} ->
+        headers = Enum.reject(headers, fn {name, _value} -> name in @decoded_drops end)
+        {:ok, %{response | headers: headers, body: body}}
+
+      {:error, {:io, "Response body is larger than " <> _}} ->
+        body_error(limits)
+
+      {:error, _reason} = error ->
+        error
     end
   end
 

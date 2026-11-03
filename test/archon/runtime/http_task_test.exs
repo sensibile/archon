@@ -170,6 +170,12 @@ defmodule Archon.Runtime.HttpTaskTest do
       |> send_resp(302, :crypto.strong_rand_bytes(600))
     end
 
+    defp answer(conn, ["redirect_to_zeros"]) do
+      conn
+      |> put_resp_header("location", "/zeros")
+      |> send_resp(302, :crypto.strong_rand_bytes(600))
+    end
+
     defp answer(conn, ["random", size]) do
       send_resp(conn, 200, :crypto.strong_rand_bytes(String.to_integer(size)))
     end
@@ -410,6 +416,15 @@ defmodule Archon.Runtime.HttpTaskTest do
 
       assert {:error, {:io, "Response body is larger than 1000 bytes"}} =
                Client.run(request(url <> "/fat_redirect"), limits)
+
+      # A compressed final body counts once decompressed.
+      assert {:ok, %{body: zeros}} =
+               Client.run(request(url <> "/zeros"), %{limits | max_body: 2000})
+
+      assert byte_size(zeros) == 2000
+
+      assert {:error, {:io, "Response body is larger than 2000 bytes"}} =
+               Client.run(request(url <> "/redirect_to_zeros"), %{limits | max_body: 2000})
     end
 
     test "a redirect to a location already visited is circular", %{url: url} do
