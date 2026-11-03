@@ -609,9 +609,10 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   - HttpClient의 기본 동작을 따른다: `Accept-Encoding: gzip, x-gzip, deflate`를 보내고 그 압축을 풀며 그때 `content-length`·
     `content-encoding`·`content-md5` 헤더를 뺀다(`ContentCompressionExec`). 그래서 응답 헤더가 캡처(`vary`·`cache-control`·
     `content-type`·`date`)와 같다. 리다이렉트는 `RedirectExec`처럼 따라간다(`301`·`302`·`303`·`307`·`308`과 `location`, `303`과 `POST`의
-    `301`·`302`는 body 없는 `GET`, 50번까지, 이미 간 곳이면 `Circular redirect to '<uri>'`). HttpClient 5.5.2 `DefaultRedirectStrategy#isRedirectAllowed`처럼
-    `Authorization`·`Cookie` 헤더가 있는 요청은 다른 호스트·포트로 따라가지 않고 그 3xx가 응답이다(그래서 `No response from the remote
-    service`로 `FAILED`). 리다이렉트는 응답을 보낸 원격 서버가 정하므로 대상 제한 없음(위 SSRF 상속 위험)이 리다이렉트 목적지에도
+    `301`·`302`는 body 없는 `GET`, 50번까지, 이미 간 곳이면 `Circular redirect to '<uri>'`). `GET`으로 바뀌는 리다이렉트는 원래 헤더 없는 새
+    요청이다(`ClassicRequestBuilder.get()`). HttpClient 5.5.2 `DefaultRedirectStrategy#isRedirectAllowed`처럼 리다이렉트 요청에
+    `Authorization`·`Cookie` 헤더가 남아 있고 다른 호스트·포트로 가면 따라가지 않고 그 3xx가 응답이다(그래서 `No response from the
+    remote service`로 `FAILED`). 리다이렉트는 응답을 보낸 원격 서버가 정하므로 대상 제한 없음(위 SSRF 상속 위험)이 리다이렉트 목적지에도
     그대로 걸린다. 7h가 README 경고에 함께 적는다. 리다이렉트 픽스처는 7a 캡처에 없다(7h가
     더해 다시 캡처할 후보).
   - **실행기**(`Archon.Runtime.HttpTask`, 앱 감독 트리의 `Archon.Runtime.HttpTask.Supervisor`가 요청용 Task 감독자와 함께

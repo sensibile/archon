@@ -70,9 +70,8 @@ defmodule Archon.Runtime.HttpTask.Client do
       {"location", location} ->
         location = request.uri |> URI.merge(location) |> URI.to_string()
 
-        if redirect_allowed?(request, location),
-          do: {location, redirected(request, status, location)},
-          else: nil
+        next = redirected(request, status, location)
+        if redirect_allowed?(request, next), do: {location, next}, else: nil
 
       nil ->
         nil
@@ -83,11 +82,12 @@ defmodule Archon.Runtime.HttpTask.Client do
 
   defp redirect(_request, _response), do: nil
 
-  # DefaultRedirectStrategy#isRedirectAllowed: a request with an Authorization or Cookie header
-  # is not redirected to another host or port; its redirect is the response.
-  defp redirect_allowed?(request, location) do
-    same_authority?(URI.parse(request.uri), URI.parse(location)) or
-      not Enum.any?(request.headers, fn {name, _value} ->
+  # DefaultRedirectStrategy#isRedirectAllowed, asked about the redirect request: one with an
+  # Authorization or Cookie header does not go to another host or port; the redirect is then the
+  # response.
+  defp redirect_allowed?(request, next) do
+    same_authority?(URI.parse(request.uri), URI.parse(next.uri)) or
+      not Enum.any?(next.headers, fn {name, _value} ->
         String.downcase(name) in ["authorization", "cookie"]
       end)
   end
@@ -103,8 +103,9 @@ defmodule Archon.Runtime.HttpTask.Client do
       (status == 303 and request.method not in ["GET", "HEAD"]) or
         (status in [301, 302] and request.method == "POST")
 
+    # ClassicRequestBuilder.get(): a new GET without the original headers or body.
     if get?,
-      do: %{request | uri: location, method: "GET", body: nil},
+      do: %{request | uri: location, method: "GET", headers: [], body: nil},
       else: %{request | uri: location}
   end
 

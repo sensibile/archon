@@ -102,6 +102,15 @@ defmodule Archon.Runtime.HttpTaskTest do
       conn |> put_resp_header("location", location) |> send_resp(302, "")
     end
 
+    defp answer(conn, ["away303"]) do
+      location = "http://127.0.0.1:#{conn.port}/echo"
+      conn |> put_resp_header("location", location) |> send_resp(303, "")
+    end
+
+    defp answer(conn, ["port"]) do
+      conn |> put_resp_header("location", "http://127.0.0.1:9/echo") |> send_resp(302, "")
+    end
+
     defp answer(conn, ["loop"]) do
       conn |> put_resp_header("location", "/loop") |> send_resp(302, "")
     end
@@ -283,6 +292,27 @@ defmodule Archon.Runtime.HttpTaskTest do
       request = request(other <> "/away", headers: [{"Authorization", "secret"}])
       assert {:ok, %{status: 302}} = Client.run(request, @limits)
       refute_received {:target, _method, "/echo"}
+
+      # Another port of the same host is another authority too.
+      request = request(url <> "/port", headers: [{"Cookie", "c"}])
+      assert {:ok, %{status: 302}} = Client.run(request, @limits)
+    end
+
+    test "a 303 after a POST is a new GET without the headers, so credentials do not stop it",
+         %{url: url} do
+      other = String.replace(url, "127.0.0.1", "localhost")
+
+      post =
+        request(other <> "/away303",
+          method: "POST",
+          body: "{}",
+          headers: [{"Authorization", "s"}]
+        )
+
+      assert {:ok, %{status: 200, body: body}} = Client.run(post, @limits)
+      assert %{"method" => "GET", "headers" => headers} = Jason.decode!(body)
+      refute Map.has_key?(headers, "authorization")
+      refute Map.has_key?(headers, "content-type")
     end
 
     test "a redirect to a location already visited is circular", %{url: url} do
