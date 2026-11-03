@@ -99,7 +99,8 @@ archon에 이미 있는 것(`541865c` 기준):
     `keepLastN`으로 이미 지운 태스크의 색인 행은 남는다(upstream과 같음).
   - 그래서 `Store.remove_workflow/1`이 archive 여부를 받도록 바뀐다(`remove_workflow/2`, `WorkflowServer`의 호출 자리 포함).
 - **기존 데이터.** 마이그레이션은 표만 만든다. 요약은 앱 코드(결정 3)가 만들어야 하므로, `Archon.Release.migrate/0` 뒤에 부르는
-  `Archon.Release.backfill_search_index/0`이 색인 표를 만든 마이그레이션의 적용 시각(`schema_migrations.inserted_at`) 이전에 만들어진
+  `Archon.Release.backfill_search_index/0`이 색인 표를 만든 마이그레이션이 밀리초 단위로 기록한 경계 시각(마이그레이션이 작은 표에 `now()`를 epoch 밀리초로 넣는다.
+  `schema_migrations.inserted_at`은 초 단위라 쓰지 않는다) 이전에 만들어진
   워크플로우와, 그 시각 이전에 예약된(`scheduledTime`) 태스크만 `create_time`·ID 순 배치로 `ON CONFLICT DO NOTHING`으로 채운다(이미 있는 행은 건너뛰므로 중단 뒤 다시 불러도 된다. 배포 뒤 생긴 태스크, 특히 일부러 색인하지 않은 예약만 된
   태스크는 건드리지 않는다). 그 이전 태스크는 처음 저장 뒤 갱신됐는지 알 수 없으므로 모두 채운다(백필 한 번의 차이). 부르는 자리
   (릴리스 절차, `docs/operations.md`)는 8c가 정해 적는다.
@@ -176,7 +177,8 @@ archon에 이미 있는 것(`541865c` 기준):
      - rerun: 위로 전하는 `Lifecycle.rerun_parent/2`의 요청에 사슬을 넣는다.
      - 부모는 그 이벤트·요청을 처리하는 커밋의 `task_logs`에 글을 넣는다. 글자는 8a 캡처가 정답이다.
   3. `POST /api/tasks/{taskId}/log`: 워크플로우 프로세스를 거치지 않고 `Archon.Runtime.Tasks`의 로그 함수가 저장소에 바로 쓴다
-     (로그는 워크플로우 상태가 아니므로 ADR 0021 결정 7의 펜스 대상이 아니다). `createdTime`은 지금. upstream처럼 태스크가 있는지
+     (로그는 워크플로우 상태가 아니지만, ADR 0021 결정 7대로 Postgres 쓰기 트랜잭션은 모두 노드 펜스를 거치므로 이 쓰기도 커밋과 같은 펜스
+     확인을 한다). `createdTime`은 지금. upstream처럼 태스크가 있는지
      확인하지 않는다.
 - **POST body.** upstream `@RequestBody String`은 Content-Type과 상관없이 body 글자를 그대로 받는다(JSON 문자열이면 따옴표째).
   archon도 Content-Type을 보지 않고 body 글자를 그대로 저장한다. 한도는 기존 `ArchonWeb.Request`의 8MB이고, 텍스트를 읽는 함수를
@@ -232,7 +234,9 @@ archon에 이미 있는 것(`541865c` 기준):
   - 3차: 8d ∥ 8e. 8d는 `Commit`·Step·저장소 로그 콜백·`Runtime.Tasks`·로그 컨트롤러, 8e는 `Archon.Runtime`·도메인 결과 모델·검색
     컨트롤러로 나뉜다. 8e가 `BulkResponse`를 일반화하고 8d는 그 파일을 고치지 않는다.
   - 마지막: 8f.
-- 각 조각은 자기 컨트롤러 액션만 미구현 목록에서 빼고, 자기 단계 옵션 줄만 고친다(ADR 0025 결정 8과 같음).
+- 각 조각은 자기 컨트롤러 액션만 미구현 목록에서 빼면 단계가 켜지므로 `contract_case.ex`를 고칠 필요가 없다. 구현하다 자기 단계의
+  옵션(`ignore` 등)을 더 고쳐야 할 때만 그 단계 줄을 고친다(ADR 0025 결정 8과 같음). 3차의 8d·8e가 이 파일의 서로 다른 줄을 고치는
+  것은 위 파일 분리의 예외이고, `gh pr update-branch`로 푸는 작은 충돌로 받아들인다.
 - 각 조각은 이 ADR의 결정 번호와 조각 이름을 PR에 적는다. 조각 중에 결정이 바뀌면 이 ADR의 해당 결정 끝에 "조각 8x에서 정한
   것(날짜)"으로 적는다. ADR이 "캡처가 정답"이라 한 세부는 조각이 캡처대로 맞추고 그 사실만 적는다.
 
@@ -251,6 +255,8 @@ ADR 0023·0025·0026의 목록에 더해 다음이 생긴다.
 - **archiveWorkflow=false의 색인 삭제 시점**(결정 2): 같은 트랜잭션. upstream은 비동기다.
 - **백필한 태스크 색인**(결정 2): 마이그레이션 전부터 있던 태스크는 갱신 여부와 상관없이 모두 색인한다.
 - **POST 로그의 교차 출처 거절**(결정 6): 브라우저가 교차 출처로 표시한 요청은 403. 두 헤더를 보내지 않는 클라이언트는 upstream과 같다.
+  상속 위험: HTTP 포트에 닿는 브라우저 밖 클라이언트는 임의 태스크 ID에 요청마다 8MB까지 로그를 쌓을 수 있다(upstream과 같은 신뢰
+  모델, ADR 0024 결정 4). 8f가 README 배포 절에 적는다(포트를 외부에 열면 인증하는 역프록시 뒤에 둘 것).
 
 ## 대안
 
