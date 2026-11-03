@@ -9,8 +9,8 @@ defmodule ArchonWeb.ContractReplayTest do
   own replays leave parts out; this one starts from the store the capture started from: the
   fixtures' definitions other tests registered are removed first and put back afterwards. Every
   Phase 6 step runs (ADR 0025, decision 7; slice 6h removed the skipping of steps not
-  implemented yet). A Phase 7 step runs once the task types it names have their mapper
-  (`types:`, ADR 0026 decision 8).
+  implemented yet), and so does every Phase 7 step (ADR 0026, decision 8; slice 7h removed the
+  skipping of steps whose task type had no mapper yet).
 
   Runs on either backend (`ARCHON_BACKEND`, ADR 0021 decision 9).
   """

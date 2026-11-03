@@ -19,9 +19,10 @@ defmodule Archon.Domain.TaskTypeConstraint do
   it runs for every task wherever a `WorkflowTask` is validated. The violations are class-level:
   their path is the task's own path (`tasks[0]`), represented here by `""`.
 
-  Not ported yet (ADR 0014): `KAFKA_PUBLISH`, which falls back to a `MetadataDAO` lookup of the
-  task definition. The lookup is wired (`task_definition/2`, ADR 0026 decision 2);
-  `JSON_JQ_TRANSFORM` (slice 7e) and `HTTP` (slice 7g) read it.
+  The rules that fall back to a `MetadataDAO` lookup of the task definition, `HTTP` and
+  `JSON_JQ_TRANSFORM` (ADR 0026, decisions 6 and 7), read it through `task_definition/2`
+  (validation option `task_def_lookup`, ADR 0026 decision 2). `KAFKA_PUBLISH`, which reads it too,
+  is not ported: the type itself is Later (ADR 0026, decision 1) and runs as a worker task.
 
   `DECISION.caseExpression` and `SWITCH.expression` with the `javascript` evaluator (not
   `graaljs`, as upstream) are parsed without running (`Archon.Script.validate_syntax/1`, ADR

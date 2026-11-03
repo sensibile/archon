@@ -148,11 +148,15 @@ Phase 6 단계는 조각 6a~6g가 구현하는 동안 미구현 액션으로 가
 | `p7_inline_*`, `p7_lambda_*` | javascript, value-param, 모르는 평가기, 스크립트 오류, 문자열이 아닌 `evaluatorType`·`expression`(시작 500), LAMBDA 결과·오류·빈 식 |
 | `p7_jq_*` | 여러 결과, `null` 결과, 문법 오류, `queryExpression` 없음, 문자열이 아닌 것, 등록 400 |
 | `p7_start_workflow_*` | 시작한 워크플로우(GET 포함), 검증 실패, `startWorkflow` 없음 |
-| `p7_http_*` | stub 대상 JSON·POST(헤더 포함)·글자·수 body, 299, 4xx 짧은·긴·빈 body, 503, 연결 거부, `uri`·`method` 없음, `asyncComplete`, 덮이는 `inputParameters.asyncComplete`, 등록 400 |
+| `p7_http_*` | stub 대상 JSON·POST(헤더 포함)·글자·수 body, 299, 4xx 짧은·긴·빈 body, 503, 연결 거부, `uri`·`method` 없음, `asyncComplete`, 덮이는 `inputParameters.asyncComplete`, 등록 400, 리다이렉트(`GET` 302, body 있는 `POST` 307, 7h) |
 
 7a가 다시 캡처한 기존 360개는 `normalize/1` 기준으로 순서만 달랐다(bulk 오류 맵의 키, `workflow_correlated_paused_closed`,
 `route_later_tasks_search`). `task_update_v2_invalid_both`는 두 오류 순서가 바뀌어 기존 캡처를 남겼다. Phase 7 단계는
-`types:` 옵션을 달아 그 타입의 매퍼가 생길 때까지 건너뛴다(7h가 옵션을 없앤다).
+조각 7b~7g가 구현하는 동안 그 타입의 매퍼가 없는 단계를 건너뛰었고(`types:`), 마지막 조각 7h가 그 장치를 없애 지금은 모든 단계가 돈다.
+
+7h는 HTTP 리다이렉트 픽스처 4개(`p7_http_redirect_302_*`, `_307_*`, 모두 524개)를 더했다. 같은 서버로 전체를 다시 캡처해 기존
+520개가 `normalize/1` 기준으로 알려진 값(bulk 오류 맵의 키, 람다 클래스 이름, `metadata_register_taskdefs_coerced`의 위반 순서, JOIN
+`pollCount`, stub `date` 헤더)만 다른 것을 확인하고 새 4개만 넣었다.
 
 Archon이 일부러 다르게 답하는 픽스처(Later 경로와 405는 404, Jackson 문구)는 재생 도우미
 `test/support/archon_web/contract_case.ex`의 시나리오에 단계 옵션으로 적혀 있다.

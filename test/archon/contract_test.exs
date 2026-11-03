@@ -344,6 +344,8 @@ defmodule Archon.ContractTest do
     "p7_http_refused_start" => :text_id,
     "p7_http_no_uri_start" => :text_id,
     "p7_http_no_method_start" => :text_id,
+    "p7_http_redirect_302_start" => :text_id,
+    "p7_http_redirect_307_start" => :text_id,
     "p7_http_async_start" => :text_id,
     "p7_http_async_update" => :text_id,
     "p7_http_async_input_start" => :text_id,

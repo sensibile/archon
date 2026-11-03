@@ -1,0 +1,274 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/68ab7cb2-add3-4e9d-a136-6057cd8033a3",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "ownerApp": "",
+      "createTime": 1793678751634,
+      "updateTime": 1793678751732,
+      "status": "COMPLETED",
+      "endTime": 1793678751732,
+      "workflowId": "68ab7cb2-add3-4e9d-a136-6057cd8033a3",
+      "tasks": [
+        {
+          "taskType": "HTTP",
+          "status": "COMPLETED",
+          "inputData": {
+            "asyncComplete": false,
+            "http_request": {
+              "uri": "http://127.0.0.1:18299/redirect/307",
+              "method": "POST",
+              "body": {
+                "k": 1
+              }
+            }
+          },
+          "referenceTaskName": "http_ref",
+          "retryCount": 0,
+          "seq": 1,
+          "pollCount": 1,
+          "taskDefName": "archon_p7_http",
+          "scheduledTime": 1793678751636,
+          "startTime": 1793678751724,
+          "endTime": 1793678751731,
+          "updateTime": 1793678751724,
+          "startDelayInSeconds": 0,
+          "retried": false,
+          "executed": false,
+          "callbackFromWorker": true,
+          "responseTimeoutSeconds": 0,
+          "workflowInstanceId": "68ab7cb2-add3-4e9d-a136-6057cd8033a3",
+          "workflowType": "archon_p7_http",
+          "taskId": "359d25cc-2847-4662-8dd1-7ab8c47ed0d4",
+          "callbackAfterSeconds": 0,
+          "workerId": "<redacted-hostname>",
+          "outputData": {
+            "response": {
+              "headers": {
+                "date": [
+                  "Tue, 03 Nov 2026 04:05:51 GMT"
+                ],
+                "vary": [
+                  "accept-encoding"
+                ],
+                "cache-control": [
+                  "max-age=0, private, must-revalidate"
+                ],
+                "content-type": [
+                  "application/json"
+                ]
+              },
+              "reasonPhrase": "OK",
+              "body": {
+                "ok": true,
+                "n": 1,
+                "list": [
+                  1,
+                  2
+                ]
+              },
+              "statusCode": 200
+            }
+          },
+          "workflowTask": {
+            "name": "archon_p7_http",
+            "taskReferenceName": "http_ref",
+            "inputParameters": {
+              "http_request": "${workflow.input.request}",
+              "asyncComplete": false
+            },
+            "type": "HTTP",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_http",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          },
+          "rateLimitPerFrequency": 0,
+          "rateLimitFrequencyInSeconds": 1,
+          "workflowPriority": 0,
+          "iteration": 0,
+          "subworkflowChanged": false,
+          "firstStartTime": 0,
+          "executionMetadata": {
+            "additionalContext": {},
+            "additionalContextMap": {},
+            "empty": true
+          },
+          "taskDefinition": {
+            "createTime": 0,
+            "updateTime": 0,
+            "name": "archon_p7_http",
+            "retryCount": 0,
+            "timeoutSeconds": 0,
+            "inputKeys": [],
+            "outputKeys": [],
+            "runtimeMetadata": [],
+            "timeoutPolicy": "TIME_OUT_WF",
+            "retryLogic": "FIXED",
+            "retryDelaySeconds": 60,
+            "responseTimeoutSeconds": 0,
+            "inputTemplate": {},
+            "rateLimitPerFrequency": 0,
+            "rateLimitFrequencyInSeconds": 1,
+            "backoffScaleFactor": 1,
+            "maxRetryDelaySeconds": 0,
+            "backoffJitterMs": 0,
+            "totalTimeoutSeconds": 0,
+            "taskStatusListenerEnabled": true,
+            "enforceSchema": false
+          },
+          "queueWaitTime": 88,
+          "loopOverTask": false
+        }
+      ],
+      "input": {
+        "request": {
+          "uri": "http://127.0.0.1:18299/redirect/307",
+          "method": "POST",
+          "body": {
+            "k": 1
+          }
+        }
+      },
+      "output": {
+        "response": {
+          "headers": {
+            "date": [
+              "Tue, 03 Nov 2026 04:05:51 GMT"
+            ],
+            "vary": [
+              "accept-encoding"
+            ],
+            "cache-control": [
+              "max-age=0, private, must-revalidate"
+            ],
+            "content-type": [
+              "application/json"
+            ]
+          },
+          "reasonPhrase": "OK",
+          "body": {
+            "ok": true,
+            "n": 1,
+            "list": [
+              1,
+              2
+            ]
+          },
+          "statusCode": 200
+        }
+      },
+      "taskToDomain": {},
+      "failedReferenceTaskNames": [],
+      "workflowDefinition": {
+        "createTime": 1793678747122,
+        "updateTime": 0,
+        "name": "archon_p7_http",
+        "version": 1,
+        "tasks": [
+          {
+            "name": "archon_p7_http",
+            "taskReferenceName": "http_ref",
+            "inputParameters": {
+              "http_request": "${workflow.input.request}",
+              "asyncComplete": false
+            },
+            "type": "HTTP",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "taskDefinition": {
+              "createTime": 0,
+              "updateTime": 0,
+              "name": "archon_p7_http",
+              "retryCount": 0,
+              "timeoutSeconds": 0,
+              "inputKeys": [],
+              "outputKeys": [],
+              "runtimeMetadata": [],
+              "timeoutPolicy": "TIME_OUT_WF",
+              "retryLogic": "FIXED",
+              "retryDelaySeconds": 60,
+              "responseTimeoutSeconds": 0,
+              "inputTemplate": {},
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "backoffScaleFactor": 1,
+              "maxRetryDelaySeconds": 0,
+              "backoffJitterMs": 0,
+              "totalTimeoutSeconds": 0,
+              "taskStatusListenerEnabled": true,
+              "enforceSchema": false
+            },
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": [],
+            "onStateChange": {},
+            "permissive": false,
+            "metadata": {}
+          }
+        ],
+        "inputParameters": [],
+        "outputParameters": {},
+        "schemaVersion": 2,
+        "restartable": true,
+        "workflowStatusListenerEnabled": false,
+        "timeoutPolicy": "ALERT_ONLY",
+        "timeoutSeconds": 0,
+        "variables": {},
+        "inputTemplate": {},
+        "enforceSchema": true,
+        "metadata": {},
+        "maskedFields": []
+      },
+      "priority": 0,
+      "variables": {},
+      "lastRetriedTime": 0,
+      "failedTaskNames": [],
+      "history": [],
+      "rateLimited": false,
+      "startTime": 1793678751634,
+      "workflowVersion": 1,
+      "workflowName": "archon_p7_http"
+    }
+  }
+}

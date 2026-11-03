@@ -211,6 +211,8 @@ defmodule Archon.Contract do
     "p7_http_refused_get" => {:response, :workflow},
     "p7_http_no_uri_get" => {:response, :workflow},
     "p7_http_no_method_get" => {:response, :workflow},
+    "p7_http_redirect_302_get" => {:response, :workflow},
+    "p7_http_redirect_307_get" => {:response, :workflow},
     "p7_http_register_async" => {:request, :workflow_def},
     "p7_http_async_get" => {:response, :workflow},
     "p7_http_async_get_completed" => {:response, :workflow},

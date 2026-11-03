@@ -56,10 +56,6 @@ defmodule ArchonWeb.ContractCase do
       `path` is a list of keys and list indexes; `condition` is `:present` (not `nil`),
       `{:length, n}` or the value itself. `until: :settled` waits for the workflow GET to show
       the fixture's workflow status, number of tasks and status of each task.
-    * `types: [type]` - the workflow task types of Phase 7 the step needs (ADR 0026, decision 8).
-      The step is skipped while one of them has no mapper of its own
-      (`Archon.Decider.Mapper.mapped?/1`); a step that needs an earlier one names its types too.
-      Each Phase 7 slice turns its steps on by adding its type to the mapper table.
 
   ## HTTP stub
 
@@ -102,7 +98,6 @@ defmodule ArchonWeb.ContractCase do
   import ExUnit.Assertions
 
   alias Archon.Contract
-  alias Archon.Decider.Mapper
   alias Archon.Domain.Codec
 
   @endpoint ArchonWeb.Endpoint
@@ -121,8 +116,7 @@ defmodule ArchonWeb.ContractCase do
           ignore: [[String.t() | non_neg_integer()]],
           only: :expected_names | :bound_ids,
           unordered: boolean(),
-          until: [{[String.t() | non_neg_integer()], condition()}] | :settled,
-          types: [String.t()]
+          until: [{[String.t() | non_neg_integer()], condition()}] | :settled
         ]
   @type step ::
           {:exchange, String.t()}
@@ -163,18 +157,8 @@ defmodule ArchonWeb.ContractCase do
   @two_tasks [until: [{["tasks"], {:length, 2}}]]
   @first_in_progress [until: [{["tasks", 0, "status"], "IN_PROGRESS"}]]
 
-  # Phase 7 (ADR 0026, decision 8): the types a step needs, and the workflow GETs the capture
-  # waited on.
-  @terminate [types: ["TERMINATE"]]
-  @set_variable [types: ["SET_VARIABLE"]]
-  @noop [types: ["NOOP"]]
-  @human [types: ["HUMAN"]]
-  @exclusive_join [types: ["EXCLUSIVE_JOIN"]]
-  @dynamic [types: ["DYNAMIC"]]
-  @dynamic_noop [types: ["DYNAMIC", "NOOP"]]
-  @fork_join_dynamic [types: ["FORK_JOIN_DYNAMIC"]]
-  @inline [types: ["INLINE"]]
-  @lambda [types: ["LAMBDA"]]
+  # Phase 7 (ADR 0026, decision 8): the workflow GETs the capture waited on, and deliberate
+  # differences.
   # The script engine's own message (ADR 0015) and a start upstream throws out of (ADR 0026,
   # decision 5).
   @engine_message [
@@ -186,9 +170,6 @@ defmodule ArchonWeb.ContractCase do
     ]
   ]
   @started [expect: :started]
-  @jq [types: ["JSON_JQ_TRANSFORM"]]
-  @start_workflow [types: ["START_WORKFLOW", "NOOP"]]
-  @http [types: ["HTTP"]]
   @settled [until: :settled]
   # Upstream's system task worker evaluates the JOIN of a dynamic fork on its own clock, so
   # whether and how often it did varies between captures of the same steps.
@@ -634,133 +615,132 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "metadata_get_workflow_after_delete"},
     {:exchange, "metadata_delete_taskdef"},
     {:exchange, "metadata_get_taskdef_deleted"},
-    # Phase 7 system task types (ADR 0026, decision 8): each step names the types it needs
+    # Phase 7 system task types (ADR 0026, decision 8)
     {:exchange, "p7_register_taskdefs"},
     # TERMINATE
-    {:exchange, "p7_terminate_register_completed", @terminate},
-    {:exchange, "p7_terminate_register_failed", @terminate},
-    {:exchange, "p7_terminate_register_terminated", @terminate},
-    {:exchange, "p7_terminate_register_not_string", @terminate},
-    {:exchange, "p7_terminate_register_expression", @terminate},
-    {:exchange, "p7_terminate_completed_start", @terminate},
-    {:exchange, "p7_terminate_completed_get", @terminate ++ @settled},
-    {:exchange, "p7_terminate_failed_start", @terminate},
-    {:exchange, "p7_terminate_failed_get", @terminate ++ @settled},
-    {:exchange, "p7_terminate_terminated_start", @terminate},
-    {:exchange, "p7_terminate_terminated_get", @terminate ++ @settled},
+    {:exchange, "p7_terminate_register_completed"},
+    {:exchange, "p7_terminate_register_failed"},
+    {:exchange, "p7_terminate_register_terminated"},
+    {:exchange, "p7_terminate_register_not_string"},
+    {:exchange, "p7_terminate_register_expression"},
+    {:exchange, "p7_terminate_completed_start"},
+    {:exchange, "p7_terminate_completed_get", @settled},
+    {:exchange, "p7_terminate_failed_start"},
+    {:exchange, "p7_terminate_failed_get", @settled},
+    {:exchange, "p7_terminate_terminated_start"},
+    {:exchange, "p7_terminate_terminated_get", @settled},
     # SET_VARIABLE
-    {:exchange, "p7_set_variable_register", @set_variable},
-    {:exchange, "p7_set_variable_start", @set_variable},
-    {:exchange, "p7_set_variable_get", @set_variable ++ @settled},
-    {:exchange, "p7_set_variable_register_big", @set_variable},
-    {:exchange, "p7_set_variable_big_start", @set_variable},
-    {:exchange, "p7_set_variable_big_get", @set_variable ++ @settled},
-    {:exchange, "p7_set_variable_register_fork", @set_variable},
-    {:exchange, "p7_set_variable_fork_start", @set_variable},
-    {:exchange, "p7_set_variable_fork_get", @set_variable ++ @settled},
+    {:exchange, "p7_set_variable_register"},
+    {:exchange, "p7_set_variable_start"},
+    {:exchange, "p7_set_variable_get", @settled},
+    {:exchange, "p7_set_variable_register_big"},
+    {:exchange, "p7_set_variable_big_start"},
+    {:exchange, "p7_set_variable_big_get", @settled},
+    {:exchange, "p7_set_variable_register_fork"},
+    {:exchange, "p7_set_variable_fork_start"},
+    {:exchange, "p7_set_variable_fork_get", @settled},
     # NOOP
-    {:exchange, "p7_noop_register", @noop},
-    {:exchange, "p7_noop_start", @noop},
-    {:exchange, "p7_noop_get", @noop ++ @settled},
+    {:exchange, "p7_noop_register"},
+    {:exchange, "p7_noop_start"},
+    {:exchange, "p7_noop_get", @settled},
     # HUMAN
-    {:exchange, "p7_human_register", @human},
-    {:exchange, "p7_human_start", @human},
-    {:exchange, "p7_human_get", @human ++ @settled},
-    {:exchange, "p7_human_update", @human},
-    {:exchange, "p7_human_get_completed", @human ++ @settled},
+    {:exchange, "p7_human_register"},
+    {:exchange, "p7_human_start"},
+    {:exchange, "p7_human_get", @settled},
+    {:exchange, "p7_human_update"},
+    {:exchange, "p7_human_get_completed", @settled},
     # EXCLUSIVE_JOIN
-    {:exchange, "p7_exclusive_join_register", @exclusive_join},
-    {:exchange, "p7_exclusive_join_case_start", @exclusive_join},
-    {:exchange, "p7_exclusive_join_case_get", @exclusive_join ++ @settled},
-    {:exchange, "p7_exclusive_join_case_update", @exclusive_join},
-    {:exchange, "p7_exclusive_join_case_get_ended", @exclusive_join ++ @settled},
-    {:exchange, "p7_exclusive_join_default_start", @exclusive_join},
-    {:exchange, "p7_exclusive_join_default_get", @exclusive_join ++ @settled},
-    {:exchange, "p7_exclusive_join_default_update", @exclusive_join},
-    {:exchange, "p7_exclusive_join_default_get_ended", @exclusive_join ++ @settled},
-    {:exchange, "p7_exclusive_join_failed_start", @exclusive_join},
-    {:exchange, "p7_exclusive_join_failed_get", @exclusive_join ++ @settled},
-    {:exchange, "p7_exclusive_join_failed_update", @exclusive_join ++ @permissive_join_update},
-    {:exchange, "p7_exclusive_join_failed_get_ended", @exclusive_join ++ @permissive_join_ended},
+    {:exchange, "p7_exclusive_join_register"},
+    {:exchange, "p7_exclusive_join_case_start"},
+    {:exchange, "p7_exclusive_join_case_get", @settled},
+    {:exchange, "p7_exclusive_join_case_update"},
+    {:exchange, "p7_exclusive_join_case_get_ended", @settled},
+    {:exchange, "p7_exclusive_join_default_start"},
+    {:exchange, "p7_exclusive_join_default_get", @settled},
+    {:exchange, "p7_exclusive_join_default_update"},
+    {:exchange, "p7_exclusive_join_default_get_ended", @settled},
+    {:exchange, "p7_exclusive_join_failed_start"},
+    {:exchange, "p7_exclusive_join_failed_get", @settled},
+    {:exchange, "p7_exclusive_join_failed_update", @permissive_join_update},
+    {:exchange, "p7_exclusive_join_failed_get_ended", @permissive_join_ended},
     # DYNAMIC
-    {:exchange, "p7_dynamic_register", @dynamic},
-    {:exchange, "p7_dynamic_start", @dynamic},
-    {:exchange, "p7_dynamic_get", @dynamic ++ @settled},
-    {:exchange, "p7_dynamic_update", @dynamic},
-    {:exchange, "p7_dynamic_get_completed", @dynamic ++ @settled},
-    {:exchange, "p7_dynamic_missing_start", @dynamic},
-    {:exchange, "p7_dynamic_missing_get", @dynamic ++ @settled},
-    {:exchange, "p7_dynamic_no_name_start", @dynamic},
-    {:exchange, "p7_dynamic_no_name_get", @dynamic ++ @settled},
-    {:exchange, "p7_dynamic_system_start", @dynamic_noop},
-    {:exchange, "p7_dynamic_system_get", @dynamic_noop ++ @settled},
+    {:exchange, "p7_dynamic_register"},
+    {:exchange, "p7_dynamic_start"},
+    {:exchange, "p7_dynamic_get", @settled},
+    {:exchange, "p7_dynamic_update"},
+    {:exchange, "p7_dynamic_get_completed", @settled},
+    {:exchange, "p7_dynamic_missing_start"},
+    {:exchange, "p7_dynamic_missing_get", @settled},
+    {:exchange, "p7_dynamic_no_name_start"},
+    {:exchange, "p7_dynamic_no_name_get", @settled},
+    {:exchange, "p7_dynamic_system_start"},
+    {:exchange, "p7_dynamic_system_get", @settled},
     # FORK_JOIN_DYNAMIC
-    {:exchange, "p7_fjd_register_simple", @fork_join_dynamic},
-    {:exchange, "p7_fjd_simple_start", @fork_join_dynamic},
-    {:exchange, "p7_fjd_simple_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
-    {:exchange, "p7_fjd_simple_update_0", @fork_join_dynamic},
-    {:exchange, "p7_fjd_simple_update_1", @fork_join_dynamic},
-    {:exchange, "p7_fjd_simple_get_completed", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
-    {:exchange, "p7_fjd_register_param", @fork_join_dynamic},
-    {:exchange, "p7_fjd_param_start", @fork_join_dynamic},
-    {:exchange, "p7_fjd_param_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
-    {:exchange, "p7_fjd_param_update_0", @fork_join_dynamic},
-    {:exchange, "p7_fjd_param_update_1", @fork_join_dynamic},
-    {:exchange, "p7_fjd_param_get_completed", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
-    {:exchange, "p7_fjd_register_legacy", @fork_join_dynamic},
-    {:exchange, "p7_fjd_legacy_start", @fork_join_dynamic},
-    {:exchange, "p7_fjd_legacy_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
-    {:exchange, "p7_fjd_legacy_update_0", @fork_join_dynamic},
-    {:exchange, "p7_fjd_legacy_update_1", @fork_join_dynamic},
-    {:exchange, "p7_fjd_legacy_get_completed", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
-    {:exchange, "p7_fjd_register_no_join", @fork_join_dynamic},
-    {:exchange, "p7_fjd_no_join_start", @fork_join_dynamic},
-    {:exchange, "p7_fjd_no_join_get", @fork_join_dynamic ++ @settled},
-    {:exchange, "p7_fjd_retry_start", @fork_join_dynamic},
-    {:exchange, "p7_fjd_retry_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
-    {:exchange, "p7_fjd_retry_fail", @fork_join_dynamic},
-    {:exchange, "p7_fjd_retry_get_failed", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
-    {:exchange, "p7_fjd_retry", @fork_join_dynamic},
-    {:exchange, "p7_fjd_retried_get", @fork_join_dynamic ++ @settled ++ @fjd_retried_join},
-    {:exchange, "p7_fjd_retried_update_0", @fork_join_dynamic},
-    {:exchange, "p7_fjd_retried_update_1", @fork_join_dynamic},
-    {:exchange, "p7_fjd_retried_get_completed", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
-    {:exchange, "p7_fjd_rerun_branch", @fork_join_dynamic},
-    {:exchange, "p7_fjd_rerun_branch_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
-    {:exchange, "p7_fjd_rerun_terminate", @fork_join_dynamic},
-    {:exchange, "p7_fjd_rerun_fork", @fork_join_dynamic},
-    {:exchange, "p7_fjd_rerun_fork_get", @fork_join_dynamic ++ @settled ++ @fjd_join_poll},
+    {:exchange, "p7_fjd_register_simple"},
+    {:exchange, "p7_fjd_simple_start"},
+    {:exchange, "p7_fjd_simple_get", @settled ++ @fjd_join_poll},
+    {:exchange, "p7_fjd_simple_update_0"},
+    {:exchange, "p7_fjd_simple_update_1"},
+    {:exchange, "p7_fjd_simple_get_completed", @settled ++ @fjd_join_poll},
+    {:exchange, "p7_fjd_register_param"},
+    {:exchange, "p7_fjd_param_start"},
+    {:exchange, "p7_fjd_param_get", @settled ++ @fjd_join_poll},
+    {:exchange, "p7_fjd_param_update_0"},
+    {:exchange, "p7_fjd_param_update_1"},
+    {:exchange, "p7_fjd_param_get_completed", @settled ++ @fjd_join_poll},
+    {:exchange, "p7_fjd_register_legacy"},
+    {:exchange, "p7_fjd_legacy_start"},
+    {:exchange, "p7_fjd_legacy_get", @settled ++ @fjd_join_poll},
+    {:exchange, "p7_fjd_legacy_update_0"},
+    {:exchange, "p7_fjd_legacy_update_1"},
+    {:exchange, "p7_fjd_legacy_get_completed", @settled ++ @fjd_join_poll},
+    {:exchange, "p7_fjd_register_no_join"},
+    {:exchange, "p7_fjd_no_join_start"},
+    {:exchange, "p7_fjd_no_join_get", @settled},
+    {:exchange, "p7_fjd_retry_start"},
+    {:exchange, "p7_fjd_retry_get", @settled ++ @fjd_join_poll},
+    {:exchange, "p7_fjd_retry_fail"},
+    {:exchange, "p7_fjd_retry_get_failed", @settled ++ @fjd_join_poll},
+    {:exchange, "p7_fjd_retry"},
+    {:exchange, "p7_fjd_retried_get", @settled ++ @fjd_retried_join},
+    {:exchange, "p7_fjd_retried_update_0"},
+    {:exchange, "p7_fjd_retried_update_1"},
+    {:exchange, "p7_fjd_retried_get_completed", @settled ++ @fjd_join_poll},
+    {:exchange, "p7_fjd_rerun_branch"},
+    {:exchange, "p7_fjd_rerun_branch_get", @settled ++ @fjd_join_poll},
+    {:exchange, "p7_fjd_rerun_terminate"},
+    {:exchange, "p7_fjd_rerun_fork"},
+    {:exchange, "p7_fjd_rerun_fork_get", @settled ++ @fjd_join_poll},
     # INLINE
-    {:exchange, "p7_inline_register", @inline},
-    {:exchange, "p7_inline_javascript_start", @inline},
-    {:exchange, "p7_inline_javascript_get", @inline ++ @settled},
-    {:exchange, "p7_inline_value_param_start", @inline},
-    {:exchange, "p7_inline_value_param_get", @inline ++ @settled},
-    {:exchange, "p7_inline_unknown_start", @inline},
-    {:exchange, "p7_inline_unknown_get", @inline ++ @settled},
-    {:exchange, "p7_inline_script_error_start", @inline},
-    {:exchange, "p7_inline_script_error_get", @inline ++ @settled ++ @engine_message},
-    {:exchange, "p7_inline_evaluator_not_string_start", @inline ++ @started},
-    {:exchange, "p7_inline_expression_not_string_start", @inline ++ @started},
+    {:exchange, "p7_inline_register"},
+    {:exchange, "p7_inline_javascript_start"},
+    {:exchange, "p7_inline_javascript_get", @settled},
+    {:exchange, "p7_inline_value_param_start"},
+    {:exchange, "p7_inline_value_param_get", @settled},
+    {:exchange, "p7_inline_unknown_start"},
+    {:exchange, "p7_inline_unknown_get", @settled},
+    {:exchange, "p7_inline_script_error_start"},
+    {:exchange, "p7_inline_script_error_get", @settled ++ @engine_message},
+    {:exchange, "p7_inline_evaluator_not_string_start", @started},
+    {:exchange, "p7_inline_expression_not_string_start", @started},
     # LAMBDA
-    {:exchange, "p7_lambda_register", @lambda},
-    {:exchange, "p7_lambda_start", @lambda},
-    {:exchange, "p7_lambda_get", @lambda ++ @settled},
-    {:exchange, "p7_lambda_error_start", @lambda},
-    {:exchange, "p7_lambda_error_get", @lambda ++ @settled ++ @engine_message},
-    {:exchange, "p7_lambda_empty_start", @lambda},
-    {:exchange, "p7_lambda_empty_get", @lambda ++ @settled},
+    {:exchange, "p7_lambda_register"},
+    {:exchange, "p7_lambda_start"},
+    {:exchange, "p7_lambda_get", @settled},
+    {:exchange, "p7_lambda_error_start"},
+    {:exchange, "p7_lambda_error_get", @settled ++ @engine_message},
+    {:exchange, "p7_lambda_empty_start"},
+    {:exchange, "p7_lambda_empty_get", @settled},
     # JSON_JQ_TRANSFORM
-    {:exchange, "p7_jq_register", @jq},
-    {:exchange, "p7_jq_start", @jq},
-    {:exchange, "p7_jq_get", @jq ++ @settled},
-    {:exchange, "p7_jq_null_start", @jq},
-    {:exchange, "p7_jq_null_get", @jq ++ @settled},
-    {:exchange, "p7_jq_syntax_start", @jq},
+    {:exchange, "p7_jq_register"},
+    {:exchange, "p7_jq_start"},
+    {:exchange, "p7_jq_get", @settled},
+    {:exchange, "p7_jq_null_start"},
+    {:exchange, "p7_jq_null_get", @settled},
+    {:exchange, "p7_jq_syntax_start"},
     # jq's syntax error reads differently from jackson-jq's (ADR 0026, decision 6).
     {:exchange, "p7_jq_syntax_get",
-     @jq ++
-       @settled ++
+     @settled ++
        [
          ignore: [
            ["reasonForIncompletion"],
@@ -769,55 +749,59 @@ defmodule ArchonWeb.ContractCase do
            ["tasks", 0, "outputData", "error"]
          ]
        ]},
-    {:exchange, "p7_jq_missing_start", @jq},
-    {:exchange, "p7_jq_missing_get", @jq ++ @settled},
-    {:exchange, "p7_jq_not_string_start", @jq},
-    {:exchange, "p7_jq_not_string_get", @jq ++ @settled},
-    {:exchange, "p7_jq_register_invalid", @jq},
+    {:exchange, "p7_jq_missing_start"},
+    {:exchange, "p7_jq_missing_get", @settled},
+    {:exchange, "p7_jq_not_string_start"},
+    {:exchange, "p7_jq_not_string_get", @settled},
+    {:exchange, "p7_jq_register_invalid"},
     # START_WORKFLOW
-    {:exchange, "p7_start_workflow_register", @start_workflow},
-    {:exchange, "p7_start_workflow_start", @start_workflow},
-    {:exchange, "p7_start_workflow_get", @start_workflow ++ @settled},
-    {:exchange, "p7_start_workflow_get_started", @start_workflow ++ @settled},
-    {:exchange, "p7_start_workflow_invalid_start", @start_workflow},
-    {:exchange, "p7_start_workflow_invalid_get", @start_workflow ++ @settled},
-    {:exchange, "p7_start_workflow_missing_start", @start_workflow},
-    {:exchange, "p7_start_workflow_missing_get", @start_workflow ++ @settled},
+    {:exchange, "p7_start_workflow_register"},
+    {:exchange, "p7_start_workflow_start"},
+    {:exchange, "p7_start_workflow_get", @settled},
+    {:exchange, "p7_start_workflow_get_started", @settled},
+    {:exchange, "p7_start_workflow_invalid_start"},
+    {:exchange, "p7_start_workflow_invalid_get", @settled},
+    {:exchange, "p7_start_workflow_missing_start"},
+    {:exchange, "p7_start_workflow_missing_get", @settled},
     # HTTP
-    {:exchange, "p7_http_register", @http},
-    {:exchange, "p7_http_json_start", @http},
-    {:exchange, "p7_http_json_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_post_start", @http},
-    {:exchange, "p7_http_post_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_text_start", @http},
-    {:exchange, "p7_http_text_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_number_start", @http},
-    {:exchange, "p7_http_number_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_status_299_start", @http},
-    {:exchange, "p7_http_status_299_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_short_404_start", @http},
-    {:exchange, "p7_http_short_404_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_long_400_start", @http},
-    {:exchange, "p7_http_long_400_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_empty_404_start", @http},
-    {:exchange, "p7_http_empty_404_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_short_503_start", @http},
-    {:exchange, "p7_http_short_503_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_refused_start", @http},
-    {:exchange, "p7_http_refused_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_no_uri_start", @http},
-    {:exchange, "p7_http_no_uri_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_no_method_start", @http},
-    {:exchange, "p7_http_no_method_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_register_async", @http},
-    {:exchange, "p7_http_async_start", @http},
-    {:exchange, "p7_http_async_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_async_update", @http},
-    {:exchange, "p7_http_async_get_completed", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_register_async_input", @http},
-    {:exchange, "p7_http_async_input_start", @http},
-    {:exchange, "p7_http_async_input_get", @http ++ @settled ++ @http_volatile},
-    {:exchange, "p7_http_register_invalid", @http}
+    {:exchange, "p7_http_register"},
+    {:exchange, "p7_http_json_start"},
+    {:exchange, "p7_http_json_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_post_start"},
+    {:exchange, "p7_http_post_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_text_start"},
+    {:exchange, "p7_http_text_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_number_start"},
+    {:exchange, "p7_http_number_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_status_299_start"},
+    {:exchange, "p7_http_status_299_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_short_404_start"},
+    {:exchange, "p7_http_short_404_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_long_400_start"},
+    {:exchange, "p7_http_long_400_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_empty_404_start"},
+    {:exchange, "p7_http_empty_404_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_short_503_start"},
+    {:exchange, "p7_http_short_503_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_refused_start"},
+    {:exchange, "p7_http_refused_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_no_uri_start"},
+    {:exchange, "p7_http_no_uri_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_no_method_start"},
+    {:exchange, "p7_http_no_method_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_redirect_302_start"},
+    {:exchange, "p7_http_redirect_302_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_redirect_307_start"},
+    {:exchange, "p7_http_redirect_307_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_register_async"},
+    {:exchange, "p7_http_async_start"},
+    {:exchange, "p7_http_async_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_async_update"},
+    {:exchange, "p7_http_async_get_completed", @settled ++ @http_volatile},
+    {:exchange, "p7_http_register_async_input"},
+    {:exchange, "p7_http_async_input_start"},
+    {:exchange, "p7_http_async_input_get", @settled ++ @http_volatile},
+    {:exchange, "p7_http_register_invalid"}
   ]
 
   @doc "Every captured exchange in capture order, with the waits between them."
@@ -851,15 +835,6 @@ defmodule ArchonWeb.ContractCase do
   @doc "The base URL the capture ran `Archon.HttpStub` at."
   @spec captured_http_stub() :: String.t()
   def captured_http_stub, do: @captured_http_stub
-
-  @doc """
-  Whether a step runs: its `types:` all have a mapper of their own (ADR 0026, decision 8).
-  """
-  @spec runs?(step()) :: boolean()
-  def runs?({:exchange, _name, opts}),
-    do: opts |> Keyword.get(:types, []) |> Enum.all?(&Mapper.mapped?/1)
-
-  def runs?(_step), do: true
 
   @doc "Binds captured UUID `captured` to `actual`, one-to-one (see the moduledoc)."
   @spec bind(state(), String.t(), String.t()) :: state()
@@ -921,7 +896,7 @@ defmodule ArchonWeb.ContractCase do
   @doc "Replays `steps`, asserting every response; returns the ID mapping for the next steps."
   @spec replay([step()], state()) :: state()
   def replay(steps, state \\ new_state()) do
-    steps |> Enum.filter(&runs?/1) |> Enum.reduce(state, &run/2)
+    Enum.reduce(steps, state, &run/2)
   end
 
   defp run({:exchange, name}, state), do: run({:exchange, name, []}, state)

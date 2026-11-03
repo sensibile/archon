@@ -38,9 +38,11 @@ defmodule Archon.Decider.SystemTasks do
   retried) and `in_place?/1` (retried in place, `taskToBeRescheduled`).
 
   `default/0` registers the system tasks Archon runs: `DECISION`, `SWITCH`, `FORK`, `JOIN`,
-  `DO_WHILE`, `SUB_WORKFLOW` and `WAIT` (ADR 0014, decision 5), and `TERMINATE`,
-  `SET_VARIABLE`, `NOOP`, `HUMAN` and `EXCLUSIVE_JOIN` (ADR 0026, decision 3). Phase 7 slices
-  add their own lines.
+  `DO_WHILE`, `SUB_WORKFLOW` and `WAIT` (ADR 0014, decision 5), and the system task types of
+  Phase 7 (ADR 0026): `TERMINATE`, `SET_VARIABLE`, `NOOP`, `HUMAN` and `EXCLUSIVE_JOIN`
+  (decision 3), `INLINE` and `LAMBDA` (decision 5), `JSON_JQ_TRANSFORM` (decision 6),
+  `START_WORKFLOW` and `HTTP` (decision 7). `DYNAMIC` and `FORK_JOIN_DYNAMIC` (decision 4) are in
+  the mapper table only.
   """
 
   alias Archon.Decider.SystemTask

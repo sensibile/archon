@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p7_http",
+    "body": {
+      "request": {
+        "uri": "http://127.0.0.1:18299/redirect/307",
+        "method": "POST",
+        "body": {
+          "k": 1
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "68ab7cb2-add3-4e9d-a136-6057cd8033a3"
+  }
+}

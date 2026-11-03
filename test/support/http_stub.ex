@@ -20,6 +20,7 @@ defmodule Archon.HttpStub do
     * `/status/<code>` - that status with an empty body (`299`, `404`, ...).
     * `/short/<code>` - that status with a short `text/plain` body.
     * `/long/<code>` - that status with a 1,010-byte `text/plain` body.
+    * `/redirect/<code>` - that status with `location: /json` and an empty body (slice 7h).
 
   Any other path answers 404 with an empty body.
   """
@@ -74,13 +75,29 @@ defmodule Archon.HttpStub do
     conn = drain(conn)
 
     case conn.path_info do
-      ["json"] -> answer(conn, 200, "application/json", ~s({"ok":true,"n":1,"list":[1,2]}))
-      ["text"] -> answer(conn, 200, "text/plain", "archon plain text")
-      ["number"] -> answer(conn, 200, "application/json", "42")
-      ["status", code] -> answer(conn, status(code), nil, "")
-      ["short", code] -> answer(conn, status(code), "text/plain", "archon short body")
-      ["long", code] -> answer(conn, status(code), "text/plain", @long)
-      _other -> answer(conn, 404, nil, "")
+      ["json"] ->
+        answer(conn, 200, "application/json", ~s({"ok":true,"n":1,"list":[1,2]}))
+
+      ["text"] ->
+        answer(conn, 200, "text/plain", "archon plain text")
+
+      ["number"] ->
+        answer(conn, 200, "application/json", "42")
+
+      ["status", code] ->
+        answer(conn, status(code), nil, "")
+
+      ["short", code] ->
+        answer(conn, status(code), "text/plain", "archon short body")
+
+      ["long", code] ->
+        answer(conn, status(code), "text/plain", @long)
+
+      ["redirect", code] ->
+        conn |> put_resp_header("location", "/json") |> answer(status(code), nil, "")
+
+      _other ->
+        answer(conn, 404, nil, "")
     end
   end
 
