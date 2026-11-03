@@ -615,8 +615,8 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     요청이다(`ClassicRequestBuilder.get()`). HttpClient 5.5.2 `DefaultRedirectStrategy#isRedirectAllowed`처럼 리다이렉트 요청에
     `Authorization`·`Cookie` 헤더가 남아 있고 다른 호스트·포트로 가면 따라가지 않고 그 3xx가 응답이다(그래서 `No response from the
     remote service`로 `FAILED`). 리다이렉트는 응답을 보낸 원격 서버가 정하므로 대상 제한 없음(위 SSRF 상속 위험)이 리다이렉트 목적지에도
-    그대로 걸린다. 7h가 README 경고에 함께 적는다. HttpClient를 따르므로 `GET`으로 바뀌지 않는 리다이렉트(`303`과
-    `POST`의 `301`·`302` 밖의 모두. 조각 7h가 "`307`·`308`은"을 고침)는 다른 호스트로도 body와 그 밖의 헤더(`X-API-Key` 같은)를 그대로 보내고, 같은 호스트·포트면 `https`에서 `http`로 바뀌어도 자격 헤더를 싣는다. 비밀을 그런 헤더나 body에
+    그대로 걸린다. 7h가 README 경고에 함께 적는다. HttpClient를 따르므로 `GET`으로 바뀌지 않는 리다이렉트(`GET`·`HEAD`가 아닌
+    요청의 `303`과 `POST`의 `301`·`302` 밖의 모두. 조각 7h가 "`307`·`308`은"을 고침)는 다른 호스트로도 body와 그 밖의 헤더(`X-API-Key` 같은)를 그대로 보내고, 같은 호스트·포트면 `https`에서 `http`로 바뀌어도 자격 헤더를 싣는다. 비밀을 그런 헤더나 body에
     넣는 정의는 리다이렉트를 보안 경계로 삼을 수 없다(상속 위험, 7h README 경고에 함께). 클라이언트별 쿠키 저장소(리다이렉트 사이
     `Set-Cookie` 재전송)와 HttpClient의 `User-Agent`는 재현하지 않는다. 리다이렉트 픽스처는 7a 캡처에 없다(7h가
     더해 다시 캡처할 후보).
