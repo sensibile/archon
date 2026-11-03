@@ -127,6 +127,18 @@ archon에 이미 있는 것(`541865c` 기준):
 - `classifier`는 upstream `WorkflowClassifier.classifierOf(정의 metadata)`대로(metadata의 `classifier`, 에이전트 표지면 `agent`, 아니면
   `workflow`). `failedReferenceTaskNames`(쉼표로 이은 글자, 기본 `""`), `parentWorkflowId`(기본 `""`) 등 기본값도 upstream 그대로다.
 - 요약 JSON 인코딩은 응답과 `json_data`가 같은 함수를 쓴다.
+- **조각 8b에서 정한 것(2026-11-04).** upstream `conductor-common` 클래스를 `ObjectMapperProvider`(Jackson 2.18.8)로 JDK 25에서
+  직렬화한 출력과 글자 단위로 맞췄다(`test/archon/domain/summary_test.exs`).
+  - API: `WorkflowSummary.new/1`(`Workflow`), `TaskSummary.new/2`(`Task`, `queueWaitTime`의 현재 시각), 둘 다 `encode/1`이 JSON 글자를
+    준다. 날짜·`String.length()`·`isBlank`·`Map.toString()`은 `Archon.Domain.SummaryUtil`에 둔다.
+  - 필드 순서는 선언 순서이고 `WorkflowSummary`만 끝에 getter 값 `inputSize`·`outputSize`가 붙는다(`TaskSummary`에는 없다). `null`
+    필드는 빠지고(`NON_NULL`) 빈 `failedTaskNames`·`taskToDomain`은 남는다. 제어 문자 이스케이프(`\u0001`, `\n` 등)와 그대로 두는 `/`·
+    U+2028도 Jackson과 같다.
+  - `WorkflowSummary`의 `startTime`·`updateTime`은 늘 쓴다. upstream `Auditable` getter가 `null`을 0으로 돌려주므로 갱신 전에는 epoch
+    글자다. `endTime`은 0보다 클 때만이다.
+  - 날짜는 `SimpleDateFormat`처럼 1582-10-15 이전은 율리우스력, 기원전은 기년(year of era), 연도는 네 자리 이상이다.
+  - 워크플로우 정의가 없으면 upstream은 NPE를 내지만 archon은 `workflowType`을 빼고 `version` 0으로 만든다(Step이 만드는 워크플로우는
+    늘 정의가 있다).
 
 ### 4. 질의 파서와 실행(BOSS 결정: freeText는 기본 SQLite 서버와 같게)
 
@@ -150,6 +162,24 @@ archon에 이미 있는 것(`541865c` 기준):
   짠다(유일한 정렬 키, 결과 하나, 또는 재생의 `unordered: true`).
 - **페이징.** `LIMIT size OFFSET start`. upstream SQLite처럼 음수 `size`는 제한 없음, 음수 `start`는 0으로 다룬다(Postgres는 음수를
   오류로 내므로 바꿔 넣는다). `totalHits`는 같은 조건의 개수.
+- **조각 8b에서 정한 것(2026-11-04).** upstream의 실제 `SqliteIndexQueryBuilder`·`Query`와 sqlite-jdbc 3.49.0.0을 JDK 25에서 upstream
+  색인 스키마에 돌린 158개 사례(`test/support/search/query_oracle.ex`)를 정답으로 두고, 메모리 평가(`run/5`)와 Postgres SQL(`sql/3`,
+  `test/archon/search/query_postgres_test.exs`)이 둘 다 같은 개수·행·오류를 낸다(정렬이 없는 사례는 순서를 보지 않는다).
+  - API: `parse(query, freeText, sort 목록)`, `sort_list/1`(upstream `Utils.convertStringToList`, `|`로 나눔), `check(query, 표)`,
+    `run(query, 표, 행, start, size)`, `sql(query, 표, 첫 매개변수 번호)`(`where`·`params`·`order_by`), `limit_offset/2`, `describe/1`.
+  - **오류 종류와 순서.** upstream이 실패하는 순서대로 나눈다. ① 파싱(절 순서대로): 잘못된 절 `{:invalid_clause, 절}`
+    (`IllegalArgumentException`), `_time`의 숫자 아닌 첫 값 `{:invalid_number, 값}`(`NumberFormatException`), 값이 없는 `_time` 절
+    `:missing_value`(`IndexOutOfBoundsException`). ② SQL 준비: 표에 없는 열 `{:unknown_column, 이름}`(WHERE를 upstream 절 순서로 본 뒤
+    정렬. SQLite는 `IN (,)`처럼 값 없는 `IN`이 있으면 WHERE 전체를 거짓으로 접어 그 열은 보지 않는다). ③ 바인드: 값 없는 절
+    `:missing_value`, `=`·`>`·`<`에 값이 여럿이면 매개변수보다 값이 많아 `{:bind_overflow, 자리 수}`(`ArrayIndexOutOfBoundsException`).
+    `describe/1`이 upstream 예외 이름과 문구를 준다. HTTP 상태는 8c·8e가 8a 캡처에 맞춘다.
+  - upstream은 절을 SQLite SQL 조각 글자 순으로 정렬한 뒤 매개변수를 묶으므로 archon도 같은 순서로 절을 두고 첫 실패를 고른다.
+  - freeText의 `*`도 upstream처럼 `%`로 바꾼다. 패턴(`%<소문자 글자>%`)은 Elixir에서 만들어 통째로 바인드한다
+    (`lower(json_data) LIKE $n ESCAPE ''`). `=`의 `*` 패턴도 Elixir에서 소문자로 만들어 `lower(열) LIKE $n ESCAPE ''`로 둔다.
+  - 글자 열의 `>`·`<`와 정렬은 `COLLATE "C"`(SQLite BINARY처럼 바이트 순)이고 메모리 평가도 바이트 순이다. 시각 열은 epoch 밀리초
+    정수로 비교한다(upstream UTC 글자 비교와 1970~9999년에서 같다).
+  - 의도적 차이 둘: `agentHierarchy` 정렬 항목은 버린다(결정 1). `Long.parseLong`이 읽는 비ASCII 숫자(예: `١٢`)는 숫자가 아닌 값으로
+    다룬다(ADR 0014 `DateTimeUtils`와 같은 기준).
 
 ### 5. 서비스 경로
 
@@ -258,6 +288,8 @@ ADR 0023·0025·0026의 목록에 더해 다음이 생긴다.
 - **요약 `input`·`output`의 맵 키 순서와 `failedTaskNames`·`failedReferenceTaskNames` 순서**(결정 3): 정렬 순. upstream은 입력 순서·
   `HashSet` 순서다.
 - **`agentHierarchy` 정렬**(결정 1): 옮기지 않는다(AI 에이전트 계층, ADR 0001 Unsupported의 AI 컨트롤러와 같은 범위).
+- **시각 값의 비ASCII 숫자**(결정 4, 조각 8b): `startTime>١٢`처럼 Java `Long.parseLong`이 읽는 다른 문자 체계의 숫자를 archon은
+  숫자가 아닌 값(`NumberFormatException`과 같은 오류)으로 다룬다.
 - **`TaskResult.logs`의 `null` 원소**(결정 6): 버린다. upstream은 태스크를 저장한 뒤 500이다.
 - **비동기 색인과 요약 JSON 직렬화 설정**(결정 2·3): 옮기지 않는다. upstream 기본값의 동작만 있다.
 - **archiveWorkflow=false의 색인 삭제 시점**(결정 2): 같은 트랜잭션. upstream은 비동기다.
