@@ -103,6 +103,23 @@ defmodule Archon.Runtime.HttpTaskTest do
       |> send_resp(200, :zlib.gzip("") <> :zlib.gzip("hello"))
     end
 
+    defp answer(conn, ["cut", kind]) do
+      {coding, body} =
+        case kind do
+          "gzip" -> {"gzip", binary_part(:zlib.gzip("hello world"), 0, 15)}
+          "trailer" -> {"gzip", binary_part(:zlib.gzip("hello world"), 0, 27)}
+          "deflate" -> {"deflate", binary_part(:zlib.compress("hello world"), 0, 8)}
+        end
+
+      conn |> put_resp_header("content-encoding", coding) |> send_resp(200, body)
+    end
+
+    defp answer(conn, ["deflate"]) do
+      conn
+      |> put_resp_header("content-encoding", "deflate")
+      |> send_resp(200, :zlib.compress("hello world"))
+    end
+
     defp answer(conn, ["bomb"]) do
       conn
       |> put_resp_header("content-encoding", "gzip")
@@ -218,6 +235,15 @@ defmodule Archon.Runtime.HttpTaskTest do
     test "decompresses every member of a gzip body", %{url: url} do
       assert {:ok, %{body: "hello world"}} = Client.run(request(url <> "/members"), @limits)
       assert {:ok, %{body: "hello"}} = Client.run(request(url <> "/empty_first"), @limits)
+
+      # A body cut before the end of its stream is corrupt, as GZIPInputStream's EOFException.
+      for path <- ["/cut/gzip", "/cut/trailer", "/cut/deflate"] do
+        assert {:error, {:io, "Corrupt input data in the response body"}} =
+                 Client.run(request(url <> path), @limits),
+               path
+      end
+
+      assert {:ok, %{body: "hello world"}} = Client.run(request(url <> "/deflate"), @limits)
 
       # The decompressed limit counts every member.
       assert {:error, {:io, "Response body is larger than 1500 bytes"}} =

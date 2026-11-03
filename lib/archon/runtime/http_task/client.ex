@@ -338,10 +338,16 @@ defmodule Archon.Runtime.HttpTask.Client do
 
     cond do
       size > max_body -> body_error(%{max_body: max_body})
-      status == :finished -> {:ok, IO.iodata_to_binary(Enum.reverse([out | acc]))}
+      # inflateEnd raises on a stream cut before its end (GZIPInputStream's EOFException).
+      status == :finished -> finish_inflate(z, [out | acc])
       idle < 0 -> {:error, {:io, "corrupt"}}
       true -> inflate_loop(z, :zlib.safeInflate(z, []), [out | acc], size, {max_body, idle})
     end
+  end
+
+  defp finish_inflate(z, acc) do
+    :ok = :zlib.inflateEnd(z)
+    {:ok, IO.iodata_to_binary(Enum.reverse(acc))}
   end
 
   defp body_error(limits),

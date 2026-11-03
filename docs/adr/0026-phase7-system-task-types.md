@@ -607,7 +607,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     HttpClient와 같음. `null`은 upstream 제공자 기본값 연결 100ms·읽기 150ms). 결정 7이 고른 이유(연결·받기 시간 상한을 따로, TLS 검증
     기본값)는 그대로이고 Finch가 그 위에 더하던 것은 풀뿐이다.
   - HttpClient의 기본 동작을 따른다: `Accept-Encoding: gzip, x-gzip, deflate`를 보내고 그 압축을 풀며 그때 `content-length`·
-    `content-encoding`·`content-md5` 헤더를 뺀다(`ContentCompressionExec`). gzip은 이어 붙인 member를 모두 푼다(`GZIPInputStream`, 빈 member 포함). 10 MiB body 상한은 디코딩한 JSON의 메모리를 묶지 않는다(작은
+    `content-encoding`·`content-md5` 헤더를 뺀다(`ContentCompressionExec`). gzip은 이어 붙인 member를 모두 푼다(`GZIPInputStream`, 빈 member 포함). 스트림 끝 전에 잘린 압축 body는 I/O 오류다(`EOFException`처럼). 10 MiB body 상한은 디코딩한 JSON의 메모리를 묶지 않는다(작은
     값이 많은 배열은 수십 배로 커진다). upstream `extractBody`도 같은 상속 위험이고, 운영자는 `max_response_bytes`로 낮춘다. 그래서 응답 헤더가 캡처(`vary`·`cache-control`·
     `content-type`·`date`)와 같다. 리다이렉트는 `RedirectExec`처럼 따라간다(`301`·`302`·`303`·`307`·`308`과 `location`, `303`과 `POST`의
     `301`·`302`는 body 없는 `GET`, 50번까지, 이미 간 곳이면 `Circular redirect to '<uri>'`). `GET`으로 바뀌는 리다이렉트는 원래 헤더 없는 새
