@@ -319,7 +319,8 @@ defmodule Archon.Runtime.HttpTask.Client do
     z = :zlib.open()
 
     try do
-      :ok = :zlib.inflateInit(z, window)
+      # GZIPInputStream reads every member of a gzip body one after the other.
+      :ok = :zlib.inflateInit(z, window, if(window == 31, do: :reset, else: :cut))
       inflate_loop(z, :zlib.safeInflate(z, body), [], 0, max_body)
     catch
       :error, _reason -> {:error, {:io, "corrupt"}}

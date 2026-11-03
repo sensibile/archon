@@ -82,6 +82,21 @@ defmodule Archon.Runtime.HttpTaskTest do
       |> send_resp(200, :zlib.gzip("unzipped body"))
     end
 
+    defp answer(conn, ["members"]) do
+      conn
+      |> put_resp_header("content-encoding", "gzip")
+      |> send_resp(200, :zlib.gzip("hello ") <> :zlib.gzip("world"))
+    end
+
+    # Two members of 1,000 zeros each: small compressed, 2,000 bytes decompressed.
+    defp answer(conn, ["zeros"]) do
+      member = :zlib.gzip(String.duplicate("0", 1000))
+
+      conn
+      |> put_resp_header("content-encoding", "gzip")
+      |> send_resp(200, member <> member)
+    end
+
     defp answer(conn, ["bomb"]) do
       conn
       |> put_resp_header("content-encoding", "gzip")
@@ -192,6 +207,14 @@ defmodule Archon.Runtime.HttpTaskTest do
 
       refute List.keymember?(headers, "content-encoding", 0)
       refute List.keymember?(headers, "content-length", 0)
+    end
+
+    test "decompresses every member of a gzip body", %{url: url} do
+      assert {:ok, %{body: "hello world"}} = Client.run(request(url <> "/members"), @limits)
+
+      # The decompressed limit counts every member.
+      assert {:error, {:io, "Response body is larger than 1500 bytes"}} =
+               Client.run(request(url <> "/zeros"), %{@limits | max_body: 1500})
     end
 
     test "refuses a body over the limit, read or decompressed", %{url: url} do
