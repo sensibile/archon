@@ -613,7 +613,10 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     요청이다(`ClassicRequestBuilder.get()`). HttpClient 5.5.2 `DefaultRedirectStrategy#isRedirectAllowed`처럼 리다이렉트 요청에
     `Authorization`·`Cookie` 헤더가 남아 있고 다른 호스트·포트로 가면 따라가지 않고 그 3xx가 응답이다(그래서 `No response from the
     remote service`로 `FAILED`). 리다이렉트는 응답을 보낸 원격 서버가 정하므로 대상 제한 없음(위 SSRF 상속 위험)이 리다이렉트 목적지에도
-    그대로 걸린다. 7h가 README 경고에 함께 적는다. 리다이렉트 픽스처는 7a 캡처에 없다(7h가
+    그대로 걸린다. 7h가 README 경고에 함께 적는다. HttpClient를 따르므로 `307`·`308`은 다른 호스트로도 body와 그 밖의 헤더
+    (`X-API-Key` 같은)를 그대로 보내고, 같은 호스트·포트면 `https`에서 `http`로 바뀌어도 자격 헤더를 싣는다. 비밀을 그런 헤더나 body에
+    넣는 정의는 리다이렉트를 보안 경계로 삼을 수 없다(상속 위험, 7h README 경고에 함께). 클라이언트별 쿠키 저장소(리다이렉트 사이
+    `Set-Cookie` 재전송)와 HttpClient의 `User-Agent`는 재현하지 않는다. 리다이렉트 픽스처는 7a 캡처에 없다(7h가
     더해 다시 캡처할 후보).
   - **실행기**(`Archon.Runtime.HttpTask`, 앱 감독 트리의 `Archon.Runtime.HttpTask.Supervisor`가 요청용 Task 감독자와 함께
     `:one_for_all`로, 그 앞에 전달용 Task 감독자를 띄운다. 실행기가 끝나면 진행 중 요청도 끝나 수가 어긋나지 않고, 진행 중 전달은
@@ -650,7 +653,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     정수·잘린 실수·10진 문자열을 받는다. 그 밖의 값(객체가 아닌 요청, 컨테이너인 `uri`, 문자열이 아닌 `headers`, 범위 밖 수)은 요청
     없이 `SCHEDULED`로 남아(`workerId`·`pollCount`는 저장) 마감에 `TIMED_OUT`이다. 보내기 전 upstream이 던지는 것(`contentType`·`accept`의
     미디어 타입 오류, JSON이 아닌 미디어 타입에 문자열이 아닌 body, `headers`가 `null`, 음수 시간 상한)은 그 예외 문구로 `FAILED`다.
-    문자열 body는 그대로, 그 밖에는 JSON으로 보낸다.
+    문자열 body는 `contentType`의 charset(없으면 JSON은 UTF-8, 그 밖은 ISO-8859-1, 못 쓰는 글자는 `?`)으로, 그 밖에는 JSON으로 보낸다.
   - 응답 문구는 Spring 6.2.19에서 확인했다(`DefaultResponseErrorHandler#getErrorMessage`, `HttpStatus` 표, `MimeTypeUtils`): 4xx·5xx는
     `<코드> <Spring 표의 문구> on <METHOD> request for "<uri의 ? 앞>": "<body>"`이고 body의 줄바꿈은 `<EOL>`, 제어 문자는 `?`다.
     **Spring은 긴 body를 줄이지 않는다**(7a 기록의 "Spring이 줄임"을 고침). `p7_http_long_400_get`에서 끝 따옴표가 없는 것은 태스크
@@ -766,6 +769,8 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
   메시지는 맞춘다.
 - **HTTP 요청의 전체 시간 상한과 취소**(결정 7): 쓰이지 않는 요청을 끊고 요청마다 전체 시간 상한(60초)을 둔다. upstream은 읽기 시간 상한만 있다. 방법은 결정 7 끝 "조각 7g에서
   정한 것".
+- **HTTP 응답 body의 JSON 판정**(결정 7, 조각 7g): JSON 값 뒤에 다른 글자가 있으면(`42 abc`) 원문 글자다. upstream Jackson
+  `readTree`는 첫 값만 읽는다(`42.0`).
 - **HTTP 응답 charset**(결정 7, 조각 7g): ISO-8859-1과 UTF-8만 읽는다. 다른 charset(windows-1252, UTF-16 등)을 밝힌 응답은 UTF-8로
   읽는다. upstream은 JVM이 아는 charset이면 그것으로 읽는다.
 - **HTTP 4xx·5xx 상태 문구와 URI**(결정 7, 조각 7g): 상태 문구는 서버가 보낸 것이 아니라 Spring 표의 것이고, URI 템플릿 확장·인코딩을

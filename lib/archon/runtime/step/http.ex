@@ -294,8 +294,10 @@ defmodule Archon.Runtime.Step.Http do
     end)
   end
 
-  defp charset(headers, default) do
-    with type when is_binary(type) <- content_type(headers),
+  defp charset(headers, default), do: charset_of(content_type(headers), default)
+
+  defp charset_of(type, default) do
+    with type when is_binary(type) <- type,
          [_, charset] <- Regex.run(~r/;\s*charset\s*=\s*"?([^";\s]+)/i, type) do
       String.upcase(charset)
     else
@@ -507,7 +509,16 @@ defmodule Archon.Runtime.Step.Http do
   # RestTemplate's converters: a string as it is, anything else as JSON, which only a JSON
   # media type takes.
   defp request_body(%{body: nil}), do: {:ok, nil}
-  defp request_body(%{body: body}) when is_binary(body), do: {:ok, body}
+  # StringHttpMessageConverter: the content type's charset, else UTF-8 for JSON and ISO-8859-1
+  # for anything else, a character it cannot encode written as ? (String#getBytes).
+  defp request_body(%{body: body, content_type: type}) when is_binary(body) do
+    default = if json?(type), do: "UTF-8", else: "ISO-8859-1"
+
+    case charset_of(type, default) do
+      latin1 when latin1 in ["ISO-8859-1", "LATIN1"] -> {:ok, latin1_bytes(body)}
+      _utf8 -> {:ok, body}
+    end
+  end
 
   defp request_body(%{body: body, content_type: type}) do
     if json?(type) do
@@ -516,6 +527,10 @@ defmodule Archon.Runtime.Step.Http do
       {:error,
        ~s(java.lang.Exception: No HttpMessageConverter for #{java_class(body)} and content type "#{type}")}
     end
+  end
+
+  defp latin1_bytes(text) do
+    for <<char::utf8 <- text>>, into: <<>>, do: if(char < 256, do: <<char>>, else: "?")
   end
 
   defp json?(nil), do: false

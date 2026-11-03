@@ -222,6 +222,19 @@ defmodule Archon.Runtime.Step.HttpTest do
                })
     end
 
+    test "a string body is written in the content type's charset, as StringHttpMessageConverter" do
+      base = %{"uri" => "http://target", "method" => "POST", "body" => "é€"}
+
+      assert {:ok, %{body: <<0xE9, ??>>}} =
+               Http.request(Map.put(base, "contentType", "text/plain"))
+
+      assert {:ok, %{body: "é€"}} =
+               Http.request(Map.put(base, "contentType", "text/plain; charset=UTF-8"))
+
+      # JSON without a charset is UTF-8.
+      assert {:ok, %{body: "é€"}} = Http.request(base)
+    end
+
     test "what upstream refuses before sending fails the task with its exception" do
       base = %{"uri" => "http://target", "method" => "POST"}
 

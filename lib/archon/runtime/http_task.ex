@@ -238,8 +238,10 @@ defmodule Archon.Runtime.HttpTask do
         :ok
 
       {:error, reason} ->
-        if Runtime.now() + wait < deadline do
-          Process.sleep(wait)
+        left = deadline - Runtime.now()
+
+        if left > 0 do
+          Process.sleep(min(wait, left))
           deliver_until(module, function, args, deadline, min(wait * 2, @max_retry_ms))
         else
           Logger.error(
