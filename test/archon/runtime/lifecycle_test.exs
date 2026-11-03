@@ -555,6 +555,42 @@ defmodule Archon.Runtime.LifecycleTest do
       assert await_status(root, :completed)
     end
 
+    # WorkflowExecutorOps#retry with #isJoinOnFailedPermissive: a FAILED JOIN whose permissive,
+    # not optional task failed is set IN_PROGRESS without taskToBeRescheduled, and that task is
+    # retried.
+    test "a JOIN failed by its permissive task runs again in place" do
+      define(~S"""
+      {"name": "lifecycle_permissive_join", "version": 1, "tasks": [
+        {"name": "fork", "taskReferenceName": "fork", "type": "FORK_JOIN", "inputParameters": {},
+         "forkTasks": [
+          [{"name": "integration_task_1", "taskReferenceName": "a", "type": "SIMPLE",
+            "inputParameters": {}, "permissive": true}],
+          [{"name": "integration_task_2", "taskReferenceName": "b", "type": "SIMPLE",
+            "inputParameters": {}}]]},
+        {"name": "join", "taskReferenceName": "join", "type": "JOIN", "inputParameters": {},
+         "joinOn": ["a", "b"]}]}
+      """)
+
+      id = start("lifecycle_permissive_join", %{})
+      complete(id, "b")
+      fail(id, "a")
+      await_status(id, :failed)
+      assert %Task{status: :failed} = join = last(id, "join")
+
+      assert :ok = Lifecycle.retry(id)
+      retried = workflow(id)
+      assert retried.status == :running
+
+      assert [%Task{status: :in_progress, retry_count: 0} = new_join] =
+               Enum.filter(retried.tasks, &(&1.reference_task_name == "join"))
+
+      assert new_join.task_id == join.task_id
+      assert_retried_pair_status(retried, "a", :failed)
+
+      complete(id, "a")
+      assert await_status(id, :completed)
+    end
+
     test "testRetryTimedOutWorkflowWithoutFailedTasks: a timed out workflow runs again" do
       t1 = %Task{
         task_id: "t1-id",
