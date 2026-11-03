@@ -1,12 +1,13 @@
 defmodule ArchonWeb.ContractCaseTest do
   @moduledoc """
-  The replay helper itself (ADR 0023 decision 6, ADR 0025 decision 7): scenario coverage, the ID
-  mapping, and the step options.
+  The replay helper itself (ADR 0023 decision 6, ADR 0025 decision 7, ADR 0026 decision 8):
+  scenario coverage, the ID mapping, and the step options.
   """
 
   use ArchonWeb.ContractCase, async: true
 
   alias Archon.Contract
+  alias Archon.Decider.Mapper
 
   @a "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
   @b "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -38,27 +39,20 @@ defmodule ArchonWeb.ContractCaseTest do
     ])
   end
 
-  describe "types:" do
-    test "a step runs once every type it names has a mapper of its own" do
-      assert runs?({:exchange, "x", types: ["SWITCH", "DO_WHILE"]})
-      refute runs?({:exchange, "x", types: ["SWITCH", "ARCHON_NOT_A_TYPE"]})
-      assert runs?({:exchange, "x", []})
-      assert runs?({:wait_status, "x", "COMPLETED"})
-    end
+  # ADR 0026, decision 8: the Phase 7 steps come after every Phase 6 step, and every type they
+  # use runs (slice 7h removed the skipping of steps whose type had no mapper yet).
+  test "the Phase 7 steps come last" do
+    first = Enum.find_index(scenario(), &(&1 == {:exchange, "p7_register_taskdefs"}))
+    assert {:exchange, "metadata_get_taskdef_deleted"} == Enum.at(scenario(), first - 1)
 
-    test "a skipped step is not replayed" do
-      assert replay([{:exchange, "no_such_fixture", types: ["ARCHON_NOT_A_TYPE"]}]) == new_state()
-    end
+    assert Enum.all?(Enum.drop(scenario(), first), &String.starts_with?(elem(&1, 1), "p7_"))
+  end
 
-    # ADR 0026, decision 8: every Phase 7 step but the task definition registration names the
-    # types it needs, so a slice turns its steps on through the mapper table.
-    test "every Phase 7 step names its types" do
-      for {:exchange, "p7_" <> _rest = name, opts} <- scenario() do
-        assert [_ | _] = Keyword.get(opts, :types), name
-      end
+  test "every Phase 7 task type has a mapper of its own" do
+    types = ~w(TERMINATE SET_VARIABLE NOOP HUMAN EXCLUSIVE_JOIN DYNAMIC FORK_JOIN_DYNAMIC
+               START_WORKFLOW INLINE LAMBDA JSON_JQ_TRANSFORM HTTP)
 
-      assert {:exchange, "p7_register_taskdefs"} in scenario()
-    end
+    assert Enum.filter(types, &(not Mapper.mapped?(&1))) == []
   end
 
   test "steps/2 cuts the scenario from one fixture through another" do

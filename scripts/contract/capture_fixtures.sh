@@ -1132,8 +1132,10 @@ p7_run p7_start_workflow_invalid archon_p7_start_workflow '{"request": {"version
 p7_run p7_start_workflow_missing archon_p7_start_workflow '{}'
 
 # HTTP against the stub: JSON, text and number bodies, a 2xx code Spring does not know, 4xx with
-# a short, a long and no body, a 5xx, a refused connection, no uri, no method; asyncComplete, an
-# asyncComplete expression the mapper overwrites; the definition check.
+# a short, a long and no body, a 5xx, a refused connection, no uri, no method, a GET 302 and a POST
+# 307 redirect (slice 7h; the stub answers by path only, so the kept method and body are
+# test/archon/runtime/http_task_test.exs's); asyncComplete, an asyncComplete expression the mapper
+# overwrites; the definition check.
 call p7_http_register POST /api/metadata/workflow \
   "$(p7_def archon_p7_http '[{"name": "archon_p7_http", "taskReferenceName": "http_ref",
     "type": "HTTP", "inputParameters": {"http_request": "${workflow.input.request}"}}]')"
@@ -1153,6 +1155,8 @@ p7_http short_503 "{\"uri\": \"$HTTP_STUB/short/503\", \"method\": \"GET\"}"
 p7_http refused '{"uri": "http://127.0.0.1:9/json", "method": "GET"}'
 p7_http no_uri '{"method": "GET"}'
 p7_http no_method "{\"uri\": \"$HTTP_STUB/json\"}"
+p7_http redirect_302 "{\"uri\": \"$HTTP_STUB/redirect/302\", \"method\": \"GET\"}"
+p7_http redirect_307 "{\"uri\": \"$HTTP_STUB/redirect/307\", \"method\": \"POST\", \"body\": {\"k\": 1}}"
 call p7_http_register_async POST /api/metadata/workflow \
   "$(p7_def archon_p7_http_async '[{"name": "archon_p7_http", "taskReferenceName": "http_ref",
     "type": "HTTP", "asyncComplete": true,

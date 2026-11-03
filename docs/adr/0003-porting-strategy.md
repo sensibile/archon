@@ -34,6 +34,9 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
 
 4. **MVP 태스크 타입은 SIMPLE, SWITCH, FORK_JOIN, JOIN, DO_WHILE, SUB_WORKFLOW, WAIT로 제한한다.**
    AI, HTTP, JQ, Event 같은 나머지 타입은 그 뒤에 붙인다.
+   (비고: Phase 7([ADR 0026](0026-phase7-system-task-types.md), 2026-11-03)이 TERMINATE, SET_VARIABLE, NOOP, HUMAN,
+   EXCLUSIVE_JOIN, DYNAMIC, FORK_JOIN_DYNAMIC, START_WORKFLOW, INLINE, LAMBDA, JSON_JQ_TRANSFORM, HTTP를 열었다. EVENT,
+   KAFKA_PUBLISH, PULL_WORKFLOW_MESSAGES 같은 나머지 타입은 Later이고, 지금처럼 `UserDefined`로 매핑한다(ADR 0026 결정 1).)
 5. **다른 영속성 백엔드는 MVP 이후 플러그인으로 다룬다.** Redis, Elasticsearch, Cassandra 등이 해당한다.
 
 ## 대안
@@ -53,4 +56,6 @@ conductor-oss는 Gradle 모듈이 60개가 넘지만, 대부분은 영속성 백
   Phase 5는 [ADR 0023](0023-phase5-rest.md)의 조각 5a~5f와 [ADR 0024](0024-worker-input-trust-and-auth.md)로 구현했다(2026-11-01,
   MVP REST 19개 경로, 두 백엔드에서 골든 픽스처 전체 재생). Later 경로와 인증은 그 뒤다.
   Phase 6은 2026-11-01 [ADR 0025](0025-phase6-workflow-operations-rest.md)로 설계했고 조각 6a~6h로 구현했다(2026-11-02,
-  워크플로우 운영 REST 33개 경로, 두 백엔드에서 골든 픽스처 전체 재생).)
+  워크플로우 운영 REST 33개 경로, 두 백엔드에서 골든 픽스처 전체 재생).
+  Phase 7은 2026-11-02 [ADR 0026](0026-phase7-system-task-types.md)로 설계했고 조각 7a~7h로 구현했다(2026-11-03,
+  시스템 태스크 타입 12개, 새 REST 경로 없음, 두 백엔드에서 골든 픽스처 전체 재생).)

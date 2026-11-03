@@ -22,8 +22,10 @@ defmodule Archon.Decider.Context do
       upstream's static `ScriptEvaluator`; `Archon.Script.evaluate/3` (the worker pool) by
       default. It is the one call the Decider makes that sends a process message: a computation
       that changes no state, allowed by ADR 0015 (decision 3).
-    * `task_def_lookup` - reads a task definition `task_defs` does not hold, for a name only the
-      input gives (`DYNAMIC`, `FORK_JOIN_DYNAMIC`). Replaces the mappers' `MetadataDAO#getTaskDef`;
+    * `task_def_lookup` - reads a task definition the mapper context does not hold, for a name
+      only the input gives (`DYNAMIC`, `FORK_JOIN_DYNAMIC`) and for the system task mappers that
+      read one (`INLINE`, `LAMBDA`, `JSON_JQ_TRANSFORM`, `HTTP`). Replaces the mappers'
+      `MetadataDAO#getTaskDef`;
       answers `{:error, :not_found}` by default, and the runtime reads the metadata store.
     * `workflow_def_lookup` - reads a workflow definition by name and version (`nil`: the
       latest), for a sub-workflow name only the input gives (`FORK_JOIN_DYNAMIC`). Replaces

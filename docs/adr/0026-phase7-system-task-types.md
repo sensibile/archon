@@ -1,11 +1,12 @@
 # ADR 0026: Phase 7 MVP 밖 시스템 태스크 타입 설계
 
-- 상태: 제안
+- 상태: 승인
 - 날짜: 2026-11-02
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(주제, 타입 범위, JQ 엔진, HTTP 대상 제한)는 2026-11-02 BOSS가 이 문서의 추천안으로 정했다.
 - 갱신: 2026-11-02 조각 7a가 결정 2·4·8 끝에 정한 것과 캡처에서 확인한 것을 적었다. 2026-11-03 조각 7g가 결정 7 끝에 HTTP
-  실행기에서 정한 것(클라이언트를 Mint로, 취소 위치, 상한 값과 설정 키)을 적었다.
+  실행기에서 정한 것(클라이언트를 Mint로, 취소 위치, 상한 값과 설정 키)을 적었다. 2026-11-03 조각 7h가 결정 8 끝에 재생 건너뛰기
+  제거와 리다이렉트 픽스처를 적고, 조각들이 남긴 의도적 차이를 "upstream과 의도적으로 다른 점"에 모으고 `승인`으로 바꿨다.
 
 ## 맥락
 
@@ -614,8 +615,8 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     요청이다(`ClassicRequestBuilder.get()`). HttpClient 5.5.2 `DefaultRedirectStrategy#isRedirectAllowed`처럼 리다이렉트 요청에
     `Authorization`·`Cookie` 헤더가 남아 있고 다른 호스트·포트로 가면 따라가지 않고 그 3xx가 응답이다(그래서 `No response from the
     remote service`로 `FAILED`). 리다이렉트는 응답을 보낸 원격 서버가 정하므로 대상 제한 없음(위 SSRF 상속 위험)이 리다이렉트 목적지에도
-    그대로 걸린다. 7h가 README 경고에 함께 적는다. HttpClient를 따르므로 `307`·`308`은 다른 호스트로도 body와 그 밖의 헤더
-    (`X-API-Key` 같은)를 그대로 보내고, 같은 호스트·포트면 `https`에서 `http`로 바뀌어도 자격 헤더를 싣는다. 비밀을 그런 헤더나 body에
+    그대로 걸린다. 7h가 README 경고에 함께 적는다. HttpClient를 따르므로 `GET`으로 바뀌지 않는 리다이렉트(`GET`·`HEAD`가 아닌
+    요청의 `303`과 `POST`의 `301`·`302` 밖의 모두. 조각 7h가 "`307`·`308`은"을 고침)는 다른 호스트로도 body와 그 밖의 헤더(`X-API-Key` 같은)를 그대로 보내고, 같은 호스트·포트면 `https`에서 `http`로 바뀌어도 자격 헤더를 싣는다. 비밀을 그런 헤더나 body에
     넣는 정의는 리다이렉트를 보안 경계로 삼을 수 없다(상속 위험, 7h README 경고에 함께). 클라이언트별 쿠키 저장소(리다이렉트 사이
     `Set-Cookie` 재전송)와 HttpClient의 `User-Agent`는 재현하지 않는다. 리다이렉트 픽스처는 7a 캡처에 없다(7h가
     더해 다시 캡처할 후보).
@@ -736,6 +737,18 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   - START_WORKFLOW 검증 실패 문구는 `"startWorkflow validation failed. 'name' -> Workflow name cannot be null or empty. "`이다.
   - SET_VARIABLE 크기 초과는 `variables`를 되돌리고 크기를 바이트로 적는다(`270021`).
 
+- **조각 7h에서 정한 것(2026-11-03).**
+  - 단계 옵션 `types:`와 그 판정(`ContractCase.runs?/1`)을 없앴다. 열두 타입이 모두 매퍼 표에 있어 Phase 7 단계가 모두 돌고,
+    골든 픽스처 전체가 두 백엔드에서 건너뛰는 단계 없이 재생된다. 조각이 더한 옵션(`expect: :started`, `expect: {:archon, ...}`,
+    `ignore`, `until: :settled`)은 의도적 차이와 upstream 타이밍 값이라 남긴다. `ContractCaseTest`는 Phase 7 단계가 Phase 6 뒤에
+    오는 것과 열두 타입 모두에 매퍼가 있는 것을 본다.
+  - 조각 7g가 남긴 리다이렉트 픽스처를 더했다. stub에 `/redirect/<code>`(`location: /json`)를 두고 `GET` `302`와 body 있는 `POST`
+    `307`을 캡처했다(`p7_http_redirect_302_*`, `_307_*`, 4개, 모두 524개). 둘 다 리다이렉트를 따라가 `/json`의 답으로 `COMPLETED`다.
+    기준 SHA 서버를 빈 디렉터리에서 띄워 전체를 다시 캡처했고, 기존 520개는 `normalize/1` 기준으로 이미 알려진 값만 달랐다
+    (bulk 오류 맵의 키, `workflow_execute_completed_blocking_task`의 람다 클래스, `metadata_register_taskdefs_coerced`의 위반 순서,
+    JOIN `pollCount`, stub `date` 헤더). 그래서 기존 파일은 그대로 두고 새 4개만 더했다. 다시 캡처한 `p7_fjd_retried_get`의 JOIN
+    `endTime`은 취소 시각이었다(조각 7c의 재현과 같다. 픽스처의 0은 그대로 두고 재생은 계속 `ignore`한다).
+
 ### 9. 구현 조각
 
 | 조각 | 범위 | 시험·정답 기준 | 선행 | 건드리는 파일·모듈 |
@@ -770,7 +783,8 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
   결과 상태는 같고 반영이 더 이르다.
 - **START_WORKFLOW의 시작 멱등**(결정 7): upstream은 START_WORKFLOW를 멱등으로 보지 않아 시작 중 죽으면 `responseTimeout` 뒤
   `TIMED_OUT`이다. archon은 태스크로 정해지는 ID로 멱등 시작하고 복구가 바로 다시 시작한다. 검증 위반 여럿의 순서는 경로 순이다.
-- **HTTP 응답 body 상한**(결정 7): 10 MiB를 넘으면 `FAILED`. upstream은 다 읽은 뒤 출력 크기 한도(외부 저장소 임계값)로 다룬다.
+- **HTTP 응답 body 상한**(결정 7): 10 MiB를 넘으면 `FAILED`(읽은 body와 푼 body 모두, 리다이렉트한 응답의 body까지 합쳐). upstream은
+  다 읽은 뒤 출력 크기 한도(외부 저장소 임계값)로 다룬다.
 - **HTTP 응답 헤더 이름**(결정 7): 소문자다(Mint). upstream은 서버가 보낸 대소문자다.
 - **HTTP 전송 오류 문구**(결정 7): 연결 거부·시간 초과는 Spring 메시지의 앞부분만 맞추고 원인 문구는 archon 문구다(연결 거부는 캡처
   문구와 같게 둔다). 4xx·5xx의
@@ -786,9 +800,34 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
 - **HTTP 4xx·5xx 상태 문구와 URI**(결정 7, 조각 7g): 상태 문구는 서버가 보낸 것이 아니라 Spring 표의 것이고, URI 템플릿 확장·인코딩을
   하지 않는다.
 - **HTTP 빈도 한도**(결정 7): `rateLimitPerFrequency`를 적용하지 않는다(worker 태스크와 같음).
-- **INLINE의 `python` 평가기**(결정 1): 없다(ADR 0015 결정 5).
+- **INLINE의 `python` 평가기**(결정 1): 없다(ADR 0015 결정 5). upstream 서버에서는 `result: null`로 `COMPLETED`이고 archon은
+  `Unknown evaluator 'python' in INLINE task.`로 `FAILED_WITH_TERMINAL_ERROR`다.
 - **INLINE 평가기 풀 오류**(결정 5): upstream에 대응이 없다. 재시도 가능한 `FAILED`다.
-- **FORK_JOIN_DYNAMIC 오류 문구의 Java `toString`**(결정 4): 재현하지 않는다.
+- **FORK_JOIN_DYNAMIC 오류 문구의 Java `toString`**(결정 4): `WorkflowModel.toShortString()`·`WorkflowTask.toString()`은 재현하고,
+  예외 메시지는 `"<값> is not a map"`이다. 만들 태스크가 없는 DYNAMIC 가지의 문구 속 이름은 정의의 이름이다.
+- **TERMINATE의 문자열이 아닌 `terminationStatus`**(결정 3, 조각 7b): 정의 검사가 막지 못한 태스크(FORK_JOIN_DYNAMIC 가지 등)에서
+  upstream은 `ClassCastException`이 결정 밖으로 새고, archon은 올바르지 않은 상태로 보고 `FAILED`다.
+- **EXCLUSIVE_JOIN permissive 실패**(결정 3, 조각 7b): 실행되지 않은 `joinOn` ref가 있을 때 upstream은 `NullPointerException`(태스크
+  갱신 500, 워크플로우가 `RUNNING`에 멈춤)이다. archon은 그 ref를 비종료로 보고 실패 이유에서 빼, EXCLUSIVE_JOIN이 `COMPLETED`이고
+  워크플로우는 permissive 실패로 `FAILED`다.
+- **FORK_JOIN_DYNAMIC의 문자열이 아닌 입력**(결정 4, 조각 7c): 간단 형태의 이름·타입·워크플로우·버전은 `String.valueOf`처럼 읽고,
+  `forkTaskInputs`의 `null` 원소는 `{"input": null}` 가지, 옛 형태의 변환 실패는 `"Dynamic tasks could not be created. ..."` 종료다.
+  upstream은 셋 다 예외가 결정 밖으로 샌다.
+- **DO_WHILE 반복의 첫 DYNAMIC**(결정 4, 조각 7c): 그 태스크의 정의 변경을 저장된 `workflowDefinition`·DO_WHILE 태스크 JSON에
+  반영하지 않는다. 예약되는 태스크는 같다.
+- **동적 포크 rerun의 종료**(결정 4, 조각 7c): rerun에서 매퍼나 새 태스크의 예약이 종료를 돌려주면 워크플로우를 종료한다.
+  upstream은 예외가 rerun 요청 밖으로 샌다.
+- **끝없는 동적 포크 매핑과 같은 ref**(결정 4, 조각 7c): 자기에게 되돌아오는 가지 목록과 한 FORK 안의 같은 ref는
+  `"... attempted to create a duplicate task reference name: <ref>"`로 종료한다(upstream은 `StackOverflowError`, 같은 ref는 하나를
+  버림). 다음 JOIN 검사를 가지 매핑보다 먼저 해, JOIN도 없고 가지도 잘못됐으면 JOIN 문구가 먼저다.
+- **INLINE의 문자열이 아닌 `evaluatorType`·`expression`**(결정 5, 조각 7d): upstream은 시작 요청이 500이고 워크플로우를 지운다.
+  archon은 시작이 200이고 태스크가 upstream `ClassCastException` 문구로 `FAILED`, 워크플로우는 `FAILED`다.
+- **START_WORKFLOW 변환 실패 문구와 같은 밀리초 rerun**(결정 7, 조각 7f): 변환 실패는 archon codec의 첫 오류
+  (`"Error reading StartWorkflowRequest. must be object"`)다. 제자리 rerun은 `scheduledTime`을 `max(now, 이전 + 1)`로 찍어 같은
+  밀리초의 rerun만 1ms 늦게 보인다.
+- **HTTP rerun의 `pollCount`**(결정 7, 조각 7g): rerun이 다른 참조의 끝난 HTTP를 다시 `SCHEDULED`로 둘 때 `pollCount`를 0으로 돌린다.
+- **HTTP 쿠키 저장소와 `User-Agent`**(결정 7, 조각 7g): HttpClient의 클라이언트별 쿠키 저장소(리다이렉트 사이 `Set-Cookie` 재전송)와
+  `User-Agent`는 재현하지 않는다.
 - **JQ 엔진**(결정 6): jackson-jq 대신 jqlang. 시간 상한(기본 4초)이 있다. 프로브가 찾은 차이 중 맞추지 않은 것은 조각 7e가 여기에 더한다.
   조각 7e가 더한 것(jackson-jq 0.0.13 프로브):
   - jq 1.8.2에는 jackson-jq 0.0.13에 없는 함수·문법(`round`, `todate`, `getpath`, `label`, `$__loc__`, `(...)[]` 등)이 있어
@@ -824,9 +863,9 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
 
 ## 결과
 
-- 이 ADR은 결정만 담는다. 구현은 결정 9의 조각 7a~7h로 하고, 마지막 조각 7h의 PR에서 `승인`으로 바꾼다.
+- 이 ADR은 결정만 담는다. 구현은 결정 9의 조각 7a~7h로 했고, 마지막 조각 7h의 PR에서 `승인`으로 바꿨다(2026-11-03).
 - [ADR 0003](0003-porting-strategy.md) 단계 표에 Phase 7을 더한다. 결정 4의 "나머지 타입은 그 뒤에"는 이 ADR이 연 타입만큼 줄어든다
-  (7h가 비고를 단다). [ADR 0001](0001-api-contract-scope.md)의 경로 분류는 바뀌지 않는다(새 경로 없음).
+  (7h가 비고를 달았다). [ADR 0001](0001-api-contract-scope.md)의 경로 분류는 바뀌지 않는다(새 경로 없음).
 - [ADR 0014](0014-phase2-decider.md) 결정 2("`task_defs`는 호출자가 미리 채운다")와 [ADR 0015](0015-script-evaluator.md) 결정 3의
   주입 함수 예외를 metadata 읽기 조회 둘(`task_def_lookup`, `workflow_def_lookup`)과 jq 평가까지 넓힌다(결정 2).
 - [ADR 0014](0014-phase2-decider.md) 결정 7이 미룬 HTTP·JSON_JQ_TRANSFORM 타입 제약과 [ADR 0015](0015-script-evaluator.md)가 미룬
