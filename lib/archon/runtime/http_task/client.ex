@@ -321,7 +321,9 @@ defmodule Archon.Runtime.HttpTask.Client do
     try do
       # GZIPInputStream reads every member of a gzip body one after the other.
       :ok = :zlib.inflateInit(z, window, if(window == 31, do: :reset, else: :cut))
-      inflate_loop(z, :zlib.safeInflate(z, body), [], 0, max_body)
+      # An empty member gives no output; a step without output is allowed once per input byte, so
+      # the loop ends whatever the input.
+      inflate_loop(z, :zlib.safeInflate(z, body), [], 0, {max_body, byte_size(body) + 1})
     catch
       :error, _reason -> {:error, {:io, "corrupt"}}
     after
@@ -329,15 +331,16 @@ defmodule Archon.Runtime.HttpTask.Client do
     end
   end
 
-  defp inflate_loop(z, {status, out}, acc, size, max_body) do
-    size = size + IO.iodata_length(out)
+  defp inflate_loop(z, {status, out}, acc, size, {max_body, idle}) do
+    length = IO.iodata_length(out)
+    size = size + length
+    idle = if length == 0, do: idle - 1, else: idle
 
     cond do
       size > max_body -> body_error(%{max_body: max_body})
       status == :finished -> {:ok, IO.iodata_to_binary(Enum.reverse([out | acc]))}
-      # Input left that gives no output: not a stream zlib can finish.
-      IO.iodata_length(out) == 0 -> {:error, {:io, "corrupt"}}
-      true -> inflate_loop(z, :zlib.safeInflate(z, []), [out | acc], size, max_body)
+      idle < 0 -> {:error, {:io, "corrupt"}}
+      true -> inflate_loop(z, :zlib.safeInflate(z, []), [out | acc], size, {max_body, idle})
     end
   end
 

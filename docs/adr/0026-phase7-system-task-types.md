@@ -607,7 +607,8 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     HttpClient와 같음. `null`은 upstream 제공자 기본값 연결 100ms·읽기 150ms). 결정 7이 고른 이유(연결·받기 시간 상한을 따로, TLS 검증
     기본값)는 그대로이고 Finch가 그 위에 더하던 것은 풀뿐이다.
   - HttpClient의 기본 동작을 따른다: `Accept-Encoding: gzip, x-gzip, deflate`를 보내고 그 압축을 풀며 그때 `content-length`·
-    `content-encoding`·`content-md5` 헤더를 뺀다(`ContentCompressionExec`). gzip은 이어 붙인 member를 모두 푼다(`GZIPInputStream`). 그래서 응답 헤더가 캡처(`vary`·`cache-control`·
+    `content-encoding`·`content-md5` 헤더를 뺀다(`ContentCompressionExec`). gzip은 이어 붙인 member를 모두 푼다(`GZIPInputStream`, 빈 member 포함). 10 MiB body 상한은 디코딩한 JSON의 메모리를 묶지 않는다(작은
+    값이 많은 배열은 수십 배로 커진다). upstream `extractBody`도 같은 상속 위험이고, 운영자는 `max_response_bytes`로 낮춘다. 그래서 응답 헤더가 캡처(`vary`·`cache-control`·
     `content-type`·`date`)와 같다. 리다이렉트는 `RedirectExec`처럼 따라간다(`301`·`302`·`303`·`307`·`308`과 `location`, `303`과 `POST`의
     `301`·`302`는 body 없는 `GET`, 50번까지, 이미 간 곳이면 `Circular redirect to '<uri>'`). `GET`으로 바뀌는 리다이렉트는 원래 헤더 없는 새
     요청이다(`ClassicRequestBuilder.get()`). HttpClient 5.5.2 `DefaultRedirectStrategy#isRedirectAllowed`처럼 리다이렉트 요청에
@@ -774,7 +775,7 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
   정한 것".
 - **HTTP 응답 body의 JSON 판정**(결정 7, 조각 7g): JSON 값 뒤에 다른 글자가 있으면(`42 abc`) 원문 글자다. upstream Jackson
   `readTree`는 첫 값만 읽는다(`42.0`). 수 길이 제약은 자릿수 1000으로 재고, Jackson이 입력 끝에 닿은 수에만 한 자리 더 허용하는
-  버퍼 경계 차이는 따르지 않는다. double 범위를 넘는 지수(`1e999`)는 원문 글자다(Jackson은 `Infinity`).
+  버퍼 경계 차이는 따르지 않는다. double 범위를 넘는 수(`1e999`, 400자리 정수)는 원문 글자다(Jackson은 `Infinity`).
 - **HTTP charset**(결정 7, 조각 7g): 응답 body는 ISO-8859-1과 UTF-8만 읽고 요청 문자열 body도 그 둘로만 쓴다. 다른 charset
   (windows-1252, UTF-16, `ISO8859_1` 같은 별칭 등)을 밝히면 UTF-8로 읽고 쓴다. upstream은 JVM이 아는 charset이면 그것으로 읽고 쓰며,
   모르는 charset을 밝힌 `contentType`은 보내기 전에 미디어 타입 오류로 실패한다(archon은 charset 이름을 검사하지 않는다).

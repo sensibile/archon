@@ -345,6 +345,11 @@ defmodule Archon.Runtime.Step.HttpTest do
       {task, _workflow} = complete(ok(200, "42"))
       assert task.output_data["response"]["body"] === 42.0
 
+      # Past the double range (Jackson's Infinity): kept as text.
+      big = String.duplicate("9", 400)
+      {task, _workflow} = complete(ok(200, big))
+      assert task.output_data["response"]["body"] == big
+
       {task, _workflow} = complete(ok(200, ~s("quoted")))
       assert task.output_data["response"]["body"] == "quoted"
 

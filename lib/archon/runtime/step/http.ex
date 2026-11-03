@@ -273,12 +273,20 @@ defmodule Archon.Runtime.Step.Http do
   defp extract_body(text) do
     case decode_json(text) do
       {:ok, value} when is_map(value) or is_list(value) -> value
-      {:ok, value} when is_number(value) -> value * 1.0
+      {:ok, value} when is_number(value) -> double(value, text)
       {:ok, value} when is_binary(value) -> value
       {:ok, nil} -> "null"
       {:ok, value} when is_boolean(value) -> Atom.to_string(value)
       {:error, _reason} -> if String.trim(text) == "", do: "", else: text
     end
+  end
+
+  # A number past the double range is Jackson's Infinity, which JSON cannot hold; it is kept as
+  # text, as an exponent past the range is (ADR 0026, decision 7).
+  defp double(value, text) do
+    :erlang.float(value)
+  rescue
+    ArgumentError -> text
   end
 
   # Jackson 2.18's default StreamReadConstraints: nesting deeper than 1000 or an integer of more
