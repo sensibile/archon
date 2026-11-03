@@ -652,7 +652,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   - 입력 변환(upstream `objectMapper.convertValue(..., Input.class)`, `try` 밖): 문자열 필드는 JSON 스칼라를 글자로 받고, 정수 필드는
     정수·잘린 실수·10진 문자열을 받는다. 그 밖의 값(객체가 아닌 요청, 컨테이너인 `uri`, 문자열이 아닌 `headers`, 범위 밖 수)은 요청
     없이 `SCHEDULED`로 남아(`workerId`·`pollCount`는 저장) 마감에 `TIMED_OUT`이다. 보내기 전 upstream이 던지는 것(`contentType`·`accept`의
-    미디어 타입 오류, JSON이 아닌 미디어 타입에 문자열이 아닌 body, `headers`가 `null`, 음수 시간 상한)은 그 예외 문구로 `FAILED`다.
+    미디어 타입 오류, 와일드카드 `contentType`, JSON이 아닌 미디어 타입에 문자열이 아닌 body, `headers`가 `null`, 음수 시간 상한)은 그 예외 문구로 `FAILED`다.
     문자열 body는 `contentType`의 charset(없으면 JSON은 UTF-8, 그 밖은 ISO-8859-1, 못 쓰는 글자는 `?`)으로, 그 밖에는 JSON으로 보낸다.
   - 응답 문구는 Spring 6.2.19에서 확인했다(`DefaultResponseErrorHandler#getErrorMessage`, `HttpStatus` 표, `MimeTypeUtils`): 4xx·5xx는
     `<코드> <Spring 표의 문구> on <METHOD> request for "<uri의 ? 앞>": "<body>"`이고 body의 줄바꿈은 `<EOL>`, 제어 문자는 `?`다.
@@ -771,8 +771,9 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
   정한 것".
 - **HTTP 응답 body의 JSON 판정**(결정 7, 조각 7g): JSON 값 뒤에 다른 글자가 있으면(`42 abc`) 원문 글자다. upstream Jackson
   `readTree`는 첫 값만 읽는다(`42.0`).
-- **HTTP 응답 charset**(결정 7, 조각 7g): ISO-8859-1과 UTF-8만 읽는다. 다른 charset(windows-1252, UTF-16 등)을 밝힌 응답은 UTF-8로
-  읽는다. upstream은 JVM이 아는 charset이면 그것으로 읽는다.
+- **HTTP charset**(결정 7, 조각 7g): 응답 body는 ISO-8859-1과 UTF-8만 읽고 요청 문자열 body도 그 둘로만 쓴다. 다른 charset
+  (windows-1252, UTF-16, `ISO8859_1` 같은 별칭 등)을 밝히면 UTF-8로 읽고 쓴다. upstream은 JVM이 아는 charset이면 그것으로 읽고 쓰며,
+  모르는 charset을 밝힌 `contentType`은 보내기 전에 미디어 타입 오류로 실패한다(archon은 charset 이름을 검사하지 않는다).
 - **HTTP 4xx·5xx 상태 문구와 URI**(결정 7, 조각 7g): 상태 문구는 서버가 보낸 것이 아니라 Spring 표의 것이고, URI 템플릿 확장·인코딩을
   하지 않는다.
 - **HTTP 빈도 한도**(결정 7): `rateLimitPerFrequency`를 적용하지 않는다(worker 태스크와 같음).

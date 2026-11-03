@@ -243,6 +243,18 @@ defmodule Archon.Runtime.Step.HttpTest do
               "org.springframework.http.InvalidMediaTypeException: Invalid mime type \"json\": does not contain '/'"} =
                Http.request(Map.put(base, "contentType", "json"))
 
+      for type <- ["*/*", "*/*; q=1"] do
+        assert {:failed, _reason,
+                "java.lang.IllegalArgumentException: Content-Type cannot contain wildcard type '*'"} =
+                 Http.request(Map.put(base, "contentType", type))
+      end
+
+      for type <- ["application/*", "application/*+json"] do
+        assert {:failed, _reason,
+                "java.lang.IllegalArgumentException: Content-Type cannot contain wildcard subtype '*'"} =
+                 Http.request(Map.put(base, "contentType", type))
+      end
+
       assert {:failed,
               "Failed to invoke HTTP task due to: java.lang.Exception: No HttpMessageConverter for java.util.LinkedHashMap and content type \"text/plain\"",
               _text} =

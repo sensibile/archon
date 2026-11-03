@@ -435,6 +435,7 @@ defmodule Archon.Runtime.Step.Http do
     with {:ok, read} <- timeout(input.read_timeout, @null_read_timeout),
          {:ok, connect} <- timeout(input.connect_timeout, @null_connect_timeout),
          :ok <- media_type(input.content_type),
+         :ok <- concrete_content_type(input.content_type),
          :ok <- Enum.reduce_while(input.accept, :ok, &media_type_step/2),
          {:ok, headers} <- request_headers(input),
          {:ok, body} <- request_body(input) do
@@ -475,6 +476,25 @@ defmodule Archon.Runtime.Step.Http do
          ~s(org.springframework.http.InvalidMediaTypeException: Invalid mime type "#{full}": #{reason})}
   end
 
+  # HttpHeaders#setContentType refuses a wildcard type or subtype.
+  defp concrete_content_type(type) do
+    [main, sub] =
+      type |> String.split(";", parts: 2) |> hd() |> String.trim() |> String.split("/", parts: 2)
+
+    cond do
+      main == "*" ->
+        {:error,
+         "java.lang.IllegalArgumentException: Content-Type cannot contain wildcard type '*'"}
+
+      sub == "*" or String.starts_with?(sub, "*+") ->
+        {:error,
+         "java.lang.IllegalArgumentException: Content-Type cannot contain wildcard subtype '*'"}
+
+      true ->
+        :ok
+    end
+  end
+
   defp mime_error(type) do
     main = type |> String.split(";", parts: 2) |> hd() |> String.trim()
 
@@ -510,7 +530,9 @@ defmodule Archon.Runtime.Step.Http do
   # media type takes.
   defp request_body(%{body: nil}), do: {:ok, nil}
   # StringHttpMessageConverter: the content type's charset, else UTF-8 for JSON and ISO-8859-1
-  # for anything else, a character it cannot encode written as ? (String#getBytes).
+  # for anything else, a character it cannot encode written as ? (String#getBytes). Only
+  # ISO-8859-1 and UTF-8 are written; another declared charset is written as UTF-8 (ADR 0026,
+  # decision 7).
   defp request_body(%{body: body, content_type: type}) when is_binary(body) do
     default = if json?(type), do: "UTF-8", else: "ISO-8859-1"
 
