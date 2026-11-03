@@ -89,9 +89,9 @@ defmodule Archon.Runtime.WorkflowServer do
 
   An `{:http_request, task_id, poll_count, request}` effect hands the request to
   `Archon.Runtime.HttpTask` after the commit, and the process keeps the attempt (`task_id` to
-  `poll_count`) as in flight; `Step.Env.http_in_flight` gives the step their IDs. The result comes
+  `{poll_count, start_time}`) as in flight; `Step.Env.http_in_flight` gives the step their IDs. The result comes
   back through `http_completed/5`, by workflow ID, so a process started since then takes it.
-  After each commit, a request whose task is no longer `SCHEDULED` with that `pollCount` (it
+  After each commit, a request whose task is no longer `SCHEDULED` with that attempt (it
   ended, was removed or started again) is cancelled, which frees its place in the executor; a
   process that ends normally (its workflow ended or was removed) cancels the ones left. One that
   fails does not: the process that replaces it takes their results.
@@ -200,7 +200,7 @@ defmodule Archon.Runtime.WorkflowServer do
           recovered_at: integer(),
           kick?: boolean(),
           ack: [Archon.Runtime.Store.outbox_id()],
-          http: %{optional(String.t()) => non_neg_integer()}
+          http: %{optional(String.t()) => {non_neg_integer(), integer()}}
         }
 
   ## Client
@@ -489,7 +489,7 @@ defmodule Archon.Runtime.WorkflowServer do
   # The request of this attempt is no longer in flight once its result is taken; a result the
   # step failed on is delivered again (Archon.Runtime.HttpTask), so the request stays in flight.
   def handle_call(
-        {:http_completed, task_id, poll_count, _started_at, _result} = event,
+        {:http_completed, task_id, poll_count, started_at, _result} = event,
         _from,
         state
       ) do
@@ -497,9 +497,14 @@ defmodule Archon.Runtime.WorkflowServer do
 
     state =
       case {reply, state.http} do
-        {{:error, _reason}, _http} -> state
-        {_ok, %{^task_id => ^poll_count}} -> %{state | http: Map.delete(state.http, task_id)}
-        _other -> state
+        {{:error, _reason}, _http} ->
+          state
+
+        {_ok, %{^task_id => {^poll_count, ^started_at}}} ->
+          %{state | http: Map.delete(state.http, task_id)}
+
+        _other ->
+          state
       end
 
     reply_and_settle(reply, state)
@@ -590,7 +595,7 @@ defmodule Archon.Runtime.WorkflowServer do
   # that replaces it.
   @impl GenServer
   def terminate(:normal, state) do
-    Enum.each(state.http, fn {task_id, _poll_count} -> HttpTask.cancel(state.id, task_id) end)
+    Enum.each(state.http, fn {task_id, _attempt} -> HttpTask.cancel(state.id, task_id) end)
   end
 
   def terminate(_reason, _state), do: :ok
@@ -604,7 +609,7 @@ defmodule Archon.Runtime.WorkflowServer do
       for %Task{task_type: "HTTP", status: :scheduled, poll_count: count} = task <- tasks,
           count > 0,
           into: %{},
-          do: {task.task_id, count}
+          do: {task.task_id, {count, task.start_time}}
 
     %{state | http: Map.merge(adopted, state.http)}
   end
@@ -619,14 +624,14 @@ defmodule Archon.Runtime.WorkflowServer do
     attempts =
       for %Task{status: :scheduled} = task <- (workflow && workflow.tasks) || [],
           into: %{},
-          do: {task.task_id, task.poll_count}
+          do: {task.task_id, {task.poll_count, task.start_time}}
 
     {keep, drop} =
-      Enum.split_with(state.http, fn {task_id, poll_count} ->
-        Map.get(attempts, task_id) == poll_count
+      Enum.split_with(state.http, fn {task_id, attempt} ->
+        Map.get(attempts, task_id) == attempt
       end)
 
-    Enum.each(drop, fn {task_id, _poll_count} -> HttpTask.cancel(state.id, task_id) end)
+    Enum.each(drop, fn {task_id, _attempt} -> HttpTask.cancel(state.id, task_id) end)
     %{state | http: Map.new(keep)}
   end
 
@@ -959,8 +964,12 @@ defmodule Archon.Runtime.WorkflowServer do
            hook(state, :effect, effect)
            HttpTask.request(state.id, task_id, poll_count, request)
          end) do
-      {:ok, :ok} -> {:ok, %{state | http: Map.put(state.http, task_id, poll_count)}}
-      {:error, reason} -> {:error, reason, state}
+      {:ok, :ok} ->
+        attempt = {poll_count, request.started_at}
+        {:ok, %{state | http: Map.put(state.http, task_id, attempt)}}
+
+      {:error, reason} ->
+        {:error, reason, state}
     end
   end
 

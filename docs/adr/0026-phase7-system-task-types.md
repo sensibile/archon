@@ -627,8 +627,8 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     보인다. 전달이 실패하면(저장소 오류, 바쁜 프로세스의 호출 시간 초과) 태스크 마감까지 간격을 두 배로 늘리며(100ms~5초) 다시
     전하고, 워크플로우가 없으면 그친다. 프로세스는 결과를 받아들인 뒤에야 그 요청을 진행 중에서 뺀다. 요청 Task가 죽으면 그 이유를
     I/O 오류로 전한다(upstream `start`의 `catch`처럼 `FAILED`).
-  - **취소를 보내는 자리**(불변식 2): 워크플로우 프로세스는 진행 중 요청을 태스크 ID → `pollCount`로 상태에 둔다
-    (`Step.Env.http_in_flight`는 그 키). 커밋이 끝날 때마다 그 태스크가 더는 `SCHEDULED`·같은 `pollCount`가 아니면(끝남·`TIMED_OUT`·
+  - **취소를 보내는 자리**(불변식 2): 워크플로우 프로세스는 진행 중 요청을 태스크 ID → 시도(`pollCount`, `startTime`)로 상태에 둔다
+    (`Step.Env.http_in_flight`는 그 키). 커밋이 끝날 때마다 그 태스크가 더는 `SCHEDULED`·같은 시도가 아니면(끝남·`TIMED_OUT`·
     종료로 `CANCELED`·지워짐·다시 시작됨) `HttpTask.cancel/2`를 보낸다. 실행기는 기다리는 요청은 보내지 않고 버리고, 보내는 중인
     요청은 그 Task를 끝내 연결을 닫고 자리를 다음에 넘긴다. 프로세스가 정상 종료할 때(`terminate/2`의 `:normal`: 워크플로우가 끝났거나
     지워짐, 시작 실패) 남은 요청을 모두 끊는다. 비정상 종료는 끊지 않으므로 활성화한 새 프로세스가 결과를 받는다. 같은 단계에서 태스크가
