@@ -26,12 +26,16 @@ defmodule Archon.Runtime.Step.Async do
 
   Starting a `SCHEDULED` task saves its `pollCount` and `startTime` first (ADR 0026, decision 7).
   A type whose start is work outside the process has a starter module here (`SUB_WORKFLOW`:
-  `Archon.Runtime.Step.SubWorkflow`, `START_WORKFLOW`: `Archon.Runtime.Step.StartWorkflow`) with
+  `Archon.Runtime.Step.SubWorkflow`, `START_WORKFLOW`: `Archon.Runtime.Step.StartWorkflow`,
+  `HTTP`: `Archon.Runtime.Step.Http`) with
   `start(state, task) :: {:started, state} | {:failed, task}`: `:started` posts the effect, which
   runs after the commit, and its result comes back as an event. The event's handler takes the task
   from `attempt/3` (still `SCHEDULED`, the same `pollCount` when the event has one; else the
   result is dropped) and ends with `finish/2`. Any other type's start is
   `Archon.Decider.SystemTask.start/3`.
+
+  A started task of a type whose start is not idempotent (`HTTP`) is left out of every pass until
+  its response timeout is over (ADR 0026, decision 7); then the evaluation times it out.
 
   The start of a type whose `start_idempotent?` is set may run again: such a task left
   `SCHEDULED` past its response timeout is started again instead of being `TIMED_OUT` (upstream
@@ -42,13 +46,17 @@ defmodule Archon.Runtime.Step.Async do
   alias Archon.Decider.{SystemTask, SystemTasks}
   alias Archon.Decider.SystemTask.SubWorkflow, as: SubWorkflowTask
   alias Archon.Domain.{Task, Workflow, WorkflowTask}
-  alias Archon.Runtime.Step.{Env, Schedule, StartWorkflow, State, SubWorkflow, Tasks}
+  alias Archon.Runtime.Step.{Env, Http, Schedule, StartWorkflow, State, SubWorkflow, Tasks}
 
   # TaskDef.ONE_HOUR
   @one_hour 3600
 
   # The types whose start is an effect (see the moduledoc).
-  @starters %{"SUB_WORKFLOW" => SubWorkflow, "START_WORKFLOW" => StartWorkflow}
+  @starters %{
+    "SUB_WORKFLOW" => SubWorkflow,
+    "START_WORKFLOW" => StartWorkflow,
+    "HTTP" => Http
+  }
 
   @doc """
   Evaluates the asynchronous system tasks the step calls for. `:wake` adds every pending one
@@ -61,6 +69,7 @@ defmodule Archon.Runtime.Step.Async do
       for task <- wf.tasks,
           Schedule.async?(state.env, task),
           not Task.terminal?(task.status),
+          not running?(state, task),
           MapSet.member?(state.due, task.task_id) or triggered?(state, task) or
             (mode in [:wake, :recover] and due?(state, task)) or
             (mode == :recover and restart?(state, task)),
@@ -92,14 +101,37 @@ defmodule Archon.Runtime.Step.Async do
     if Task.loop_over_task?(task), do: Enum.map(refs, &"#{&1}__#{task.iteration}"), else: refs
   end
 
-  # Due on a :wake: a SCHEDULED task once its delay is over, a running JOIN or WAIT, and a running
-  # SUB_WORKFLOW whose child was read.
   # Due on a :wake: a task whose delay is over (a running SUB_WORKFLOW also needs its child to
   # have been read).
   defp due?(%State{env: env}, %Task{task_type: "SUB_WORKFLOW", status: :in_progress} = task),
     do: Env.child(env, task, Task.sub_workflow_id(task)) != :error
 
+  # A started HTTP task is due at its response timeout, not after its startDelay again.
+  defp due?(
+         %State{now: now},
+         %Task{task_type: "HTTP", status: :scheduled, poll_count: count} = task
+       )
+       when count > 0,
+       do: Http.deadline(task) <= now
+
   defp due?(%State{now: now}, task), do: due_time(task) <= now
+
+  # ADR 0026, decision 7: a started task of a type whose start is not idempotent (HTTP) is not
+  # evaluated before its response timeout is over, whether its request is in flight
+  # (`env.http_in_flight`) or was lost with a process (its pollCount counted the start). Its
+  # result comes back as an event; once the timeout is over, the evaluation times it out.
+  defp running?(%State{env: env, now: now}, %Task{status: :scheduled} = task)
+       when is_map_key(@starters, task.task_type) do
+    started? = task.poll_count > 0 or MapSet.member?(env.http_in_flight, task.task_id)
+
+    started? and not SystemTasks.start_idempotent?(env.system_tasks, task.task_type) and
+      now < Http.deadline(task)
+  end
+
+  # Upstream removes the message of an isAsyncComplete HTTP task once it leaves SCHEDULED; the
+  # worker's update ends it.
+  defp running?(_state, %Task{task_type: "HTTP", status: :in_progress}), do: true
+  defp running?(_state, _task), do: false
 
   # Started (its pollCount counted the start) without a result that ended or kept it: a
   # start-idempotent type starts again (ADR 0026, decision 7).

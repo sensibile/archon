@@ -54,6 +54,7 @@ defmodule Archon.MixProject do
       {:ecto_sql, "~> 3.14"},
       {:elixir_make, "~> 0.10.0", runtime: false},
       {:ex_json_schema, "~> 0.11.5", only: :test},
+      {:mint, "~> 1.7"},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
       {:phoenix, "~> 1.8"},
       {:postgrex, "~> 0.22.4"}

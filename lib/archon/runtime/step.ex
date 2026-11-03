@@ -48,7 +48,7 @@ defmodule Archon.Runtime.Step do
   operations are `Archon.Runtime.Step.Lifecycle`.
   """
 
-  alias Archon.Domain.{TaskResult, Workflow}
+  alias Archon.Domain.{Task, TaskResult, Workflow}
   alias Archon.Runtime.Commit
 
   alias Archon.Runtime.Step.{
@@ -57,6 +57,7 @@ defmodule Archon.Runtime.Step do
     Effect,
     Env,
     Event,
+    Http,
     Lifecycle,
     Postpone,
     Recover,
@@ -148,6 +149,17 @@ defmodule Archon.Runtime.Step do
     case Async.attempt(state, task_id, nil) do
       nil -> {:ok, state}
       task -> {:ok, started(state, SubWorkflow.started(state, task, result))}
+    end
+  end
+
+  # ADR 0026, decision 7: the result of the attempt that sent the request, else dropped. Its
+  # startTime tells it from an attempt with the same pollCount after a rerun reset the count.
+  defp handle({:http_completed, task_id, poll_count, started_at, result}, %State{wf: wf} = state) do
+    with false <- Workflow.terminal?(wf.status),
+         %Task{start_time: ^started_at} = task <- Async.attempt(state, task_id, poll_count) do
+      {:ok, started(state, Http.completed(state, task, result))}
+    else
+      _dropped -> {:ok, state}
     end
   end
 
@@ -250,6 +262,9 @@ defmodule Archon.Runtime.Step do
   defp still_wanted?(state, {start, task_id, _start})
        when start in [:start_sub_workflow, :start_workflow],
        do: match?(%{status: :scheduled}, State.task(state, task_id))
+
+  defp still_wanted?(state, {:http_request, task_id, poll_count, _request}),
+    do: match?(%{status: :scheduled, poll_count: ^poll_count}, State.task(state, task_id))
 
   defp still_wanted?(_state, _effect), do: true
 

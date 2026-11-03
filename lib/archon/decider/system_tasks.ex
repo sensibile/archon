@@ -91,7 +91,8 @@ defmodule Archon.Decider.SystemTasks do
       "EXCLUSIVE_JOIN" => %Spec{module: SystemTask.ExclusiveJoin},
       "INLINE" => %Spec{module: SystemTask.Inline},
       "LAMBDA" => %Spec{module: SystemTask.Lambda},
-      "JSON_JQ_TRANSFORM" => %Spec{module: SystemTask.JsonJqTransform}
+      "JSON_JQ_TRANSFORM" => %Spec{module: SystemTask.JsonJqTransform},
+      "HTTP" => %Spec{async?: true}
     }
   end
 

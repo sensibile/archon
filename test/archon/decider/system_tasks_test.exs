@@ -31,7 +31,7 @@ defmodule Archon.Decider.SystemTasksTest do
       registry = SystemTasks.default()
 
       assert Enum.filter(Map.keys(registry), &SystemTasks.async?(registry, &1)) |> Enum.sort() ==
-               ~w(JOIN START_WORKFLOW SUB_WORKFLOW WAIT)
+               ~w(HTTP JOIN START_WORKFLOW SUB_WORKFLOW WAIT)
 
       # START_WORKFLOW's start is idempotent in Archon only (ADR 0026, decision 7).
       assert Enum.filter(Map.keys(registry), &SystemTasks.start_idempotent?(registry, &1))
@@ -71,10 +71,12 @@ defmodule Archon.Decider.SystemTasksTest do
       for type <- ~w(SIMPLE SWITCH DECISION FORK_JOIN JOIN DO_WHILE SUB_WORKFLOW WAIT),
           do: assert(Mapper.mapped?(type), type)
 
-      refute Mapper.mapped?("HTTP")
-      assert Mapper.module_for("HTTP") == Mapper.UserDefined
+      refute Mapper.mapped?("KAFKA_PUBLISH")
+      assert Mapper.module_for("KAFKA_PUBLISH") == Mapper.UserDefined
       refute Mapper.changes_definition?("SIMPLE")
-      refute Mapper.changes_definition?("HTTP")
+      refute Mapper.changes_definition?("KAFKA_PUBLISH")
+      # HTTP sets its asyncComplete input on the workflow task (ADR 0026, decision 7).
+      assert Mapper.changes_definition?("HTTP")
     end
   end
 

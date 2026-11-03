@@ -204,7 +204,9 @@ defmodule Archon.Domain.Task do
 
   @doc """
   Encodes to upstream JSON with the derived getter keys. `now_ms` is the clock used for
-  `queueWaitTime` (see `queue_wait_time/2`).
+  `queueWaitTime` (see `queue_wait_time/2`). `reasonForIncompletion` is cut to 500 characters,
+  as upstream's `TaskModel#toTask` gives it to the `Task` setter: a task in memory keeps the whole
+  reason, which a failed workflow's reason quotes.
   """
   @spec to_json(t(), integer()) :: Codec.json_object()
   def to_json(%__MODULE__{} = task, now_ms \\ System.system_time(:millisecond)) do
@@ -213,6 +215,7 @@ defmodule Archon.Domain.Task do
     resolved = %{
       task
       | task_def_name: task_def_name(task),
+        reason_for_incompletion: truncate_reason(task.reason_for_incompletion),
         sub_workflow_id: sub_workflow_id(task),
         execution_metadata: task.execution_metadata || %ExecutionMetadata{},
         runtime_metadata: non_empty(task.runtime_metadata)
@@ -317,7 +320,23 @@ defmodule Archon.Domain.Task do
   @doc false
   @spec truncate_reason(String.t() | nil) :: String.t() | nil
   def truncate_reason(nil), do: nil
-  def truncate_reason(reason), do: String.slice(reason, 0, @reason_limit)
+  # StringUtils.substring counts UTF-16 code units; a character that would be cut in half is left
+  # out (Java keeps half of it, which UTF-8 cannot hold).
+  def truncate_reason(reason) do
+    {kept, _units} =
+      reason
+      |> String.slice(0, @reason_limit)
+      |> String.to_charlist()
+      |> Enum.reduce_while({[], 0}, fn char, {kept, units} ->
+        width = if char > 0xFFFF, do: 2, else: 1
+
+        if units + width > @reason_limit,
+          do: {:halt, {kept, units}},
+          else: {:cont, {[char | kept], units + width}}
+      end)
+
+    kept |> Enum.reverse() |> List.to_string()
+  end
 
   defp blank?(nil), do: true
   defp blank?(value), do: String.trim(value) == ""

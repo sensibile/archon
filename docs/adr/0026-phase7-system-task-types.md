@@ -4,7 +4,8 @@
 - 날짜: 2026-11-02
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(주제, 타입 범위, JQ 엔진, HTTP 대상 제한)는 2026-11-02 BOSS가 이 문서의 추천안으로 정했다.
-- 갱신: 2026-11-02 조각 7a가 결정 2·4·8 끝에 정한 것과 캡처에서 확인한 것을 적었다.
+- 갱신: 2026-11-02 조각 7a가 결정 2·4·8 끝에 정한 것과 캡처에서 확인한 것을 적었다. 2026-11-03 조각 7g가 결정 7 끝에 HTTP
+  실행기에서 정한 것(클라이언트를 Mint로, 취소 위치, 상한 값과 설정 키)을 적었다.
 
 ## 맥락
 
@@ -541,7 +542,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     max_concurrency:`, 기본 스케줄러 수 × 2, upstream 시스템 태스크 스레드 수와 같은 뜻)을 두고 넘는 요청은 차례로 기다리게 한다.
     태스크 정의의 동시 실행 한도(`concurrentExecLimit`)는 worker 태스크의 기존 판정을 써서 넘으면 미룬다. 빈도 한도는 archon worker
     경로에도 아직 없으므로 이 Phase에서도 적용하지 않는다(결과 절).
-  - HTTP 클라이언트는 **Finch**(Mint 기반, 새 의존성)다. 연결 시간 상한은 `connectionTimeOut`, 받기 시간 상한은 `readTimeOut`이다.
+  - HTTP 클라이언트는 **Finch**(Mint 기반, 새 의존성)다(조각 7g가 Mint 직접 사용으로 고침. 아래 "조각 7g에서 정한 것"). 연결 시간 상한은 `connectionTimeOut`, 받기 시간 상한은 `readTimeOut`이다.
     응답 body는 `max_response_bytes`(기본 10 MiB, upstream 태스크 출력 하드 한도 10240KB와 같은 크기)까지만 읽고, 넘으면 태스크를
     `FAILED`로 끝낸다(의도적 차이).
   - 응답 처리는 upstream `HttpTask`를 따른다. 2xx면 출력 `response` = `{body, headers, statusCode, reasonPhrase}`, `COMPLETED`(또는
@@ -597,6 +598,84 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     `max(now, 이전 scheduledTime + 1)`로 찍는다. 그 경우에만 `scheduledTime`이 1ms 늦게 보인다.
   - 픽스처: `START_WORKFLOW` 재생 단계는 NOOP에 기대므로 7b가 머지되기 전에는 건너뛴다. 시작하는 쪽은 `Archon.StepReplay` 방식의
     단계 시험이 `p7_start_workflow_get`·`_invalid_get`·`_missing_get`과 같다(`test/archon/runtime/step/start_workflow_test.exs`).
+
+- **조각 7g에서 정한 것(2026-11-03).**
+  - **클라이언트는 Finch가 아니라 Mint를 직접 쓴다**(위 "HTTP 클라이언트는 Finch" 문장을 고침. 새 의존성은 `mint` 하나이고 `hpax`는
+    이미 있다). Finch는 연결 시간 상한을 풀마다 시작할 때 정하므로 요청마다 다른 `connectionTimeOut`을 지킬 수 없다. upstream
+    `DefaultRestTemplateProvider`도 요청마다 새 Apache HttpClient 5 클라이언트를 만들어 연결을 다시 쓰지 않는다. 그래서 요청마다 새
+    연결을 열고(`Archon.Runtime.HttpTask.Client`), `connectionTimeOut`으로 연결하고 `readTimeOut`을 읽기마다 적용한다(`0`은 상한 없음,
+    HttpClient와 같음. `null`은 upstream 제공자 기본값 연결 100ms·읽기 150ms). 결정 7이 고른 이유(연결·받기 시간 상한을 따로, TLS 검증
+    기본값)는 그대로이고 Finch가 그 위에 더하던 것은 풀뿐이다.
+  - HttpClient의 기본 동작을 따른다: `Accept-Encoding: gzip, x-gzip, deflate`를 보내고 그 압축을 풀며 그때 `content-length`·
+    `content-encoding`·`content-md5` 헤더를 뺀다(`ContentCompressionExec`). gzip은 이어 붙인 member를 모두 푼다(`GZIPInputStream`, 빈 member 포함). 스트림 끝 전에 잘린 압축 body는 I/O 오류다(`EOFException`처럼). 10 MiB body 상한은 디코딩한 JSON의 메모리를 묶지 않는다(작은
+    값이 많은 배열은 수십 배로 커진다). upstream `extractBody`도 같은 상속 위험이고, 운영자는 `max_response_bytes`로 낮춘다. 그래서 응답 헤더가 캡처(`vary`·`cache-control`·
+    `content-type`·`date`)와 같다. 리다이렉트는 `RedirectExec`처럼 따라간다(`301`·`302`·`303`·`307`·`308`과 `location`, `303`과 `POST`의
+    `301`·`302`는 body 없는 `GET`, 50번까지, 이미 간 곳이면 `Circular redirect to '<uri>'`). `GET`으로 바뀌는 리다이렉트는 원래 헤더 없는 새
+    요청이다(`ClassicRequestBuilder.get()`). HttpClient 5.5.2 `DefaultRedirectStrategy#isRedirectAllowed`처럼 리다이렉트 요청에
+    `Authorization`·`Cookie` 헤더가 남아 있고 다른 호스트·포트로 가면 따라가지 않고 그 3xx가 응답이다(그래서 `No response from the
+    remote service`로 `FAILED`). 리다이렉트는 응답을 보낸 원격 서버가 정하므로 대상 제한 없음(위 SSRF 상속 위험)이 리다이렉트 목적지에도
+    그대로 걸린다. 7h가 README 경고에 함께 적는다. HttpClient를 따르므로 `307`·`308`은 다른 호스트로도 body와 그 밖의 헤더
+    (`X-API-Key` 같은)를 그대로 보내고, 같은 호스트·포트면 `https`에서 `http`로 바뀌어도 자격 헤더를 싣는다. 비밀을 그런 헤더나 body에
+    넣는 정의는 리다이렉트를 보안 경계로 삼을 수 없다(상속 위험, 7h README 경고에 함께). 클라이언트별 쿠키 저장소(리다이렉트 사이
+    `Set-Cookie` 재전송)와 HttpClient의 `User-Agent`는 재현하지 않는다. 리다이렉트 픽스처는 7a 캡처에 없다(7h가
+    더해 다시 캡처할 후보).
+  - **실행기**(`Archon.Runtime.HttpTask`, 앱 감독 트리의 `Archon.Runtime.HttpTask.Supervisor`가 요청용 Task 감독자와 함께
+    `:one_for_all`로, 그 앞에 전달용 Task 감독자를 띄운다. 실행기가 끝나면 진행 중 요청도 끝나 수가 어긋나지 않고, 진행 중 전달은
+    살아남는다): 요청은 `Task.Supervisor.async_nolink`로 보내고, 결과는 별도 감독 Task가 워크플로우 ID로
+    `WorkflowServer.http_completed/4`에 전한다(바쁜 워크플로우 프로세스가 실행기를 막지 않게). 요청은 워크플로우·태스크로 식별하고
+    같은 태스크의 새 요청은 옛 요청을 먼저 끝낸다. 요청을 넘기는 것은 호출(`GenServer.call`)이라, 재시작 중인 실행기는 효과 실패로
+    보인다. 전달이 실패하면(저장소 오류, 바쁜 프로세스의 호출 시간 초과) 태스크 마감까지 간격을 두 배로 늘리며(100ms~5초) 다시
+    전하고, 워크플로우가 없으면 그친다. 프로세스는 결과를 받아들인 뒤에야 그 요청을 진행 중에서 뺀다. 요청 Task가 죽으면 그 이유를
+    I/O 오류로 전한다(upstream `start`의 `catch`처럼 `FAILED`).
+  - **취소를 보내는 자리**(불변식 2): 워크플로우 프로세스는 진행 중 요청을 태스크 ID → 시도(`pollCount`, `startTime`)로 상태에 둔다
+    (`Step.Env.http_in_flight`는 그 키). 커밋이 끝날 때마다 그 태스크가 더는 `SCHEDULED`·같은 시도가 아니면(끝남·`TIMED_OUT`·
+    종료로 `CANCELED`·지워짐·다시 시작됨) `HttpTask.cancel/2`를 보낸다. 실행기는 기다리는 요청은 보내지 않고 버리고, 보내는 중인
+    요청은 그 Task를 끝내 연결을 닫고 자리를 다음에 넘긴다. 프로세스가 정상 종료할 때(`terminate/2`의 `:normal`: 워크플로우가 끝났거나
+    지워짐, 시작 실패) 남은 요청을 모두 끊는다. 비정상 종료는 끊지 않으므로 활성화한 새 프로세스가 결과를 받는다. 같은 단계에서 태스크가
+    다른 시도가 되면 요청 효과 자체를 버린다(`Step.finish`의 `still_wanted?`). 비정상 종료 뒤 활성화한 프로세스는 시작한
+    `SCHEDULED` HTTP 태스크(`pollCount` > 0)를 진행 중으로 넘겨받아, 옛 프로세스가 보낸 요청도 그 태스크가 끝나면 끊는다(그 동안
+    `evict_after`로 끝나지도 않는다).
+  - **상한 값과 설정 키**(불변식 3, `config :archon, Archon.Runtime.HttpTask, ...`): `max_concurrency`(기본 스케줄러 수 × 2),
+    `max_request_ms`(기본 60 000, 리다이렉트를 포함한 요청 하나의 전체 시간. 태스크 마감을 넘지 않는다), `max_response_bytes`(기본
+    10 MiB, 읽은 body와 푼 body 모두, 리다이렉트한 응답의 body까지 합쳐). 60초는 기본 `readTimeOut`(3초)의 스무 배로 느린 대상도 받되, 조금씩 보내는 대상이 자리
+    하나를 1분보다 오래 쥐지 못하는 값이다. 상한을 넘으면 I/O 오류로 `FAILED`다(`... request for "<uri>": Request did not complete within
+    its total time limit`, `Response body is larger than <n> bytes`). 기다리는 요청은 꺼낼 때 마감이 지났으면 보내지 않는다. 클라이언트는 연결·보내기(`send_timeout`)·읽기를 모두 남은 전체
+    시간 안으로 묶고, 일찍 끝낸 요청을 닫을 때는 보내지 못한 것을 기다리지 않는다(`linger` 0). 실행기는 전체 시간 상한 1초 뒤에도 끝나지 않은 요청을
+    직접 끝내고 같은 I/O 오류로 전한다.
+  - 고르는 자리의 거르기(`Step.Async.pass`): 시작 모듈이 있고 시작이 멱등이 아닌 타입(HTTP)의 `SCHEDULED` 태스크는 진행 중 집합에
+    있거나 `pollCount` > 0이면 마감(`updateTime` + `responseTimeoutSeconds`, 0이면 1시간) 전에는 어떤 패스에도 넣지 않는다. `asyncComplete`로
+    `IN_PROGRESS`가 된 HTTP도 넣지 않는다(upstream은 그 메시지를 큐에서 지운다. 워커 갱신이 끝낸다). `Postpone.wake_at`은 시작한 HTTP의
+    마감을 재평가 후보에 더하고, 시작한 HTTP는 `startDelay`가 아니라 그 마감에 평가 대상이 된다.
+  - HTTP 결과의 시도 확인은 `pollCount`와 그 시도의 `startTime`이다(효과 요청의 `started_at`, 결과 이벤트
+    `{:http_completed, task_id, poll_count, started_at, result}`). rerun이 `pollCount`를 0으로 돌려 같은 번호가 다시 나와도, 전달을
+    재시도하던 옛 결과는 `startTime`이 달라 버려진다.
+  - rerun의 `finalizeRerun`이 다른 참조의 끝난 HTTP를 다시 `SCHEDULED`로 둘 때 `pollCount`를 0으로 돌린다. 그대로 두면 위
+    거르기가 시작한 태스크로 보고 다시 보내지 않아 마감에 `TIMED_OUT`이 된다. upstream은 `pollCount`를 두고 실행기가 그것으로
+    시작 여부를 가리지 않는다(의도적 차이: 이 경우 보이는 `pollCount`만 다르다). 태스크 자체를 rerun하는 경로는 이미 0으로 둔다.
+    DYNAMIC으로 만든 HTTP는 태스크 정의의 `responseTimeoutSeconds`로 마감을 잰다(시험 있음).
+  - 입력 변환(upstream `objectMapper.convertValue(..., Input.class)`, `try` 밖): 문자열 필드는 JSON 스칼라를 글자로 받고, 정수 필드는
+    정수·잘린 실수·10진 문자열을 받는다. 그 밖의 값(객체가 아닌 요청, 컨테이너인 `uri`, 문자열이 아닌 `headers`, 범위 밖 수)은 요청
+    없이 `SCHEDULED`로 남아(`workerId`·`pollCount`는 저장) 마감에 `TIMED_OUT`이다. 보내기 전 upstream이 던지는 것(`contentType`·`accept`의
+    미디어 타입 오류(type·subtype의 토큰 문자 검사 포함, 매개변수는 검사하지 않음), 와일드카드 `contentType`, JSON이 아닌 미디어 타입에 문자열이 아닌 body, `headers`가 `null`, 음수 시간 상한)은 그 예외 문구로 `FAILED`다.
+    문자열 body는 `contentType`의 charset(없으면 JSON은 UTF-8, 그 밖은 ISO-8859-1, 못 쓰는 글자는 `?`)으로, 그 밖에는 JSON으로 보낸다.
+  - 응답 문구는 Spring 6.2.19에서 확인했다(`DefaultResponseErrorHandler#getErrorMessage`, `HttpStatus` 표, `MimeTypeUtils`): 4xx·5xx는
+    `<코드> <Spring 표의 문구> on <METHOD> request for "<uri의 ? 앞>": "<body>"`이고 body의 줄바꿈은 `<EOL>`, 제어 문자는 `?`다.
+    **Spring은 긴 body를 줄이지 않는다**(7a 기록의 "Spring이 줄임"을 고침). `p7_http_long_400_get`에서 끝 따옴표가 없는 것은 태스크
+    `reasonForIncompletion`의 500자 자르기다. 워크플로우의 `reasonForIncompletion`은 자르지 않은 태스크 이유를 인용하므로, archon도
+    태스크에 이유를 다 두고 `Task.to_json/2`(upstream `TaskModel#toTask`)에서 자른다. 자르는 단위는 Java처럼 UTF-16 code unit이고,
+    반으로 잘릴 글자는 뺀다(`Task.truncate_reason/1`, 다른 경로에도 같게 적용). 3xx처럼 2xx·4xx·5xx가 아니면 body 없이
+    `No response from the remote service`로 `FAILED`다. 2xx body는 `content-type`의 charset, 없으면 JSON은 UTF-8·그 밖은 ISO-8859-1로
+    읽는다(`StringHttpMessageConverter`). JSON 판정은 Jackson 2.18 기본 `StreamReadConstraints`를 따라 중첩 1000을 넘거나
+    1000자리를 넘는 정수, 정수·소수·지수 자릿수 합이 1000을 넘는 실수(정수부가 `0` 하나면 0으로 셈, `ParserBase#resetFloat`)가
+    있으면 파싱 실패로 원문 글자다(Jackson 2.18.8을 실행해 경계를 쟀다). 이 검사를 디코딩 전에 해서, body 상한 안의 응답이 디코딩으로
+    끝없는 구조를 만들지 못하게 한다. 연결 거부는 캡처 문구(`Connect to <scheme>://<host>:<port> failed: Connection refused (connect
+    failed)`)와 같게, 연결·읽기 시간 초과는 `Connect timed out`·`Read timed out`, 이름 풀이 실패는 `<host>: Name or service not known`이다.
+  - 4xx·5xx 문구의 상태 문구는 서버가 보낸 것이 아니라 Spring 표의 것이다(Mint는 사유 문구를 주지 않는다). 표에 없는 4xx·5xx는 빈
+    문구다. URI 템플릿 확장과 인코딩(`DefaultUriBuilderFactory`)은 하지 않는다. 의도적 차이로 7h가 목록에 옮긴다.
+  - 시험: `test/archon/runtime/step/http_test.exs`(매퍼, 시작 요청, 응답, 진행 중·고아 거르기, 마감 `TIMED_OUT`, 시도 확인, 비정상 입력,
+    `HttpTaskTest` 사례), `test/archon/runtime/http_task_test.exs`(클라이언트와 실행기: 상한, 리다이렉트, 압축, 동시 상한, 취소로 자리
+    반납, 조금씩 보내는 대상), `test/archon/runtime/http_runtime_test.exs`(진행 중 `:wake`, 프로세스 교체 뒤 결과, `TIMED_OUT`·종료·삭제가
+    요청을 끊음, 진행 중이면 `evict_after`로 끝나지 않음), 계약 재생 `p7_http_*`(`workflowDefinition` 포함).
 
 ### 8. 골든 픽스처와 재생(조각 7a가 한 번에 캡처)
 
@@ -667,7 +746,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
 | 7d | 결정 5: INLINE, LAMBDA | GraalJS 오라클 비교, `InlineTest`·`LambdaTest` 사례, 픽스처 재생 | 7a | `lib/archon/decider/mapper/{inline,lambda}.ex`, `lib/archon/decider/system_task/{inline,lambda}.ex`, 두 표의 자기 줄, 해당 시험 |
 | 7e | 결정 6: jq vendoring, `archon_jq`, 풀 일반화와 `Archon.Jq.Pool`, JSON_JQ_TRANSFORM, 그 타입 제약 | jackson-jq 프로브 비교, `JsonJqTransformTest` 사례, 격리 시험(`$ENV`, `import`, 시간·출력 상한), 픽스처 재생 | 7a | `c_src/jq/*`, `c_src/archon_jq/*`, `Makefile`, `NOTICE`, `.github/workflows/ci.yml`(sanitize 빌드), `config/*.exs`, `lib/archon/script/{pool,worker}.ex`, `lib/archon/jq.ex`, `lib/archon/application.ex`, `lib/archon/decider/mapper/json_jq_transform.ex`, `lib/archon/decider/system_task/json_jq_transform.ex`, `lib/archon/domain/task_type_constraint.ex`(JQ 규칙 절), 두 표의 자기 줄, 해당 시험 |
 | 7f | 결정 7의 공통 비동기 경로(시작 멱등 성질, 결과 이벤트와 시도 확인, 복구·재평가 시각)와 START_WORKFLOW | 비동기 시작·결과 버림·복구 재시작 시험(두 백엔드), `StartWorkflowTest` 사례, 픽스처 재생 | 7a | `lib/archon/runtime/step/{async,event,effect,recover,postpone,start_workflow}.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/effects.ex`, `lib/archon/runtime/workflow_server.ex`, `lib/archon/decider/mapper/start_workflow.ex`, 두 표의 자기 줄, 해당 시험 |
-| 7g | 결정 7의 HTTP(진행 중 집합, `evict_after` 예외, 결과 전달 API) | stub 대상 시험(성공·4xx·5xx·시간 초과·body 상한·동시 상한·진행 중 재시작 안 함·프로세스 교체 뒤 결과·`TIMED_OUT`), `HttpTaskTest` 사례, 픽스처 재생 | 7e, 7f | `mix.exs`·`mix.lock`(Finch), `lib/archon/runtime/http_task.ex`, `lib/archon/runtime/step/http.ex`, `lib/archon/runtime/step/{async,event,recover,postpone}.ex`(HTTP 분기), `lib/archon/runtime/workflow_server.ex`, `lib/archon/application.ex`, `config/*.exs`, `lib/archon/decider/mapper/http.ex`, `lib/archon/domain/task_type_constraint.ex`(HTTP 규칙 절), 두 표의 자기 줄, 해당 시험 |
+| 7g | 결정 7의 HTTP(진행 중 집합, `evict_after` 예외, 결과 전달 API) | stub 대상 시험(성공·4xx·5xx·시간 초과·body 상한·동시 상한·진행 중 재시작 안 함·프로세스 교체 뒤 결과·`TIMED_OUT`), `HttpTaskTest` 사례, 픽스처 재생 | 7e, 7f | `mix.exs`·`mix.lock`(Finch, 7g가 Mint로 바꿈), `lib/archon/runtime/http_task.ex`, `lib/archon/runtime/step/http.ex`, `lib/archon/runtime/step/{async,event,recover,postpone}.ex`(HTTP 분기), `lib/archon/runtime/workflow_server.ex`, `lib/archon/application.ex`, `config/*.exs`, `lib/archon/decider/mapper/http.ex`, `lib/archon/domain/task_type_constraint.ex`(HTTP 규칙 절), 두 표의 자기 줄, 해당 시험 |
 | 7h | 통합: `types:` 건너뛰기 제거와 전체 재생(두 백엔드), 빠진 픽스처, README 호환성 절(지원 타입 표, 의도적 차이, HTTP SSRF 경고), `TaskTypeConstraint` moduledoc, ADR 0003 결정 4 비고, 이 ADR `승인` | `mix test` 전부(두 백엔드), CI | 7b~7g | `test/support/archon_web/contract_case.ex`, `test/archon_web/contract_case_test.exs`, `README.md`, `docs/adr/{0003,0026,README}.md`, 빠진 픽스처가 있으면 7a의 픽스처 파일들 |
 
 - **병렬로 진행할 수 있는 묶음.**
@@ -693,9 +772,19 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
   `TIMED_OUT`이다. archon은 태스크로 정해지는 ID로 멱등 시작하고 복구가 바로 다시 시작한다. 검증 위반 여럿의 순서는 경로 순이다.
 - **HTTP 응답 body 상한**(결정 7): 10 MiB를 넘으면 `FAILED`. upstream은 다 읽은 뒤 출력 크기 한도(외부 저장소 임계값)로 다룬다.
 - **HTTP 응답 헤더 이름**(결정 7): 소문자다(Mint). upstream은 서버가 보낸 대소문자다.
-- **HTTP 전송 오류 문구**(결정 7): 연결 거부·시간 초과는 Spring 메시지의 앞부분만 맞추고 원인 문구는 archon 문구다. 4xx·5xx의
+- **HTTP 전송 오류 문구**(결정 7): 연결 거부·시간 초과는 Spring 메시지의 앞부분만 맞추고 원인 문구는 archon 문구다(연결 거부는 캡처
+  문구와 같게 둔다). 4xx·5xx의
   메시지는 맞춘다.
-- **HTTP 요청의 전체 시간 상한과 취소**(결정 7): 쓰이지 않는 요청을 끊고 요청마다 전체 시간 상한을 둔다. upstream은 읽기 시간 상한만 있다. 값과 방법은 7g가 결정 7에 적는다.
+- **HTTP 요청의 전체 시간 상한과 취소**(결정 7): 쓰이지 않는 요청을 끊고 요청마다 전체 시간 상한(60초)을 둔다. upstream은 읽기 시간 상한만 있다. 방법은 결정 7 끝 "조각 7g에서
+  정한 것".
+- **HTTP 응답 body의 JSON 판정**(결정 7, 조각 7g): JSON 값 뒤에 다른 글자가 있으면(`42 abc`) 원문 글자다. upstream Jackson
+  `readTree`는 첫 값만 읽는다(`42.0`). 수 길이 제약은 자릿수 1000으로 재고, Jackson이 입력 끝에 닿은 수에만 한 자리 더 허용하는
+  버퍼 경계 차이는 따르지 않는다. double 범위를 넘는 수(`1e999`, 400자리 정수)는 원문 글자다(Jackson은 `Infinity`).
+- **HTTP charset**(결정 7, 조각 7g): 응답 body는 ISO-8859-1과 UTF-8만 읽고 요청 문자열 body도 그 둘로만 쓴다. 다른 charset
+  (windows-1252, UTF-16, `ISO8859_1` 같은 별칭 등)을 밝히면 UTF-8로 읽고 쓴다. upstream은 JVM이 아는 charset이면 그것으로 읽고 쓰며,
+  모르는 charset을 밝힌 `contentType`은 보내기 전에 미디어 타입 오류로 실패한다(archon은 charset 이름을 검사하지 않는다).
+- **HTTP 4xx·5xx 상태 문구와 URI**(결정 7, 조각 7g): 상태 문구는 서버가 보낸 것이 아니라 Spring 표의 것이고, URI 템플릿 확장·인코딩을
+  하지 않는다.
 - **HTTP 빈도 한도**(결정 7): `rateLimitPerFrequency`를 적용하지 않는다(worker 태스크와 같음).
 - **INLINE의 `python` 평가기**(결정 1): 없다(ADR 0015 결정 5).
 - **INLINE 평가기 풀 오류**(결정 5): upstream에 대응이 없다. 재시도 가능한 `FAILED`다.
@@ -742,7 +831,7 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
   주입 함수 예외를 metadata 읽기 조회 둘(`task_def_lookup`, `workflow_def_lookup`)과 jq 평가까지 넓힌다(결정 2).
 - [ADR 0014](0014-phase2-decider.md) 결정 7이 미룬 HTTP·JSON_JQ_TRANSFORM 타입 제약과 [ADR 0015](0015-script-evaluator.md)가 미룬
   INLINE·LAMBDA를 이 ADR이 다룬다. ADR 0025 "의도적으로 다른 점"의 rerun 동적 FORK 분기는 7c가 닫는다.
-- 새 의존성: Finch(와 Mint, NimblePool, NimbleOptions), vendoring한 jqlang·oniguruma. `mix deps.audit`와 `NOTICE`가 다룬다.
+- 새 의존성: Mint(조각 7g가 Finch 대신 고름, 결정 7 끝), vendoring한 jqlang·oniguruma. `mix deps.audit`와 `NOTICE`가 다룬다.
 - 아직 범위 밖: EVENT·KAFKA_PUBLISH·PULL_WORKFLOW_MESSAGES 타입, `python` 평가기, 비밀 값 치환, 빈도 한도, 입력·출력 스키마 강제
   (`enforceSchema`, `/api/schema`), task log, 검색·색인과 `bulk/search`, 이벤트 핸들러, 외부 payload 저장소, 큐 관리·admin, 스케줄러,
   인증(ADR 0024 결정 4), 여러 노드, `POST /api/workflow/test`, 배포 절차.
