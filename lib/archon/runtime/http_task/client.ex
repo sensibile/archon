@@ -203,7 +203,7 @@ defmodule Archon.Runtime.HttpTask.Client do
         receive_response(conn, ref, request, limits, ends, %{
           status: nil,
           headers: [],
-          body: [],
+          body: "",
           size: 0
         })
 
@@ -229,7 +229,7 @@ defmodule Archon.Runtime.HttpTask.Client do
              %{
                status: acc.status,
                headers: acc.headers,
-               body: IO.iodata_to_binary(Enum.reverse(acc.body))
+               body: acc.body
              }}
 
           {:more, acc} ->
@@ -269,7 +269,9 @@ defmodule Archon.Runtime.HttpTask.Client do
 
     if size > limits.max_body,
       do: body_error(limits),
-      else: collect(rest, ref, limits, %{acc | body: [data | acc.body], size: size})
+      # Appended to one binary (the runtime grows it in place), so many small chunks do not cost
+      # a list cell and a sub-binary each.
+      else: collect(rest, ref, limits, %{acc | body: acc.body <> data, size: size})
   end
 
   defp collect([{:done, ref} | _rest], ref, _limits, acc), do: {:done, acc}
@@ -321,9 +323,9 @@ defmodule Archon.Runtime.HttpTask.Client do
     try do
       # GZIPInputStream reads every member of a gzip body one after the other.
       :ok = :zlib.inflateInit(z, window, if(window == 31, do: :reset, else: :cut))
-      # An empty member gives no output; a step without output is allowed once per input byte, so
-      # the loop ends whatever the input.
-      inflate_loop(z, :zlib.safeInflate(z, body), [], 0, {max_body, byte_size(body) + 1})
+      # An empty member gives no output; a step without output is allowed once per member the
+      # input can hold (a gzip member is at least 18 bytes), so the loop ends whatever the input.
+      inflate_loop(z, :zlib.safeInflate(z, body), [], 0, {max_body, div(byte_size(body), 18) + 2})
     catch
       :error, _reason -> {:error, {:io, "corrupt"}}
     after

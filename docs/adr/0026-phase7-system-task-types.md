@@ -646,6 +646,9 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     있거나 `pollCount` > 0이면 마감(`updateTime` + `responseTimeoutSeconds`, 0이면 1시간) 전에는 어떤 패스에도 넣지 않는다. `asyncComplete`로
     `IN_PROGRESS`가 된 HTTP도 넣지 않는다(upstream은 그 메시지를 큐에서 지운다. 워커 갱신이 끝낸다). `Postpone.wake_at`은 시작한 HTTP의
     마감을 재평가 후보에 더하고, 시작한 HTTP는 `startDelay`가 아니라 그 마감에 평가 대상이 된다.
+  - HTTP 결과의 시도 확인은 `pollCount`와 그 시도의 `startTime`이다(효과 요청의 `started_at`, 결과 이벤트
+    `{:http_completed, task_id, poll_count, started_at, result}`). rerun이 `pollCount`를 0으로 돌려 같은 번호가 다시 나와도, 전달을
+    재시도하던 옛 결과는 `startTime`이 달라 버려진다.
   - rerun의 `finalizeRerun`이 다른 참조의 끝난 HTTP를 다시 `SCHEDULED`로 둘 때 `pollCount`를 0으로 돌린다. 그대로 두면 위
     거르기가 시작한 태스크로 보고 다시 보내지 않아 마감에 `TIMED_OUT`이 된다. upstream은 `pollCount`를 두고 실행기가 그것으로
     시작 여부를 가리지 않는다(의도적 차이: 이 경우 보이는 `pollCount`만 다르다). 태스크 자체를 rerun하는 경로는 이미 0으로 둔다.
@@ -653,7 +656,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   - 입력 변환(upstream `objectMapper.convertValue(..., Input.class)`, `try` 밖): 문자열 필드는 JSON 스칼라를 글자로 받고, 정수 필드는
     정수·잘린 실수·10진 문자열을 받는다. 그 밖의 값(객체가 아닌 요청, 컨테이너인 `uri`, 문자열이 아닌 `headers`, 범위 밖 수)은 요청
     없이 `SCHEDULED`로 남아(`workerId`·`pollCount`는 저장) 마감에 `TIMED_OUT`이다. 보내기 전 upstream이 던지는 것(`contentType`·`accept`의
-    미디어 타입 오류, 와일드카드 `contentType`, JSON이 아닌 미디어 타입에 문자열이 아닌 body, `headers`가 `null`, 음수 시간 상한)은 그 예외 문구로 `FAILED`다.
+    미디어 타입 오류(type·subtype의 토큰 문자 검사 포함, 매개변수는 검사하지 않음), 와일드카드 `contentType`, JSON이 아닌 미디어 타입에 문자열이 아닌 body, `headers`가 `null`, 음수 시간 상한)은 그 예외 문구로 `FAILED`다.
     문자열 body는 `contentType`의 charset(없으면 JSON은 UTF-8, 그 밖은 ISO-8859-1, 못 쓰는 글자는 `?`)으로, 그 밖에는 JSON으로 보낸다.
   - 응답 문구는 Spring 6.2.19에서 확인했다(`DefaultResponseErrorHandler#getErrorMessage`, `HttpStatus` 표, `MimeTypeUtils`): 4xx·5xx는
     `<코드> <Spring 표의 문구> on <METHOD> request for "<uri의 ? 앞>": "<body>"`이고 body의 줄바꿈은 `<EOL>`, 제어 문자는 `?`다.

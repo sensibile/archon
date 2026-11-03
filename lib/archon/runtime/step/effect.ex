@@ -21,7 +21,7 @@ defmodule Archon.Runtime.Step.Effect do
       to the step as `{:workflow_started, task_id, result}`.
     * `{:http_request, task_id, poll_count, request}` - hands the request of an `HTTP` task's
       attempt `poll_count` to `Archon.Runtime.HttpTask` (ADR 0026, decision 7). The result comes
-      back later, as the event `{:http_completed, task_id, poll_count, result}`.
+      back later, as the event `{:http_completed, task_id, poll_count, started_at, result}`.
     * `{:terminate_sub_workflow, workflow_id, reason}` - sends `{:cancel_by_parent, reason, nil}`
       to a child. A child that does not exist counts as done (ADR 0018, decision 5). In `post`
       it is `{:terminate_sub_workflow, workflow_id, reason, parent_end_count}`, with the parent's

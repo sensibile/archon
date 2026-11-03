@@ -152,10 +152,11 @@ defmodule Archon.Runtime.Step do
     end
   end
 
-  # ADR 0026, decision 7: the result of the attempt that sent the request, else dropped.
-  defp handle({:http_completed, task_id, poll_count, result}, %State{wf: wf} = state) do
+  # ADR 0026, decision 7: the result of the attempt that sent the request, else dropped. Its
+  # startTime tells it from an attempt with the same pollCount after a rerun reset the count.
+  defp handle({:http_completed, task_id, poll_count, started_at, result}, %State{wf: wf} = state) do
     with false <- Workflow.terminal?(wf.status),
-         %Task{} = task <- Async.attempt(state, task_id, poll_count) do
+         %Task{start_time: ^started_at} = task <- Async.attempt(state, task_id, poll_count) do
       {:ok, started(state, Http.completed(state, task, result))}
     else
       _dropped -> {:ok, state}

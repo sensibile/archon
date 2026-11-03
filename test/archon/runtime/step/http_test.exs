@@ -76,6 +76,17 @@ defmodule Archon.Runtime.Step.HttpTest do
     {reply, stored, pre, post}
   end
 
+  # The result event of the attempt of the task in `workflow` (its pollCount and startTime).
+  defp http_completed(workflow, id, count, result) do
+    started_at =
+      case Enum.find(workflow.tasks, &(&1.task_id == id)) do
+        nil -> 0
+        task -> task.start_time
+      end
+
+    {:http_completed, id, count, started_at, result}
+  end
+
   defp requests(post),
     do: for({:http_request, id, count, request} <- post, do: {id, count, request})
 
@@ -163,6 +174,7 @@ defmodule Archon.Runtime.Step.HttpTest do
                body: nil,
                connect_timeout: 3000,
                read_timeout: 3000,
+               started_at: @now,
                deadline: @now + @hour
              }
     end
@@ -243,7 +255,15 @@ defmodule Archon.Runtime.Step.HttpTest do
               "org.springframework.http.InvalidMediaTypeException: Invalid mime type \"json\": does not contain '/'"} =
                Http.request(Map.put(base, "contentType", "json"))
 
-      for type <- ["*/*", "*/*; q=1"] do
+      # MimeType#checkToken; "*" is read as "*/*".
+      assert {:failed, _reason,
+              ~s(org.springframework.http.InvalidMediaTypeException: Invalid mime type "text/pla in": Invalid token character ' ' in token "pla in")} =
+               Http.request(Map.put(base, "contentType", "text/pla in"))
+
+      assert {:failed, _reason, "org.springframework.http.InvalidMediaTypeException: " <> _} =
+               Http.request(Map.put(base, "accept", ["a/b/c"]))
+
+      for type <- ["*/*", "*/*; q=1", "*"] do
         assert {:failed, _reason,
                 "java.lang.IllegalArgumentException: Content-Type cannot contain wildcard type '*'"} =
                  Http.request(Map.put(base, "contentType", type))
@@ -317,7 +337,10 @@ defmodule Archon.Runtime.Step.HttpTest do
     defp complete(result, fields \\ []) do
       {stored, [_ | _] = post} = start(%{"request" => @get}, [http_task(fields)])
       [{id, count, _request}] = requests(post)
-      {:ok, done, _pre, _post} = run(stored, {:http_completed, id, count, result}, @now + 100)
+
+      {:ok, done, _pre, _post} =
+        run(stored, http_completed(stored, id, count, result), @now + 100)
+
       {http(done), done}
     end
 
@@ -485,7 +508,7 @@ defmodule Archon.Runtime.Step.HttpTest do
       request = %{"uri" => "http://target/q?secret=1", "method" => "GET"}
       {stored, post} = start(%{"request" => request})
       [{id, 1, _request}] = requests(post)
-      {:ok, done, _pre, _post} = run(stored, {:http_completed, id, 1, ok(401, "")}, @now + 1)
+      {:ok, done, _pre, _post} = run(stored, http_completed(stored, id, 1, ok(401, "")), @now + 1)
       assert http(done).output_data["response"] =~ ~s(on GET request for "http://target/q": )
     end
 
@@ -554,7 +577,7 @@ defmodule Archon.Runtime.Step.HttpTest do
       assert %Task{status: :timed_out} = http(timed_out)
 
       {:ok, after_result, _pre, _post} =
-        run(timed_out, {:http_completed, id, 1, ok(200, "{}")}, @now + @hour + 1)
+        run(timed_out, http_completed(timed_out, id, 1, ok(200, "{}")), @now + @hour + 1)
 
       assert after_result == timed_out
     end
@@ -563,11 +586,13 @@ defmodule Archon.Runtime.Step.HttpTest do
       {stored, post} = start(%{"request" => @get})
       [{id, 1, _request}] = requests(post)
 
-      {:ok, same, _pre, _post} = run(stored, {:http_completed, id, 2, ok(200, "{}")}, @now + 1)
+      {:ok, same, _pre, _post} =
+        run(stored, http_completed(stored, id, 2, ok(200, "{}")), @now + 1)
+
       assert same == stored
 
       {:ok, same, _pre, _post} =
-        run(stored, {:http_completed, "other", 1, ok(200, "{}")}, @now + 1)
+        run(stored, http_completed(stored, "other", 1, ok(200, "{}")), @now + 1)
 
       assert same == stored
     end
@@ -579,7 +604,7 @@ defmodule Archon.Runtime.Step.HttpTest do
       assert %Task{status: :canceled} = http(terminated)
 
       {:ok, same, _pre, _post} =
-        run(terminated, {:http_completed, id, 1, ok(200, "{}")}, @now + 2)
+        run(terminated, http_completed(terminated, id, 1, ok(200, "{}")), @now + 2)
 
       assert same == terminated
     end
@@ -607,7 +632,7 @@ defmodule Archon.Runtime.Step.HttpTest do
       assert %Task{status: :scheduled, poll_count: 1} = http(waited)
 
       {:ok, done, _pre, _post} =
-        run(waited, {:http_completed, id, 1, ok(200, "{}")}, @now + 6_500)
+        run(waited, http_completed(waited, id, 1, ok(200, "{}")), @now + 6_500)
 
       assert %Task{status: :in_progress} = http(done)
 
@@ -639,7 +664,10 @@ defmodule Archon.Runtime.Step.HttpTest do
 
       {stored, post} = start(%{"request" => @get}, [fork, join])
       [{id, 1, _request}] = requests(post)
-      {:ok, failed, _pre, _post} = run(stored, {:http_completed, id, 1, ok(500, "")}, @now + 1)
+
+      {:ok, failed, _pre, _post} =
+        run(stored, http_completed(stored, id, 1, ok(500, "")), @now + 1)
+
       assert failed.status == :failed
 
       simple = Enum.find(failed.tasks, &(&1.reference_task_name == "simple_ref"))
@@ -656,6 +684,11 @@ defmodule Archon.Runtime.Step.HttpTest do
       assert rerun_wf.status == :running
       assert [{^id, 1, _request}] = requests(post)
       assert %Task{status: :scheduled, poll_count: 1} = http(rerun_wf)
+
+      # A late delivery of the first attempt's result (its pollCount was 1 too) is dropped.
+      stale = {:http_completed, id, 1, http(stored).start_time, ok(200, "{}")}
+      {:ok, same, _pre, _post} = run(rerun_wf, stale, @now + 3)
+      assert same == rerun_wf
     end
 
     test "the concurrent execution limit comes before the deadline, and keeps the attempt" do
@@ -671,7 +704,7 @@ defmodule Archon.Runtime.Step.HttpTest do
       assert %Task{status: :scheduled, poll_count: 1} = http(waited)
 
       {:ok, done, _pre, _post} =
-        run(waited, {:http_completed, id, 1, ok(200, "{}")}, @now + @hour + 1)
+        run(waited, http_completed(waited, id, 1, ok(200, "{}")), @now + @hour + 1)
 
       assert %Task{status: :completed} = http(done)
     end

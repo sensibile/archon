@@ -8,8 +8,9 @@ defmodule Archon.Runtime.HttpTask do
   worker threads. A workflow process hands it a request with `request/4` after the commit that
   started the task; the executor sends it in a supervised task
   (`Task.Supervisor.async_nolink`, `Archon.Runtime.HttpTask.Client`) and delivers the result by
-  workflow ID, not to the process that asked, as `{:http_completed, task_id, poll_count, result}`
-  (`Archon.Runtime.WorkflowServer.http_completed/4`): a process that ended abnormally since then is
+  workflow ID, not to the process that asked, as
+  `{:http_completed, task_id, poll_count, started_at, result}`
+  (`Archon.Runtime.WorkflowServer.http_completed/5`): a process that ended abnormally since then is
   replaced by the one the delivery activates, which takes the result if the task is still the
   same attempt.
 
@@ -26,7 +27,8 @@ defmodule Archon.Runtime.HttpTask do
       the task's response timeout).
     * `max_response_bytes` - the largest response body, read or decompressed: 10 MiB.
     * `deliver` - `{module, function, args}` called with `(workflow_id, task_id, poll_count,
-      result)`, `Archon.Runtime.WorkflowServer.http_completed/4` by default (for tests).
+      started_at, result)`, `Archon.Runtime.WorkflowServer.http_completed/5` by default (for
+      tests).
     * `client` - the module whose `run/2` sends a request, `Archon.Runtime.HttpTask.Client` by
       default (for tests).
 
@@ -225,7 +227,7 @@ defmodule Archon.Runtime.HttpTask do
     {module, function, args} =
       setting(:deliver, {Archon.Runtime.WorkflowServer, :http_completed, []})
 
-    args = args ++ [workflow_id, task_id, poll_count, result]
+    args = args ++ [workflow_id, task_id, poll_count, request.started_at, result]
 
     Task.Supervisor.start_child(@deliveries, fn ->
       deliver_until(module, function, args, request.deadline, @retry_ms)

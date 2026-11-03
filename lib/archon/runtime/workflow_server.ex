@@ -90,7 +90,7 @@ defmodule Archon.Runtime.WorkflowServer do
   An `{:http_request, task_id, poll_count, request}` effect hands the request to
   `Archon.Runtime.HttpTask` after the commit, and the process keeps the attempt (`task_id` to
   `poll_count`) as in flight; `Step.Env.http_in_flight` gives the step their IDs. The result comes
-  back through `http_completed/4`, by workflow ID, so a process started since then takes it.
+  back through `http_completed/5`, by workflow ID, so a process started since then takes it.
   After each commit, a request whose task is no longer `SCHEDULED` with that `pollCount` (it
   ended, was removed or started again) is cancelled, which frees its place in the executor; a
   process that ends normally (its workflow ended or was removed) cancels the ones left. One that
@@ -366,10 +366,10 @@ defmodule Archon.Runtime.WorkflowServer do
   The result of the request of an `HTTP` task's attempt `poll_count`, from
   `Archon.Runtime.HttpTask` (ADR 0026, decision 7).
   """
-  @spec http_completed(String.t(), String.t(), non_neg_integer(), Step.Http.result()) ::
+  @spec http_completed(String.t(), String.t(), non_neg_integer(), integer(), Step.Http.result()) ::
           :ok | {:error, term()}
-  def http_completed(id, task_id, poll_count, result),
-    do: call(id, :existing, {:http_completed, task_id, poll_count, result})
+  def http_completed(id, task_id, poll_count, started_at, result),
+    do: call(id, :existing, {:http_completed, task_id, poll_count, started_at, result})
 
   defp call(id, mode, request, retry? \\ true) do
     case activate(id, mode) do
@@ -488,7 +488,11 @@ defmodule Archon.Runtime.WorkflowServer do
 
   # The request of this attempt is no longer in flight once its result is taken; a result the
   # step failed on is delivered again (Archon.Runtime.HttpTask), so the request stays in flight.
-  def handle_call({:http_completed, task_id, poll_count, _result} = event, _from, state) do
+  def handle_call(
+        {:http_completed, task_id, poll_count, _started_at, _result} = event,
+        _from,
+        state
+      ) do
     {reply, state} = handle_event(event, state)
 
     state =

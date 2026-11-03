@@ -97,6 +97,11 @@ defmodule Archon.Runtime.HttpTaskTest do
       |> send_resp(200, member <> member)
     end
 
+    defp answer(conn, ["many_empty"]) do
+      body = String.duplicate(:zlib.gzip(""), 1000) <> :zlib.gzip("hi")
+      conn |> put_resp_header("content-encoding", "gzip") |> send_resp(200, body)
+    end
+
     defp answer(conn, ["empty_first"]) do
       conn
       |> put_resp_header("content-encoding", "gzip")
@@ -118,6 +123,15 @@ defmodule Archon.Runtime.HttpTaskTest do
       conn
       |> put_resp_header("content-encoding", "deflate")
       |> send_resp(200, :zlib.compress("hello world"))
+    end
+
+    defp answer(conn, ["bytes", count]) do
+      conn = send_chunked(conn, 200)
+
+      Enum.reduce(1..String.to_integer(count), conn, fn _n, conn ->
+        {:ok, conn} = chunk(conn, "x")
+        conn
+      end)
     end
 
     defp answer(conn, ["bomb"]) do
@@ -198,6 +212,7 @@ defmodule Archon.Runtime.HttpTaskTest do
         body: nil,
         connect_timeout: 3000,
         read_timeout: 3000,
+        started_at: Runtime.now(),
         deadline: Runtime.now() + 3_600_000
       },
       Map.new(fields)
@@ -224,6 +239,11 @@ defmodule Archon.Runtime.HttpTaskTest do
       assert headers["accept-encoding"] == "gzip, x-gzip, deflate"
     end
 
+    test "a body in many small chunks is one binary", %{url: url} do
+      assert {:ok, %{body: body}} = Client.run(request(url <> "/bytes/2000"), @limits)
+      assert body == String.duplicate("x", 2000)
+    end
+
     test "decompresses a gzip body and drops its coding headers", %{url: url} do
       assert {:ok, %{body: "unzipped body", headers: headers}} =
                Client.run(request(url <> "/gzip"), @limits)
@@ -235,6 +255,7 @@ defmodule Archon.Runtime.HttpTaskTest do
     test "decompresses every member of a gzip body", %{url: url} do
       assert {:ok, %{body: "hello world"}} = Client.run(request(url <> "/members"), @limits)
       assert {:ok, %{body: "hello"}} = Client.run(request(url <> "/empty_first"), @limits)
+      assert {:ok, %{body: "hi"}} = Client.run(request(url <> "/many_empty"), @limits)
 
       # A body cut before the end of its stream is corrupt, as GZIPInputStream's EOFException.
       for path <- ["/cut/gzip", "/cut/trailer", "/cut/deflate"] do
@@ -529,20 +550,20 @@ defmodule Archon.Runtime.HttpTaskTest do
   end
 
   @doc false
-  def forward(test, workflow_id, task_id, poll_count, result),
+  def forward(test, workflow_id, task_id, poll_count, _started_at, result),
     do: send(test, {:delivered, workflow_id, task_id, poll_count, result})
 
   @doc false
   # Fails twice with what a busy process answers, then takes the result; "gone" is not found.
-  def flaky(test, _attempts, "gone", _task_id, _poll_count, _result) do
+  def flaky(test, _attempts, "gone", _task_id, _poll_count, _started_at, _result) do
     send(test, {:not_found, "gone"})
     {:error, :not_found}
   end
 
-  def flaky(test, attempts, workflow_id, task_id, poll_count, result) do
+  def flaky(test, attempts, workflow_id, task_id, poll_count, started_at, result) do
     case Agent.get_and_update(attempts, &{&1 + 1, &1 + 1}) do
       n when n < 3 -> {:error, {:exit, :timeout}}
-      _n -> forward(test, workflow_id, task_id, poll_count, result)
+      _n -> forward(test, workflow_id, task_id, poll_count, started_at, result)
     end
   end
 

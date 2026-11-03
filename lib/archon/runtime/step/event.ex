@@ -22,9 +22,9 @@ defmodule Archon.Runtime.Step.Event do
       `{:ok, child}`, `{:error, :transient, message}` or `{:error, message}`.
     * `{:workflow_started, task_id, result}` - the result of a `:start_workflow` effect (a
       `START_WORKFLOW` task), as `:sub_workflow_started`'s.
-    * `{:http_completed, task_id, poll_count, result}` - the result of an `:http_request` effect
-      (an `HTTP` task, `t:Archon.Runtime.Step.Http.result/0`), delivered by
-      `Archon.Runtime.HttpTask` for the attempt `poll_count`.
+    * `{:http_completed, task_id, poll_count, started_at, result}` - the result of an
+      `:http_request` effect (an `HTTP` task, `t:Archon.Runtime.Step.Http.result/0`), delivered by
+      `Archon.Runtime.HttpTask` for the attempt with that `pollCount` and `startTime`.
     * `{:failure_workflow_started, {:error, message}}` - the failure workflow did not start.
     * `{:terminate, reason}` - a termination request (`DELETE /api/workflow/{id}`).
     * `{:cancel_by_parent, reason, parent_end_count}` - the parent workflow ended. A child that
@@ -64,7 +64,8 @@ defmodule Archon.Runtime.Step.Event do
           | {:child_changed, String.t(), Workflow.t()}
           | {:sub_workflow_started, String.t(), sub_workflow_result()}
           | {:workflow_started, String.t(), sub_workflow_result()}
-          | {:http_completed, String.t(), non_neg_integer(), Archon.Runtime.Step.Http.result()}
+          | {:http_completed, String.t(), non_neg_integer(), integer(),
+             Archon.Runtime.Step.Http.result()}
           | {:failure_workflow_started, {:error, String.t()}}
           | {:terminate, String.t() | nil}
           | {:cancel_by_parent, String.t(), non_neg_integer() | nil}

@@ -119,8 +119,9 @@ defmodule Archon.Runtime.Step.Http do
 
   @typedoc """
   A request for `Archon.Runtime.HttpTask`: what upstream's `RestTemplate` sends, with the
-  timeouts in milliseconds (`0` waits without a limit) and `deadline`, the epoch time the task's
-  response timeout ends.
+  timeouts in milliseconds (`0` waits without a limit), `started_at`, the task's `startTime` of
+  the attempt (which with its `pollCount` names the attempt, ADR 0026 decision 7), and
+  `deadline`, the epoch time the task's response timeout ends.
   """
   @type request :: %{
           method: String.t(),
@@ -129,6 +130,7 @@ defmodule Archon.Runtime.Step.Http do
           body: binary() | nil,
           connect_timeout: non_neg_integer(),
           read_timeout: non_neg_integer(),
+          started_at: integer(),
           deadline: integer()
         }
 
@@ -150,7 +152,9 @@ defmodule Archon.Runtime.Step.Http do
 
     case request(task.input_data) do
       {:ok, request} ->
-        request = Map.put(request, :deadline, now + response_timeout(task) * 1000)
+        request =
+          Map.merge(request, %{started_at: now, deadline: now + response_timeout(task) * 1000})
+
         effect = {:http_request, task.task_id, task.poll_count, request}
         {:started, state |> State.save_task(task) |> State.post(effect)}
 
@@ -550,8 +554,7 @@ defmodule Archon.Runtime.Step.Http do
 
   # HttpHeaders#setContentType refuses a wildcard type or subtype.
   defp concrete_content_type(type) do
-    [main, sub] =
-      type |> String.split(";", parts: 2) |> hd() |> String.trim() |> String.split("/", parts: 2)
+    [main, sub] = type |> mime_main() |> String.split("/", parts: 2)
 
     cond do
       main == "*" ->
@@ -567,8 +570,16 @@ defmodule Archon.Runtime.Step.Http do
     end
   end
 
+  # MimeTypeUtils#parseMimeType: the type before its parameters, "*" read as "*/*".
+  defp mime_main(type) do
+    case type |> String.split(";", parts: 2) |> hd() |> String.trim() do
+      "*" -> "*/*"
+      main -> main
+    end
+  end
+
   defp mime_error(type) do
-    main = type |> String.split(";", parts: 2) |> hd() |> String.trim()
+    main = mime_main(type)
 
     cond do
       not String.contains?(main, "/") ->
@@ -581,8 +592,18 @@ defmodule Archon.Runtime.Step.Http do
         "wildcard type is legal only in '*/*' (all mime types)"
 
       true ->
-        nil
+        main |> String.split("/", parts: 2) |> Enum.find_value(&token_error/1)
     end
+  end
+
+  # MimeType#checkToken: RFC 2616 token characters (no controls, separators or non-ASCII).
+  @separators ~c"()<>@,;:\\\"/[]?={} \t"
+
+  defp token_error(token) do
+    Enum.find_value(String.to_charlist(token), fn char ->
+      if char < 32 or char >= 127 or char in @separators,
+        do: ~s(Invalid token character '#{<<char::utf8>>}' in token "#{token}")
+    end)
   end
 
   # Content-Type, Accept, then each header with a value (as its text).
