@@ -389,8 +389,23 @@ defmodule Archon.Runtime.Step.HttpTest do
       {task, _workflow} = complete(ok(200, quoted))
       assert task.output_data["response"]["body"] == %{"s" => String.duplicate("[", 2000)}
 
-      {task, _workflow} = complete(ok(200, "1." <> String.duplicate("1", 1500)))
+      # A float is limited by its length (Jackson 2.18.8 measured: one more character at the top
+      # level than inside an array).
+      {task, _workflow} = complete(ok(200, "1." <> String.duplicate("1", 1000)))
       assert is_float(task.output_data["response"]["body"])
+
+      for text <- [
+            "1." <> String.duplicate("1", 1001),
+            "1.5e" <> String.duplicate("1", 999),
+            "[1." <> String.duplicate("1", 1000) <> "]"
+          ] do
+        {task, _workflow} = complete(ok(200, text))
+        assert task.output_data["response"]["body"] == text
+      end
+
+      {task, _workflow} = complete(ok(200, "[-1." <> String.duplicate("1", 999) <> "]"))
+      assert [value] = task.output_data["response"]["body"]
+      assert is_float(value)
     end
 
     test "a text body without a charset is read as ISO-8859-1, JSON as UTF-8" do
@@ -495,6 +510,16 @@ defmodule Archon.Runtime.Step.HttpTest do
       {:ok, timed_out, _pre, _post} = run(started, :wake, at + @hour)
       assert %Task{status: :timed_out} = http(timed_out)
       assert Postpone.wake_at(started, env(at + 1)) <= at + @hour
+    end
+
+    test "a started task with a startDelay over is not woken every second" do
+      {stored, _post} = start(%{"request" => 42}, [http_task(start_delay: 60)])
+      {:ok, started, _pre, _post} = run(stored, :wake, @now + 60_000)
+      assert %Task{status: :scheduled, poll_count: 1, update_time: at} = http(started)
+
+      # Past the delay, the next evaluation is the workflow's offset, not a second away.
+      now = at + 120_000
+      assert Postpone.wake_at(started, env(now)) == now + 30_000
     end
 
     test "lost with its process (not in flight, its pollCount counted) waits for its deadline too" do

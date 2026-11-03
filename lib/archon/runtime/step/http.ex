@@ -286,6 +286,7 @@ defmodule Archon.Runtime.Step.Http do
   # response within the body limit cannot make the decode build an unbounded structure.
   @max_depth 1000
   @max_digits 1000
+  @max_float_length 1001
 
   defp decode_json(text) do
     if within_constraints?(text, 0, false, 0),
@@ -322,18 +323,29 @@ defmodule Archon.Runtime.Step.Http do
   defp within_constraints?(<<digit, rest::binary>>, depth, false, digits) when digit in ?0..?9,
     do: within_constraints?(rest, depth, false, digits + 1)
 
-  # A fraction or an exponent: the digits after it are not the integer's.
+  # A fraction or an exponent: the number is a float, whose length (its digits and marks, not its
+  # signs) is limited too, measured as Jackson 2.18.8 does (one more character for a value at the
+  # top level).
   defp within_constraints?(<<mark, rest::binary>>, depth, false, digits)
        when mark in [?., ?e, ?E] and digits > 0,
-       do: skip_number(rest, depth)
+       do: float_within?(rest, depth, digits + 1)
 
   defp within_constraints?(<<_char, rest::binary>>, depth, false, _digits),
     do: within_constraints?(rest, depth, false, 0)
 
-  defp skip_number(<<char, rest::binary>>, depth) when char in ?0..?9 or char in [?+, ?-, ?e, ?E],
-    do: skip_number(rest, depth)
+  defp float_within?(_rest, 0, length) when length > @max_float_length + 1, do: false
 
-  defp skip_number(rest, depth), do: within_constraints?(rest, depth, false, 0)
+  defp float_within?(_rest, depth, length) when depth > 0 and length > @max_float_length,
+    do: false
+
+  defp float_within?(<<char, rest::binary>>, depth, length)
+       when char in ?0..?9 or char in [?., ?e, ?E],
+       do: float_within?(rest, depth, length + 1)
+
+  defp float_within?(<<sign, rest::binary>>, depth, length) when sign in [?+, ?-],
+    do: float_within?(rest, depth, length)
+
+  defp float_within?(rest, depth, _length), do: within_constraints?(rest, depth, false, 0)
 
   # HttpHeaders: each name with its values (the names as Mint gives them, lower case).
   defp headers(headers) do

@@ -102,6 +102,7 @@ defmodule Archon.Runtime.Step.Postpone do
           task.status == :scheduled,
           Schedule.async?(env, task),
           Schedule.delay_ms(task) > 0,
+          not started_http?(task),
           do: Async.due_time(task) - now
 
     # ADR 0026, decision 7: a started HTTP task is evaluated at the end of its response timeout.
@@ -112,6 +113,12 @@ defmodule Archon.Runtime.Step.Postpone do
 
     now + max(earliest(delays ++ deadlines, compute(workflow, env)), 1000)
   end
+
+  # A started HTTP task waits for its deadline, not its delay (Archon.Runtime.Step.Async).
+  defp started_http?(%Task{task_type: "HTTP", status: :scheduled, poll_count: count}),
+    do: count > 0
+
+  defp started_http?(%Task{}), do: false
 
   defp earliest([], ms), do: ms
   defp earliest([delay | delays], ms) when is_integer(delay), do: earliest(delays, min(delay, ms))

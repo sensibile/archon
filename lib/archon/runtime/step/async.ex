@@ -101,8 +101,6 @@ defmodule Archon.Runtime.Step.Async do
     if Task.loop_over_task?(task), do: Enum.map(refs, &"#{&1}__#{task.iteration}"), else: refs
   end
 
-  # Due on a :wake: a SCHEDULED task once its delay is over, a running JOIN or WAIT, and a running
-  # SUB_WORKFLOW whose child was read.
   # Due on a :wake: a task whose delay is over (a running SUB_WORKFLOW also needs its child to
   # have been read).
   defp due?(%State{env: env}, %Task{task_type: "SUB_WORKFLOW", status: :in_progress} = task),
