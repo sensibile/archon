@@ -320,7 +320,23 @@ defmodule Archon.Domain.Task do
   @doc false
   @spec truncate_reason(String.t() | nil) :: String.t() | nil
   def truncate_reason(nil), do: nil
-  def truncate_reason(reason), do: String.slice(reason, 0, @reason_limit)
+  # StringUtils.substring counts UTF-16 code units; a character that would be cut in half is left
+  # out (Java keeps half of it, which UTF-8 cannot hold).
+  def truncate_reason(reason) do
+    {kept, _units} =
+      reason
+      |> String.slice(0, @reason_limit)
+      |> String.to_charlist()
+      |> Enum.reduce_while({[], 0}, fn char, {kept, units} ->
+        width = if char > 0xFFFF, do: 2, else: 1
+
+        if units + width > @reason_limit,
+          do: {:halt, {kept, units}},
+          else: {:cont, {[char | kept], units + width}}
+      end)
+
+    kept |> Enum.reverse() |> List.to_string()
+  end
 
   defp blank?(nil), do: true
   defp blank?(value), do: String.trim(value) == ""

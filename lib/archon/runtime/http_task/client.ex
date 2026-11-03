@@ -50,8 +50,15 @@ defmodule Archon.Runtime.HttpTask.Client do
   defp follow(request, limits, ends, visited, hops) do
     with {:ok, response} <- exchange(request, limits, ends) do
       case redirect(request, response) do
-        nil -> decoded(response, limits)
-        {location, next} -> follow_to(next, location, limits, ends, visited, hops)
+        nil ->
+          decoded(response, limits)
+
+        # The bodies of the responses redirected from count toward the body limit too.
+        {location, next} ->
+          limits =
+            Map.update(limits, :read, byte_size(response.body), &(&1 + byte_size(response.body)))
+
+          follow_to(next, location, limits, ends, visited, hops)
       end
     end
   end
@@ -267,7 +274,7 @@ defmodule Archon.Runtime.HttpTask.Client do
   defp collect([{:data, ref, data} | rest], ref, limits, acc) do
     size = acc.size + byte_size(data)
 
-    if size > limits.max_body,
+    if size + Map.get(limits, :read, 0) > limits.max_body,
       do: body_error(limits),
       # Appended to one binary (the runtime grows it in place), so many small chunks do not cost
       # a list cell and a sub-binary each.

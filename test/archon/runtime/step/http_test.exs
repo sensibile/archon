@@ -497,6 +497,13 @@ defmodule Archon.Runtime.Step.HttpTest do
       assert task.output_data["response"] =~ ~s(: "a<EOL><EOL>b?c")
     end
 
+    test "the JSON reason is cut at 500 UTF-16 code units, as StringUtils.substring" do
+      emoji = String.duplicate("😀", 300)
+      assert String.length(Task.truncate_reason(emoji)) == 250
+      assert Task.truncate_reason("a" <> emoji) == "a" <> String.duplicate("😀", 249)
+      assert Task.truncate_reason(String.duplicate("é", 600)) == String.duplicate("é", 500)
+    end
+
     test "the reason is kept whole in the task and cut to 500 characters in its JSON" do
       {task, workflow} = complete(ok(400, String.duplicate("x", 1000)))
       assert String.length(task.reason_for_incompletion) > 1000

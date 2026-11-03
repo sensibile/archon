@@ -163,6 +163,17 @@ defmodule Archon.Runtime.HttpTaskTest do
       conn |> put_resp_header("location", "http://127.0.0.1:9/echo") |> send_resp(302, "")
     end
 
+    # Random bytes, so the target's compression does not shrink them below the limit.
+    defp answer(conn, ["fat_redirect"]) do
+      conn
+      |> put_resp_header("location", "/random/600")
+      |> send_resp(302, :crypto.strong_rand_bytes(600))
+    end
+
+    defp answer(conn, ["random", size]) do
+      send_resp(conn, 200, :crypto.strong_rand_bytes(String.to_integer(size)))
+    end
+
     defp answer(conn, ["loop"]) do
       conn |> put_resp_header("location", "/loop") |> send_resp(302, "")
     end
@@ -390,6 +401,15 @@ defmodule Archon.Runtime.HttpTaskTest do
       assert %{"method" => "GET", "headers" => headers} = Jason.decode!(body)
       refute Map.has_key?(headers, "authorization")
       refute Map.has_key?(headers, "content-type")
+    end
+
+    test "the bodies of redirect responses count toward the body limit", %{url: url} do
+      limits = %{@limits | max_body: 1000}
+      assert {:ok, %{body: body}} = Client.run(request(url <> "/random/600"), limits)
+      assert byte_size(body) == 600
+
+      assert {:error, {:io, "Response body is larger than 1000 bytes"}} =
+               Client.run(request(url <> "/fat_redirect"), limits)
     end
 
     test "a redirect to a location already visited is circular", %{url: url} do

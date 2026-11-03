@@ -637,7 +637,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     `evict_after`로 끝나지도 않는다).
   - **상한 값과 설정 키**(불변식 3, `config :archon, Archon.Runtime.HttpTask, ...`): `max_concurrency`(기본 스케줄러 수 × 2),
     `max_request_ms`(기본 60 000, 리다이렉트를 포함한 요청 하나의 전체 시간. 태스크 마감을 넘지 않는다), `max_response_bytes`(기본
-    10 MiB, 읽은 body와 푼 body 모두). 60초는 기본 `readTimeOut`(3초)의 스무 배로 느린 대상도 받되, 조금씩 보내는 대상이 자리
+    10 MiB, 읽은 body와 푼 body 모두, 리다이렉트한 응답의 body까지 합쳐). 60초는 기본 `readTimeOut`(3초)의 스무 배로 느린 대상도 받되, 조금씩 보내는 대상이 자리
     하나를 1분보다 오래 쥐지 못하는 값이다. 상한을 넘으면 I/O 오류로 `FAILED`다(`... request for "<uri>": Request did not complete within
     its total time limit`, `Response body is larger than <n> bytes`). 기다리는 요청은 꺼낼 때 마감이 지났으면 보내지 않는다. 클라이언트는 연결·보내기(`send_timeout`)·읽기를 모두 남은 전체
     시간 안으로 묶고, 일찍 끝낸 요청을 닫을 때는 보내지 못한 것을 기다리지 않는다(`linger` 0). 실행기는 전체 시간 상한 1초 뒤에도 끝나지 않은 요청을
@@ -662,7 +662,8 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     `<코드> <Spring 표의 문구> on <METHOD> request for "<uri의 ? 앞>": "<body>"`이고 body의 줄바꿈은 `<EOL>`, 제어 문자는 `?`다.
     **Spring은 긴 body를 줄이지 않는다**(7a 기록의 "Spring이 줄임"을 고침). `p7_http_long_400_get`에서 끝 따옴표가 없는 것은 태스크
     `reasonForIncompletion`의 500자 자르기다. 워크플로우의 `reasonForIncompletion`은 자르지 않은 태스크 이유를 인용하므로, archon도
-    태스크에 이유를 다 두고 `Task.to_json/2`(upstream `TaskModel#toTask`)에서 자른다. 3xx처럼 2xx·4xx·5xx가 아니면 body 없이
+    태스크에 이유를 다 두고 `Task.to_json/2`(upstream `TaskModel#toTask`)에서 자른다. 자르는 단위는 Java처럼 UTF-16 code unit이고,
+    반으로 잘릴 글자는 뺀다(`Task.truncate_reason/1`, 다른 경로에도 같게 적용). 3xx처럼 2xx·4xx·5xx가 아니면 body 없이
     `No response from the remote service`로 `FAILED`다. 2xx body는 `content-type`의 charset, 없으면 JSON은 UTF-8·그 밖은 ISO-8859-1로
     읽는다(`StringHttpMessageConverter`). JSON 판정은 Jackson 2.18 기본 `StreamReadConstraints`를 따라 중첩 1000을 넘거나
     1000자리를 넘는 정수, 정수·소수·지수 자릿수 합이 1000을 넘는 실수(정수부가 `0` 하나면 0으로 셈, `ParserBase#resetFloat`)가
