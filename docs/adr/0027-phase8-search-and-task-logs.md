@@ -100,10 +100,12 @@ archon에 이미 있는 것(`541865c` 기준):
   - 그래서 `Store.remove_workflow/1`이 archive 여부를 받도록 바뀐다(`remove_workflow/2`, `WorkflowServer`의 호출 자리 포함).
 - **기존 데이터.** 마이그레이션은 표만 만든다. 요약은 앱 코드(결정 3)가 만들어야 하므로, `Archon.Release.migrate/0` 뒤에 부르는
   `Archon.Release.backfill_search_index/0`이 색인 표를 만든 마이그레이션이 밀리초 단위로 기록한 경계 시각(마이그레이션이 작은 표에 `now()`를 epoch 밀리초로 넣는다.
-  `schema_migrations.inserted_at`은 초 단위라 쓰지 않는다) 이전에 만들어진
+  `schema_migrations.inserted_at`은 초 단위라 쓰지 않는다. 경계는 DB 시계이고 행의 시각은 앱 시계이지만 마이그레이션 중에는 런타임이
+  돌지 않으므로 경계 근처에 새 행이 없다) 이전에 만들어진
   워크플로우와, 그 시각 이전에 예약된(`scheduledTime`) 태스크만 `create_time`·ID 순 배치로 `ON CONFLICT DO NOTHING`으로 채운다(이미 있는 행은 건너뛰므로 중단 뒤 다시 불러도 된다. 배포 뒤 생긴 태스크, 특히 일부러 색인하지 않은 예약만 된
   태스크는 건드리지 않는다). 그 이전 태스크는 처음 저장 뒤 갱신됐는지 알 수 없으므로 모두 채운다(백필 한 번의 차이). 부르는 자리
-  (릴리스 절차, `docs/operations.md`)는 8c가 정해 적는다.
+  (릴리스 절차, `docs/operations.md`)는 8c가 정해 적는다. 백필은 마이그레이션처럼 릴리스 작업이라 노드 펜스를 거치지 않는다
+  (`ON CONFLICT DO NOTHING`이라 실행 중인 커밋을 덮지 않는다).
 - **비용.** 색인은 요약 JSON(입력·출력 포함)을 한 번 더 저장하므로 쓰기량이 늘어난다. upstream 기본 서버와 같은 비용이며 받아들인다.
   비동기 색인 설정(`asyncIndexingEnabled`)은 옮기지 않는다.
 
@@ -178,7 +180,7 @@ archon에 이미 있는 것(`541865c` 기준):
      - 부모는 그 이벤트·요청을 처리하는 커밋의 `task_logs`에 글을 넣는다. 글자는 8a 캡처가 정답이다.
   3. `POST /api/tasks/{taskId}/log`: 워크플로우 프로세스를 거치지 않고 `Archon.Runtime.Tasks`의 로그 함수가 저장소에 바로 쓴다
      (로그는 워크플로우 상태가 아니지만, ADR 0021 결정 7대로 Postgres 쓰기 트랜잭션은 모두 노드 펜스를 거치므로 이 쓰기도 커밋과 같은 펜스
-     확인을 한다). `createdTime`은 지금. upstream처럼 태스크가 있는지
+     확인을 한다. 펜스에 걸리면 기존 오류 경로처럼 500이다). `createdTime`은 지금. upstream처럼 태스크가 있는지
      확인하지 않는다.
 - **POST body.** upstream `@RequestBody String`은 Content-Type과 상관없이 body 글자를 그대로 받는다(JSON 문자열이면 따옴표째).
   archon도 Content-Type을 보지 않고 body 글자를 그대로 저장한다. 한도는 기존 `ArchonWeb.Request`의 8MB이고, 텍스트를 읽는 함수를
@@ -236,7 +238,8 @@ archon에 이미 있는 것(`541865c` 기준):
   - 마지막: 8f.
 - 각 조각은 자기 컨트롤러 액션만 미구현 목록에서 빼면 단계가 켜지므로 `contract_case.ex`를 고칠 필요가 없다. 구현하다 자기 단계의
   옵션(`ignore` 등)을 더 고쳐야 할 때만 그 단계 줄을 고친다(ADR 0025 결정 8과 같음). 3차의 8d·8e가 이 파일의 서로 다른 줄을 고치는
-  것은 위 파일 분리의 예외이고, `gh pr update-branch`로 푸는 작은 충돌로 받아들인다.
+  것은 위 파일 분리의 예외다. 떨어진 줄이면 `gh pr update-branch`로 합쳐지고, 붙은 줄이면 손으로 합친다. 어느 쪽이든 AGENTS.md
+  4번 절차(auto-merge 끄기, 새 head 재리뷰, 다시 켜기)를 따른다.
 - 각 조각은 이 ADR의 결정 번호와 조각 이름을 PR에 적는다. 조각 중에 결정이 바뀌면 이 ADR의 해당 결정 끝에 "조각 8x에서 정한
   것(날짜)"으로 적는다. ADR이 "캡처가 정답"이라 한 세부는 조각이 캡처대로 맞추고 그 사실만 적는다.
 
