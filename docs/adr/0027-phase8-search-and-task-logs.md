@@ -112,8 +112,9 @@ archon에 이미 있는 것(`541865c` 기준):
 
 ### 3. 요약 모델
 
-- `Archon.Domain.WorkflowSummary`와 `Archon.Domain.TaskSummary`를 upstream 생성자(`new WorkflowSummary(WorkflowModel)`,
-  `new TaskSummary(TaskModel)`)대로 만든다. 필드 순서는 upstream Jackson 직렬화 순서다. upstream getter로 직렬화되는 파생 값도
+- `Archon.Domain.WorkflowSummary`와 `Archon.Domain.TaskSummary`를 upstream 생성자(`new WorkflowSummary(Workflow)`,
+  `new TaskSummary(Task)`, `ExecutionDAOFacade`가 `workflowModel.toWorkflow()`·`taskModel.toTask()`로 부름)대로. 그래서 입력은 REST의
+  `Workflow`·`Task` 모양이다 만든다. 필드 순서는 upstream Jackson 직렬화 순서다. upstream getter로 직렬화되는 파생 값도
   포함한다(`inputSize`·`outputSize`는 Java `String.length()`, 곧 UTF-16 단위 길이).
 - 시각은 `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'`(GMT) 글자. `WorkflowSummary`의 `startTime`은 `createTime`, `endTime`은 0보다 클 때만,
   `executionTime`은 끝 − 시작. `TaskSummary`의 시각은 0이어도 epoch 글자로 찍는다. `queueWaitTime`은 upstream `Task` 계산을 따르되
@@ -228,7 +229,7 @@ archon에 이미 있는 것(`541865c` 기준):
 |---|---|---|---|---|
 | 8a | 결정 7의 캡처 전부, 기존 `route_later_*` 단계 교체, 라우터(9개), 컨트롤러 골격·미구현 목록·`requires:` 건너뛰기, 픽스처 등록, 요약 시각 정규화 | 기존 픽스처 재캡처 비교, 라우터 시험(`route_info/4`), 건너뛰기를 뺀 전체 재생 | 없음 | `scripts/contract/capture_fixtures.sh`, `test/fixtures/contract/*`, `test/fixtures/contract/README.md`, `test/support/contract.ex`, `test/support/archon_web/contract_case.ex`, `test/archon_web/contract_case_test.exs`, `test/archon/contract_test.exs`, `test/archon/domain/contract_round_trip_test.exs`, `lib/archon_web/router.ex`, `lib/archon_web/controllers/{search,task_log}_controller.ex`(골격), `lib/archon_web/controllers/workflow_bulk_controller.ex`(bulk/search 골격만), `test/archon_web/router_test.exs` |
 | 8b | 결정 3·4의 순수 모듈: `WorkflowSummary`·`TaskSummary`, `Archon.Search.Query`(파서, 메모리 평가, SQL 조각 생성) | upstream `SqliteIndexQueryBuilder` 사례, JDK 프로브(시각 형식, `String.length()`), 단위 시험 | 없음 | `lib/archon/domain/{workflow_summary,task_summary}.ex`, `lib/archon/search/*`, 해당 시험 |
-| 8c | 결정 2: `Commit`의 `index_workflow`·`index_tasks`와 Step이 채우는 자리, 색인 마이그레이션, `Archon.Release.backfill_search_index/0`, `Store.commit/2`의 색인 쓰기(두 백엔드), `remove_workflow/2`와 지우기 규칙, 저장소 검색 콜백 | 저장소 계약 시험(두 백엔드), 색인 시점 시험(동기 첫 태스크, skiptask, extendLease), `update_time` 가드·remove·백필 시험 | 8b | `lib/archon/runtime/commit.ex`, `lib/archon/runtime/step/*`(`State.save_task`·워크플로우 저장을 부르는 자리 전부의 색인 표시), `lib/archon/runtime/workflow_server.ex`(remove 호출, 커밋 `empty?/1`의 새 필드), `lib/archon/release.ex`, `priv/repo/migrations/*`(새 파일), `lib/archon/runtime/store.ex`, `lib/archon/runtime/store/{memory,postgres}.ex`, `test/support/runtime/store_contract.ex`, 해당 시험 |
+| 8c | 결정 2: `Commit`의 `index_workflow`·`index_tasks`와 Step이 채우는 자리, 색인 마이그레이션, `Archon.Release.backfill_search_index/0`, `Store.commit/2`의 색인 쓰기(두 백엔드), `remove_workflow/2`와 지우기 규칙, 저장소 검색 콜백 | 저장소 계약 시험(두 백엔드), 색인 시점 시험(동기 첫 태스크, skiptask, extendLease), `update_time` 가드·remove·백필 시험 | 8b | `lib/archon/runtime/commit.ex`, `lib/archon/runtime/step/*`(`State.save_task`·워크플로우 저장을 부르는 자리 전부의 색인 표시), `lib/archon/runtime/workflow_server.ex`(remove 호출, 커밋 `empty?/1`의 새 필드), `lib/archon/release.ex`, `priv/repo/migrations/*`(새 파일), `lib/archon/runtime/store.ex`, `lib/archon/runtime/store/{memory,postgres}.ex`, `test/support/runtime/store_contract.ex`, `test/support/postgres_case.ex`(`reset!/1`의 새 표·완료 표시), `test/archon/runtime/postgres_test.exs`(마이그레이션 버전·표 목록·롤백 단언), 해당 시험 |
 | 8d | 결정 6: `Commit`의 `task_logs`, 쓰기 경로 셋(되살림 효과·이벤트·rerun 요청의 동작과 사슬, 옛 outbox 항목 호환), 로그 저장소 콜백, `Request`의 텍스트 읽기, `POST`·`GET` 로그 액션과 공용 `refuse_cross_origin` plug | 로그 픽스처 재생, 상한·204·지우기·되살림 로그(restart·retry·rerun, 옛 outbox 항목)·교차 출처 시험(두 백엔드) | 8a, 8c | `lib/archon/runtime/commit.ex`, `lib/archon/runtime/tasks.ex`, `lib/archon/runtime/lifecycle.ex`, `lib/archon/runtime/step.ex`, `lib/archon/runtime/step/{tasks,state,lifecycle,effect}.ex`, `lib/archon/runtime/{outbox,sub_workflows,workflow_server}.ex`(커밋 `empty?/1`의 `task_logs` 포함), `lib/archon/runtime/store.ex`·`store/{memory,postgres}.ex`(로그 콜백 절, 효과 인코딩 절), `test/support/runtime/store_contract.ex`, `lib/archon_web/request.ex`, `lib/archon_web/plugs/refuse_cross_origin.ex`(새), `lib/archon_web/controllers/{task_log,workflow_lifecycle}_controller.ex`, 해당 시험 |
 | 8e | 결정 1·5: 검색 여섯 액션과 bulk/search, `Archon.Runtime`의 검색 함수, `SearchResult`·`BulkResponse` 일반화, `WorkflowModel`·`TaskModel` 인코더 | 검색 픽스처 재생(두 백엔드), 쿼리 매개변수·5000·1000 검증 시험 | 8a, 8c | `lib/archon/runtime.ex`(검색 함수), `lib/archon/domain/{search_result,bulk_response}.ex`, `lib/archon/domain/workflow_model_json.ex`(새), `lib/archon_web/controllers/search_controller.ex`, `lib/archon_web/controllers/workflow_bulk_controller.ex`(bulk/search 액션), 해당 시험 |
 | 8f | 통합: 건너뛰기 장치 제거와 전체 재생(두 백엔드), 빠진 픽스처, README 호환성 절, ADR 0001 분류("Phase 8"), 이 ADR `승인` | `mix test` 전부(두 백엔드), CI | 8d, 8e | `test/support/archon_web/contract_case.ex`, `test/archon_web/contract_case_test.exs`, 각 컨트롤러의 미구현 목록, `README.md`, `docs/adr/{0001,0003,0027,README}.md` |
@@ -262,7 +263,8 @@ ADR 0023·0025·0026의 목록에 더해 다음이 생긴다.
 - **백필한 태스크 색인**(결정 2): 배포 전부터 있던 태스크는 갱신 여부와 상관없이 모두 색인한다.
 - **POST 로그의 교차 출처 거절**(결정 6): 브라우저가 교차 출처로 표시한 요청은 403. 두 헤더를 보내지 않는 클라이언트는 upstream과 같다.
   상속 위험: HTTP 포트에 닿는 브라우저 밖 클라이언트는 임의 태스크 ID에 요청마다 8MB까지 로그를 쌓을 수 있다(upstream과 같은 신뢰
-  모델, ADR 0024 결정 4). 8f가 README 배포 절에 적는다(포트를 외부에 열면 인증하는 역프록시 뒤에 둘 것).
+  모델, ADR 0024 결정 4). 같은 이유로 포트에 닿는 클라이언트는 ID를 몰라도 검색을 넘겨 가며 모든 워크플로우 요약(입력·출력 포함)을
+  읽을 수 있다. 8f가 README 배포 절에 둘 다 적는다(포트를 외부에 열면 인증하는 역프록시 뒤에 둘 것).
 
 ## 대안
 
