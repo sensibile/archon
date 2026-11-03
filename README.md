@@ -5,8 +5,8 @@
 A Conductor-compatible workflow orchestration engine in Elixir, running each workflow as a
 supervised OTP process with durable state and API-level compatibility with existing workers and SDKs.
 
-> Status: early development. The MVP REST API (19 routes, below) runs on an in-memory or PostgreSQL
-> backend; everything else is not implemented yet.
+> Status: early development. The REST routes listed below (19 MVP routes and 33 workflow operations
+> routes) run on an in-memory or PostgreSQL backend; everything else is not implemented yet.
 
 ## Goals
 
