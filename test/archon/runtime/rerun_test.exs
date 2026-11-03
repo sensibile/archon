@@ -229,6 +229,61 @@ defmodule Archon.Runtime.RerunTest do
     end
   end
 
+  # WorkflowExecutorOps#finalizeRerun: after a direct rerun, every task of another reference that
+  # ended unsuccessfully runs again; a JOIN is set IN_PROGRESS in place, other tasks SCHEDULED.
+  describe "finalizeRerun" do
+    @fork ~S"""
+    {"name": "rerun_fork", "version": 1, "tasks": [
+      {"name": "fork", "taskReferenceName": "fork", "type": "FORK_JOIN", "inputParameters": {},
+       "forkTasks": [
+        [{"name": "rerun_task", "taskReferenceName": "a", "type": "SIMPLE", "inputParameters": {}}],
+        [{"name": "rerun_task", "taskReferenceName": "b", "type": "SIMPLE", "inputParameters": {}},
+         {"name": "rerun_task", "taskReferenceName": "c", "type": "SIMPLE",
+          "inputParameters": {}}]]},
+      {"name": "join", "taskReferenceName": "join", "type": "JOIN", "inputParameters": {},
+       "joinOn": ["a", "c"]}]}
+    """
+
+    defp run_task(id, ref, status) do
+      t = eventually(fn -> match?(%Task{status: :scheduled}, task(id, ref)) and task(id, ref) end)
+      assert %Task{status: :in_progress} = WorkflowServer.poll(id, t.task_id, "w")
+
+      assert %Task{status: ^status} =
+               WorkflowServer.update(%TaskResult{
+                 workflow_instance_id: id,
+                 task_id: t.task_id,
+                 status: status
+               })
+
+      t
+    end
+
+    test "a JOIN canceled with the workflow runs again in place beside the rerun task" do
+      {:ok, definition} = @fork |> Jason.decode!() |> WorkflowDef.from_json()
+      :ok = Runtime.metadata().update_workflow_def(definition)
+
+      id = start("rerun_fork")
+      run_task(id, "b", :completed)
+      # c is scheduled after the JOIN, so the rerun from c keeps the JOIN
+      c = run_task(id, "c", :failed)
+      await_status(id, :failed)
+      assert %Task{status: :canceled} = task(id, "a")
+      assert %Task{status: :canceled} = join = task(id, "join")
+      assert join.seq < c.seq
+
+      assert rerun(id, re_run_from_task_id: c.task_id) == :ok
+
+      assert %Workflow{status: :running} = workflow(id)
+      assert %Task{status: :in_progress} = new_join = task(id, "join")
+      assert new_join.task_id == join.task_id
+      assert %Task{status: :scheduled} = task(id, "a")
+
+      run_task(id, "a", :completed)
+      run_task(id, "c", :completed)
+      assert await_status(id, :completed)
+    end
+  end
+
   describe "a child's notice to a canceled task" do
     test "a parent that ended and canceled the task keeps it without the child's reason" do
       parent = start("rerun_parent")
