@@ -182,9 +182,13 @@ defmodule Archon.Runtime.HttpTask do
       {{:value, {key, id}}, queue} ->
         state = %{state | queue: queue}
 
-        case Map.pop(state.waiting, key) do
-          {%{id: ^id} = job, waiting} -> next(run(%{state | waiting: waiting}, job))
-          _dropped_or_replaced -> next(state)
+        case Map.fetch(state.waiting, key) do
+          {:ok, %{id: ^id} = job} ->
+            next(run(%{state | waiting: Map.delete(state.waiting, key)}, job))
+
+          # Dropped, or replaced by a later request whose own entry is further in the queue.
+          _dropped_or_replaced ->
+            next(state)
         end
     end
   end

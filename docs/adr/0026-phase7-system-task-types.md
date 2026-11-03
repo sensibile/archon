@@ -609,7 +609,10 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   - HttpClient의 기본 동작을 따른다: `Accept-Encoding: gzip, x-gzip, deflate`를 보내고 그 압축을 풀며 그때 `content-length`·
     `content-encoding`·`content-md5` 헤더를 뺀다(`ContentCompressionExec`). 그래서 응답 헤더가 캡처(`vary`·`cache-control`·
     `content-type`·`date`)와 같다. 리다이렉트는 `RedirectExec`처럼 따라간다(`301`·`302`·`303`·`307`·`308`과 `location`, `303`과 `POST`의
-    `301`·`302`는 body 없는 `GET`, 50번까지, 이미 간 곳이면 `Circular redirect to '<uri>'`). 리다이렉트 픽스처는 7a 캡처에 없다(7h가
+    `301`·`302`는 body 없는 `GET`, 50번까지, 이미 간 곳이면 `Circular redirect to '<uri>'`). HttpClient 5.5.2 `DefaultRedirectStrategy#isRedirectAllowed`처럼
+    `Authorization`·`Cookie` 헤더가 있는 요청은 다른 호스트·포트로 따라가지 않고 그 3xx가 응답이다(그래서 `No response from the remote
+    service`로 `FAILED`). 리다이렉트는 응답을 보낸 원격 서버가 정하므로 대상 제한 없음(위 SSRF 상속 위험)이 리다이렉트 목적지에도
+    그대로 걸린다. 7h가 README 경고에 함께 적는다. 리다이렉트 픽스처는 7a 캡처에 없다(7h가
     더해 다시 캡처할 후보).
   - **실행기**(`Archon.Runtime.HttpTask`, 앱 감독 트리의 `Archon.Runtime.HttpTask.Supervisor`가 요청용 Task 감독자와 함께
     `:one_for_all`로, 그 앞에 전달용 Task 감독자를 띄운다. 실행기가 끝나면 진행 중 요청도 끝나 수가 어긋나지 않고, 진행 중 전달은
@@ -762,6 +765,8 @@ ADR 0023·0025의 목록에 더해 다음이 생긴다.
   메시지는 맞춘다.
 - **HTTP 요청의 전체 시간 상한과 취소**(결정 7): 쓰이지 않는 요청을 끊고 요청마다 전체 시간 상한(60초)을 둔다. upstream은 읽기 시간 상한만 있다. 방법은 결정 7 끝 "조각 7g에서
   정한 것".
+- **HTTP 응답 charset**(결정 7, 조각 7g): ISO-8859-1과 UTF-8만 읽는다. 다른 charset(windows-1252, UTF-16 등)을 밝힌 응답은 UTF-8로
+  읽는다. upstream은 JVM이 아는 charset이면 그것으로 읽는다.
 - **HTTP 4xx·5xx 상태 문구와 URI**(결정 7, 조각 7g): 상태 문구는 서버가 보낸 것이 아니라 Spring 표의 것이고, URI 템플릿 확장·인코딩을
   하지 않는다.
 - **HTTP 빈도 한도**(결정 7): `rateLimitPerFrequency`를 적용하지 않는다(worker 태스크와 같음).

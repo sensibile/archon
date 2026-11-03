@@ -96,6 +96,12 @@ defmodule Archon.Runtime.HttpTaskTest do
       conn |> put_resp_header("location", "/echo") |> send_resp(307, "")
     end
 
+    # To the same port by IP address: another host name than localhost.
+    defp answer(conn, ["away"]) do
+      location = "http://127.0.0.1:#{conn.port}/echo"
+      conn |> put_resp_header("location", location) |> send_resp(302, "")
+    end
+
     defp answer(conn, ["loop"]) do
       conn |> put_resp_header("location", "/loop") |> send_resp(302, "")
     end
@@ -263,6 +269,22 @@ defmodule Archon.Runtime.HttpTaskTest do
       assert %{"method" => "PUT"} = Jason.decode!(body)
     end
 
+    test "a request with credentials is not redirected to another host", %{url: url} do
+      other = String.replace(url, "127.0.0.1", "localhost")
+
+      # The same host and port: followed.
+      for name <- ["Authorization", "cookie"] do
+        request = request(url <> "/redirect/307", headers: [{name, "secret"}])
+        assert {:ok, %{status: 200}} = Client.run(request, @limits)
+        assert_received {:target, "GET", "/echo"}
+      end
+
+      # The same request to the other name of the host gets the redirect as its response.
+      request = request(other <> "/away", headers: [{"Authorization", "secret"}])
+      assert {:ok, %{status: 302}} = Client.run(request, @limits)
+      refute_received {:target, _method, "/echo"}
+    end
+
     test "a redirect to a location already visited is circular", %{url: url} do
       assert {:error, {:io, "Circular redirect to '" <> location}} =
                Client.run(request(url <> "/loop"), @limits)
@@ -327,6 +349,16 @@ defmodule Archon.Runtime.HttpTaskTest do
       assert_receive {:delivered, "wf-1", "a", 1, _result}, 2000
       refute_receive {:target, _method, "/echo"}, 200
       assert HttpTask.info() == %{running: [], waiting: []}
+    end
+
+    test "a waiting request replaced again is sent once, as the newest", %{url: url} do
+      with_max_concurrency(1)
+      :ok = HttpTask.request("wf-1", "a", 1, request(url <> "/sleep/200"))
+      :ok = HttpTask.request("wf-1", "b", 1, request(url <> "/json"))
+      :ok = HttpTask.request("wf-1", "b", 2, request(url <> "/json"))
+
+      assert_receive {:delivered, "wf-1", "b", 2, {:ok, %{status: 200}}}, 2000
+      refute_received {:delivered, "wf-1", "b", 1, _result}
     end
 
     test "a new request of the same task replaces the one in flight", %{url: url} do

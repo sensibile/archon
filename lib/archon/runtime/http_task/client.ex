@@ -69,7 +69,10 @@ defmodule Archon.Runtime.HttpTask.Client do
     case List.keyfind(headers, "location", 0) do
       {"location", location} ->
         location = request.uri |> URI.merge(location) |> URI.to_string()
-        {location, redirected(request, status, location)}
+
+        if redirect_allowed?(request, location),
+          do: {location, redirected(request, status, location)},
+          else: nil
 
       nil ->
         nil
@@ -79,6 +82,21 @@ defmodule Archon.Runtime.HttpTask.Client do
   end
 
   defp redirect(_request, _response), do: nil
+
+  # DefaultRedirectStrategy#isRedirectAllowed: a request with an Authorization or Cookie header
+  # is not redirected to another host or port; its redirect is the response.
+  defp redirect_allowed?(request, location) do
+    same_authority?(URI.parse(request.uri), URI.parse(location)) or
+      not Enum.any?(request.headers, fn {name, _value} ->
+        String.downcase(name) in ["authorization", "cookie"]
+      end)
+  end
+
+  defp same_authority?(%URI{host: host, port: port}, %URI{host: other, port: port})
+       when is_binary(host) and is_binary(other),
+       do: String.downcase(host) == String.downcase(other)
+
+  defp same_authority?(_uri, _other), do: false
 
   defp redirected(request, status, location) do
     get? =

@@ -303,6 +303,8 @@ defmodule Archon.Runtime.Step.Http do
     end
   end
 
+  # ISO-8859-1, else UTF-8: another declared charset (windows-1252, UTF-16, ...) is read as UTF-8
+  # (an intentional difference, ADR 0026 decision 7).
   defp decode(bytes, charset) when charset in ["ISO-8859-1", "LATIN1"],
     do: :unicode.characters_to_binary(bytes, :latin1)
 
