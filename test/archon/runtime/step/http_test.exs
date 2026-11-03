@@ -488,6 +488,80 @@ defmodule Archon.Runtime.Step.HttpTest do
       assert same == terminated
     end
 
+    test "a DYNAMIC task resolved to HTTP keeps its definition's response timeout" do
+      dynamic = %WorkflowTask{
+        name: "dyn",
+        task_reference_name: "http_ref",
+        type: "DYNAMIC",
+        dynamic_task_name_param: "taskToExecute",
+        async_complete: true,
+        input_parameters: %{
+          "taskToExecute" => "HTTP",
+          "http_request" => "${workflow.input.request}"
+        }
+      }
+
+      lookup = fn "HTTP" -> {:ok, %TaskDef{name: "HTTP", response_timeout_seconds: 7}} end
+      {stored, post} = start(%{"request" => @get}, [dynamic], task_def_lookup: lookup)
+      assert [{id, 1, %{deadline: deadline}}] = requests(post)
+      assert deadline == @now + 7_000
+      assert %Task{task_type: "HTTP", response_timeout_seconds: 7} = http(stored)
+
+      {:ok, waited, _pre, _post} = run(stored, :wake, @now + 6_000)
+      assert %Task{status: :scheduled, poll_count: 1} = http(waited)
+
+      {:ok, done, _pre, _post} =
+        run(waited, {:http_completed, id, 1, ok(200, "{}")}, @now + 6_500)
+
+      assert %Task{status: :in_progress} = http(done)
+
+      {:ok, timed_out, _pre, _post} = run(stored, :wake, @now + 7_000)
+
+      assert %Task{
+               status: :timed_out,
+               reason_for_incompletion: "Task did not complete within its responseTimeout of 7s"
+             } = http(timed_out)
+    end
+
+    test "rerun from another branch starts a failed HTTP task again (finalizeRerun)" do
+      fork = %WorkflowTask{
+        name: "fork",
+        task_reference_name: "fork_ref",
+        type: "FORK_JOIN",
+        fork_tasks: [
+          [http_task()],
+          [%WorkflowTask{name: "simple", task_reference_name: "simple_ref", type: "SIMPLE"}]
+        ]
+      }
+
+      join = %WorkflowTask{
+        name: "join",
+        task_reference_name: "join_ref",
+        type: "JOIN",
+        join_on: ["http_ref", "simple_ref"]
+      }
+
+      {stored, post} = start(%{"request" => @get}, [fork, join])
+      [{id, 1, _request}] = requests(post)
+      {:ok, failed, _pre, _post} = run(stored, {:http_completed, id, 1, ok(500, "")}, @now + 1)
+      assert failed.status == :failed
+
+      simple = Enum.find(failed.tasks, &(&1.reference_task_name == "simple_ref"))
+
+      rerun = %{
+        task_id: simple.task_id,
+        task_input: nil,
+        workflow_input: nil,
+        correlation_id: nil
+      }
+
+      {:ok, rerun_wf, _pre, post} = run(failed, {:rerun, rerun}, @now + 2)
+
+      assert rerun_wf.status == :running
+      assert [{^id, 1, _request}] = requests(post)
+      assert %Task{status: :scheduled, poll_count: 1} = http(rerun_wf)
+    end
+
     test "the concurrent execution limit comes before the deadline, and keeps the attempt" do
       task_def = %TaskDef{name: "http", concurrent_exec_limit: 1}
       task = http_task(task_definition: task_def)

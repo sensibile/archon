@@ -638,6 +638,10 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     있거나 `pollCount` > 0이면 마감(`updateTime` + `responseTimeoutSeconds`, 0이면 1시간) 전에는 어떤 패스에도 넣지 않는다. `asyncComplete`로
     `IN_PROGRESS`가 된 HTTP도 넣지 않는다(upstream은 그 메시지를 큐에서 지운다. 워커 갱신이 끝낸다). `Postpone.wake_at`은 시작한 HTTP의
     마감을 재평가 후보에 더한다.
+  - rerun의 `finalizeRerun`이 다른 참조의 끝난 HTTP를 다시 `SCHEDULED`로 둘 때 `pollCount`를 0으로 돌린다. 그대로 두면 위
+    거르기가 시작한 태스크로 보고 다시 보내지 않아 마감에 `TIMED_OUT`이 된다. upstream은 `pollCount`를 두고 실행기가 그것으로
+    시작 여부를 가리지 않는다(의도적 차이: 이 경우 보이는 `pollCount`만 다르다). 태스크 자체를 rerun하는 경로는 이미 0으로 둔다.
+    DYNAMIC으로 만든 HTTP는 태스크 정의의 `responseTimeoutSeconds`로 마감을 잰다(시험 있음).
   - 입력 변환(upstream `objectMapper.convertValue(..., Input.class)`, `try` 밖): 문자열 필드는 JSON 스칼라를 글자로 받고, 정수 필드는
     정수·잘린 실수·10진 문자열을 받는다. 그 밖의 값(객체가 아닌 요청, 컨테이너인 `uri`, 문자열이 아닌 `headers`, 범위 밖 수)은 요청
     없이 `SCHEDULED`로 남아(`workerId`·`pollCount`는 저장) 마감에 `TIMED_OUT`이다. 보내기 전 upstream이 던지는 것(`contentType`·`accept`의

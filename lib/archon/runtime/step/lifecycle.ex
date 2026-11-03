@@ -387,6 +387,12 @@ defmodule Archon.Runtime.Step.Lifecycle do
     |> Decide.settle()
   end
 
+  # ADR 0026, decision 7: a SCHEDULED HTTP task whose pollCount counted a start is taken as
+  # started (in flight or lost) and not started again, so one rerun here starts from 0. Upstream
+  # keeps the count; its executor tells nothing from it.
+  defp rerun_poll_count(%Task{task_type: "HTTP"}), do: 0
+  defp rerun_poll_count(%Task{poll_count: count}), do: count
+
   # The sibling tasks of updateAndPushParents.
   defp repair(%State{} = state, %Task{task_type: "SUB_WORKFLOW"} = task) do
     case {Task.sub_workflow_id(task), unsuccessful_terminal?(task)} do
@@ -769,7 +775,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
           state |> State.save_task(task) |> Schedule.push(task)
 
         true ->
-          task = %{task | status: :scheduled}
+          task = %{task | status: :scheduled, poll_count: rerun_poll_count(task)}
           state |> State.save_task(task) |> due_now(task)
       end
     end)
