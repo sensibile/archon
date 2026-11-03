@@ -88,10 +88,13 @@ Phase 7 태스크 타입(ADR 0026):
 - `START_WORKFLOW`·`HTTP`는 타입 이름의 큐를 거치지 않고 워크플로우 프로세스가 바로 시작해 결과를 이벤트로 받는다. 큐 크기 조회에
   나타나지 않는다. `START_WORKFLOW`는 태스크로 정해지는 ID로 멱등 시작하고 복구가 바로 다시 시작한다. 검증 위반 여럿은 경로
   순으로 잇고, 변환 실패 문구는 Archon 문구다. 같은 밀리초의 제자리 rerun은 `scheduledTime`이 1ms 늦다.
-- upstream에서 예외가 결정이나 요청 밖으로 새는 입력은 태스크·워크플로우 실패로 끝낸다: 문자열이 아닌 `TERMINATE`
-  `terminationStatus`(정의 검사를 거치지 않은 태스크), `INLINE` `evaluatorType`·`expression`(upstream은 시작 500, Archon은 시작 200과
-  `FAILED`), `FORK_JOIN_DYNAMIC` 입력, 실행되지 않은 ref가 있는 `EXCLUSIVE_JOIN`의 permissive 실패(upstream NPE로 멈춤, Archon은
-  `COMPLETED` 뒤 워크플로우 `FAILED`), 동적 포크 rerun의 매핑 종료, 끝없는 동적 포크 매핑과 한 FORK 안의 같은 ref.
+- upstream에서 예외가 결정이나 요청 밖으로 새는 입력은 Archon이 예외 없이 처리한다. 문자열이 아닌 `TERMINATE`
+  `terminationStatus`(정의 검사를 거치지 않은 태스크)는 태스크 `FAILED`, `INLINE` `evaluatorType`·`expression`은 시작 200과 태스크
+  `FAILED`(upstream은 시작 500), 실행되지 않은 ref가 있는 `EXCLUSIVE_JOIN`의 permissive 실패는 `COMPLETED` 뒤 워크플로우
+  `FAILED`(upstream은 NPE로 멈춤), 동적 포크 rerun의 매핑 종료와 끝없는 동적 포크 매핑은 워크플로우 종료다. `FORK_JOIN_DYNAMIC`의
+  문자열이 아닌 간단 형태 필드는 글자로 읽고 `forkTaskInputs`의 `null` 원소는 `{"input": null}` 가지로 만들며, 옛 형태의 변환
+  실패는 워크플로우 종료다.
+- 한 FORK 안에서 같은 ref를 만드는 동적 포크는 종료한다(upstream은 하나를 버린다).
 - DO_WHILE 반복의 첫 `DYNAMIC`은 정의 변경을 저장된 `workflowDefinition`에 반영하지 않는다. `FORK_JOIN_DYNAMIC` 오류 문구의 예외
   메시지는 Archon 문구다.
 - `INLINE`의 `python` 평가기와 시스템 태스크 입력의 비밀 값 치환이 없다. 평가기 풀이 받지 못한 요청은 재시도 가능한 `FAILED`다.
@@ -111,9 +114,10 @@ Phase 7 태스크 타입(ADR 0026):
 
 **HTTP 태스크의 대상 제한 없음(SSRF).** upstream처럼 `HTTP` 태스크는 서버가 닿는 어떤 주소로든 요청한다([ADR 0026](docs/adr/0026-phase7-system-task-types.md)
 결정 7). REST 포트에 닿는 호출자는 루프백 서비스나 클라우드 메타데이터 주소를 부르는 정의를 등록하고 그 응답을 태스크 출력으로 읽을
-수 있다. 리다이렉트도 같다. 목적지를 제한하지 않고 따라가며, `307`·`308`은 body와 `Authorization`·`Cookie` 밖의 헤더(`X-API-Key`
-같은)를 다른 호스트로도 보내고, 같은 호스트·포트면 `https`에서 `http`로 바뀌어도 자격 헤더를 싣는다. 비밀을 헤더나 body에 넣는
-정의는 리다이렉트를 보안 경계로 삼을 수 없다. 응답 body 상한(10 MiB) 안에서도 디코딩한 JSON은 메모리에서 수십 배로 커질 수 있으므로
+수 있다. 리다이렉트도 같다. 목적지를 제한하지 않고 따라가며, 헤더 없는 `GET`으로 바뀌는 리다이렉트(`303`, `POST`의 `301`·`302`)
+밖에는 원래 body와 헤더(`X-API-Key` 같은)를 다른 호스트로도 그대로 보낸다. 다만 `Authorization`·`Cookie` 헤더가 있으면 다른
+호스트·포트로는 따라가지 않고 태스크가 `FAILED`다. 같은 호스트·포트면 `https`에서 `http`로 바뀌어도 그 자격 헤더를 싣는다. 비밀을
+헤더나 body에 넣는 정의는 리다이렉트를 보안 경계로 삼을 수 없다. 응답 body 상한(10 MiB) 안에서도 디코딩한 JSON은 메모리에서 수십 배로 커질 수 있으므로
 필요하면 `config :archon, Archon.Runtime.HttpTask, max_response_bytes:`로 낮춘다. 포트를 외부에 열면 인증하는 역프록시 뒤에 두고,
 서버가 나가는 요청도 망(방화벽, egress 정책)에서 제한한다.
 

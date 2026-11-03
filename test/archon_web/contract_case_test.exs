@@ -1,7 +1,7 @@
 defmodule ArchonWeb.ContractCaseTest do
   @moduledoc """
-  The replay helper itself (ADR 0023 decision 6, ADR 0025 decision 7, ADR 0026 decision 8): scenario coverage, the ID
-  mapping, and the step options.
+  The replay helper itself (ADR 0023 decision 6, ADR 0025 decision 7, ADR 0026 decision 8):
+  scenario coverage, the ID mapping, and the step options.
   """
 
   use ArchonWeb.ContractCase, async: true

@@ -1132,9 +1132,10 @@ p7_run p7_start_workflow_invalid archon_p7_start_workflow '{"request": {"version
 p7_run p7_start_workflow_missing archon_p7_start_workflow '{}'
 
 # HTTP against the stub: JSON, text and number bodies, a 2xx code Spring does not know, 4xx with
-# a short, a long and no body, a 5xx, a refused connection, no uri, no method, a GET redirect and a
-# POST redirect that keeps its method and body (slice 7h); asyncComplete, an asyncComplete
-# expression the mapper overwrites; the definition check.
+# a short, a long and no body, a 5xx, a refused connection, no uri, no method, a GET 302 and a POST
+# 307 redirect (slice 7h; the stub answers by path only, so the kept method and body are
+# test/archon/runtime/http_task_test.exs's); asyncComplete, an asyncComplete expression the mapper
+# overwrites; the definition check.
 call p7_http_register POST /api/metadata/workflow \
   "$(p7_def archon_p7_http '[{"name": "archon_p7_http", "taskReferenceName": "http_ref",
     "type": "HTTP", "inputParameters": {"http_request": "${workflow.input.request}"}}]')"
