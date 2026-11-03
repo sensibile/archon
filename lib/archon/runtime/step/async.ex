@@ -108,6 +108,14 @@ defmodule Archon.Runtime.Step.Async do
   defp due?(%State{env: env}, %Task{task_type: "SUB_WORKFLOW", status: :in_progress} = task),
     do: Env.child(env, task, Task.sub_workflow_id(task)) != :error
 
+  # A started HTTP task is due at its response timeout, not after its startDelay again.
+  defp due?(
+         %State{now: now},
+         %Task{task_type: "HTTP", status: :scheduled, poll_count: count} = task
+       )
+       when count > 0,
+       do: Http.deadline(task) <= now
+
   defp due?(%State{now: now}, task), do: due_time(task) <= now
 
   # ADR 0026, decision 7: a started task of a type whose start is not idempotent (HTTP) is not

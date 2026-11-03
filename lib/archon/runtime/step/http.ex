@@ -271,7 +271,7 @@ defmodule Archon.Runtime.Step.Http do
   # extractBody: a JSON array or object as is, a number as a Double, another JSON value as its
   # text (Jackson asText), and text that does not parse as it is.
   defp extract_body(text) do
-    case Jason.decode(text) do
+    case decode_json(text) do
       {:ok, value} when is_map(value) or is_list(value) -> value
       {:ok, value} when is_number(value) -> value * 1.0
       {:ok, value} when is_binary(value) -> value
@@ -280,6 +280,60 @@ defmodule Archon.Runtime.Step.Http do
       {:error, _reason} -> if String.trim(text) == "", do: "", else: text
     end
   end
+
+  # Jackson 2.18's default StreamReadConstraints: nesting deeper than 1000 or an integer of more
+  # than 1000 digits does not parse (the text is kept as it is). Checked before decoding, so a
+  # response within the body limit cannot make the decode build an unbounded structure.
+  @max_depth 1000
+  @max_digits 1000
+
+  defp decode_json(text) do
+    if within_constraints?(text, 0, false, 0),
+      do: Jason.decode(text),
+      else: {:error, :constraints}
+  end
+
+  # depth, inside a string, digits of the integer being read.
+  defp within_constraints?(<<>>, _depth, _string?, _digits), do: true
+
+  defp within_constraints?(<<?\\, _escaped, rest::binary>>, depth, true, _digits),
+    do: within_constraints?(rest, depth, true, 0)
+
+  defp within_constraints?(<<?", rest::binary>>, depth, string?, _digits),
+    do: within_constraints?(rest, depth, not string?, 0)
+
+  defp within_constraints?(<<_char, rest::binary>>, depth, true, _digits),
+    do: within_constraints?(rest, depth, true, 0)
+
+  defp within_constraints?(<<open, _rest::binary>>, depth, false, _digits)
+       when open in [?[, ?{] and depth >= @max_depth,
+       do: false
+
+  defp within_constraints?(<<open, rest::binary>>, depth, false, _digits) when open in [?[, ?{],
+    do: within_constraints?(rest, depth + 1, false, 0)
+
+  defp within_constraints?(<<close, rest::binary>>, depth, false, _digits) when close in [?], ?}],
+    do: within_constraints?(rest, max(depth - 1, 0), false, 0)
+
+  defp within_constraints?(<<digit, _rest::binary>>, _depth, false, @max_digits)
+       when digit in ?0..?9,
+       do: false
+
+  defp within_constraints?(<<digit, rest::binary>>, depth, false, digits) when digit in ?0..?9,
+    do: within_constraints?(rest, depth, false, digits + 1)
+
+  # A fraction or an exponent: the digits after it are not the integer's.
+  defp within_constraints?(<<mark, rest::binary>>, depth, false, digits)
+       when mark in [?., ?e, ?E] and digits > 0,
+       do: skip_number(rest, depth)
+
+  defp within_constraints?(<<_char, rest::binary>>, depth, false, _digits),
+    do: within_constraints?(rest, depth, false, 0)
+
+  defp skip_number(<<char, rest::binary>>, depth) when char in ?0..?9 or char in [?+, ?-, ?e, ?E],
+    do: skip_number(rest, depth)
+
+  defp skip_number(rest, depth), do: within_constraints?(rest, depth, false, 0)
 
   # HttpHeaders: each name with its values (the names as Mint gives them, lower case).
   defp headers(headers) do

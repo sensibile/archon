@@ -644,7 +644,7 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
   - 고르는 자리의 거르기(`Step.Async.pass`): 시작 모듈이 있고 시작이 멱등이 아닌 타입(HTTP)의 `SCHEDULED` 태스크는 진행 중 집합에
     있거나 `pollCount` > 0이면 마감(`updateTime` + `responseTimeoutSeconds`, 0이면 1시간) 전에는 어떤 패스에도 넣지 않는다. `asyncComplete`로
     `IN_PROGRESS`가 된 HTTP도 넣지 않는다(upstream은 그 메시지를 큐에서 지운다. 워커 갱신이 끝낸다). `Postpone.wake_at`은 시작한 HTTP의
-    마감을 재평가 후보에 더한다.
+    마감을 재평가 후보에 더하고, 시작한 HTTP는 `startDelay`가 아니라 그 마감에 평가 대상이 된다.
   - rerun의 `finalizeRerun`이 다른 참조의 끝난 HTTP를 다시 `SCHEDULED`로 둘 때 `pollCount`를 0으로 돌린다. 그대로 두면 위
     거르기가 시작한 태스크로 보고 다시 보내지 않아 마감에 `TIMED_OUT`이 된다. upstream은 `pollCount`를 두고 실행기가 그것으로
     시작 여부를 가리지 않는다(의도적 차이: 이 경우 보이는 `pollCount`만 다르다). 태스크 자체를 rerun하는 경로는 이미 0으로 둔다.
@@ -660,7 +660,9 @@ upstream의 `SystemTaskWorker`·`AsyncSystemTaskExecutor`(타입 이름 큐를 �
     `reasonForIncompletion`의 500자 자르기다. 워크플로우의 `reasonForIncompletion`은 자르지 않은 태스크 이유를 인용하므로, archon도
     태스크에 이유를 다 두고 `Task.to_json/2`(upstream `TaskModel#toTask`)에서 자른다. 3xx처럼 2xx·4xx·5xx가 아니면 body 없이
     `No response from the remote service`로 `FAILED`다. 2xx body는 `content-type`의 charset, 없으면 JSON은 UTF-8·그 밖은 ISO-8859-1로
-    읽는다(`StringHttpMessageConverter`). 연결 거부는 캡처 문구(`Connect to <scheme>://<host>:<port> failed: Connection refused (connect
+    읽는다(`StringHttpMessageConverter`). JSON 판정은 Jackson 2.18 기본 `StreamReadConstraints`를 따라 중첩 1000을 넘거나
+    1000자리를 넘는 정수가 있으면 파싱 실패로 원문 글자다(실행해 확인). 이 검사를 디코딩 전에 해서, body 상한 안의 응답이 디코딩으로
+    끝없는 구조를 만들지 못하게 한다. 연결 거부는 캡처 문구(`Connect to <scheme>://<host>:<port> failed: Connection refused (connect
     failed)`)와 같게, 연결·읽기 시간 초과는 `Connect timed out`·`Read timed out`, 이름 풀이 실패는 `<host>: Name or service not known`이다.
   - 4xx·5xx 문구의 상태 문구는 서버가 보낸 것이 아니라 Spring 표의 것이다(Mint는 사유 문구를 주지 않는다). 표에 없는 4xx·5xx는 빈
     문구다. URI 템플릿 확장과 인코딩(`DefaultUriBuilderFactory`)은 하지 않는다. 의도적 차이로 7h가 목록에 옮긴다.

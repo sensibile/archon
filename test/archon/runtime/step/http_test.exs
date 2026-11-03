@@ -370,6 +370,29 @@ defmodule Archon.Runtime.Step.HttpTest do
       assert requests(post) == []
     end
 
+    test "JSON past Jackson's default constraints is kept as text" do
+      deep = String.duplicate("[", 1000) <> String.duplicate("]", 1000)
+      {task, _workflow} = complete(ok(200, deep))
+      assert is_list(task.output_data["response"]["body"])
+
+      for text <- [
+            String.duplicate("[", 1001) <> String.duplicate("]", 1001),
+            String.duplicate("1", 1001),
+            ~s({"a":) <> String.duplicate("1", 1001) <> "}"
+          ] do
+        {task, _workflow} = complete(ok(200, text))
+        assert task.output_data["response"]["body"] == text
+      end
+
+      # Brackets in strings and digits after a fraction do not count.
+      quoted = Jason.encode!(%{"s" => String.duplicate("[", 2000)})
+      {task, _workflow} = complete(ok(200, quoted))
+      assert task.output_data["response"]["body"] == %{"s" => String.duplicate("[", 2000)}
+
+      {task, _workflow} = complete(ok(200, "1." <> String.duplicate("1", 1500)))
+      assert is_float(task.output_data["response"]["body"])
+    end
+
     test "a text body without a charset is read as ISO-8859-1, JSON as UTF-8" do
       {task, _workflow} = complete(ok(200, <<0xE9>>, [{"content-type", "text/plain"}]))
       assert task.output_data["response"]["body"] == "é"
@@ -460,6 +483,18 @@ defmodule Archon.Runtime.Step.HttpTest do
         assert requests(post) == [], inspect(event)
         assert http(waited).poll_count == 1
       end
+    end
+
+    test "a started task with a startDelay is timed out at its deadline, not a delay later" do
+      {stored, post} = start(%{"request" => 42}, [http_task(start_delay: 7200)])
+      assert requests(post) == []
+      {:ok, started, _pre, post} = run(stored, :wake, @now + 7_200_000)
+      assert requests(post) == []
+      assert %Task{status: :scheduled, poll_count: 1, update_time: at} = http(started)
+
+      {:ok, timed_out, _pre, _post} = run(started, :wake, at + @hour)
+      assert %Task{status: :timed_out} = http(timed_out)
+      assert Postpone.wake_at(started, env(at + 1)) <= at + @hour
     end
 
     test "lost with its process (not in flight, its pollCount counted) waits for its deadline too" do
