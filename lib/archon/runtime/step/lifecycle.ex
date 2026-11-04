@@ -15,7 +15,8 @@
 # are revived by a message to each parent in turn instead of one loop over the store, and the
 # decider queue push became the step's decide (ADR 0018, decision 9); a task's child is followed
 # only when it belongs to the task (ADR 0024, decision 2); the queue offsets of resetcallbacks are
-# reset while the env is read (ADR 0025, decision 2).
+# reset while the env is read (ADR 0025, decision 2); each revival names its operation and the
+# workflows below for the parent's log (ADR 0027, decision 6).
 
 defmodule Archon.Runtime.Step.Lifecycle do
   @moduledoc """
@@ -27,10 +28,10 @@ defmodule Archon.Runtime.Step.Lifecycle do
       runs again and is decided. With `push_parents?` its parent is asked to revive
       (`updateAndPushParents`) before the decide's own effects.
     * `restart/2` - upstream `restart`: the tasks are deleted and the workflow starts over.
-    * `child_revived/2` - one level of upstream `updateAndPushParents`, on the parent: the task of
-      the child that runs again goes back to `IN_PROGRESS`, the workflow runs again, its other
-      failed `SUB_WORKFLOW` children are retried and its canceled tasks scheduled again; then it
-      asks its own parent to revive.
+    * `child_revived/3` - one level of upstream `updateAndPushParents`, on the parent: the task of
+      the child that runs again goes back to `IN_PROGRESS` with its log, the workflow runs again,
+      its other failed `SUB_WORKFLOW` children are retried and its canceled tasks scheduled again;
+      then it asks its own parent to revive.
     * `skip_task/2` - upstream `skipTaskFromWorkflow`: a `SKIPPED` task for a reference of the
       definition that has none yet, then a decide (ADR 0025, decision 2).
     * `reset_callbacks/1` - upstream `resetCallbacksForWorkflow`: the tasks whose queue message
@@ -50,6 +51,13 @@ defmodule Archon.Runtime.Step.Lifecycle do
   alias Archon.Decider.{Parameters, SystemTasks}
   alias Archon.Domain.{Task, Workflow, WorkflowDef, WorkflowTask}
   alias Archon.Runtime.Step.{Decide, Env, Schedule, State, SubWorkflow, Terminate}
+  alias Archon.Runtime.TaskLogs
+
+  @typedoc """
+  What a revival from below names for the parent's log: the operation and the chain of workflows
+  below (ADR 0027, decision 6).
+  """
+  @type revival :: {operation :: String.t(), chain :: String.t()}
 
   @type reply :: :ok | {:error, {:conflict | :not_found | :invalid_state | :invalid, String.t()}}
 
@@ -109,6 +117,8 @@ defmodule Archon.Runtime.Step.Lifecycle do
   """
   @spec retry(State.t(), boolean()) :: {reply(), State.t()}
   def retry(%State{wf: wf} = state, push_parents?) do
+    operation = if push_parents?, do: "retried", else: :none
+
     cond do
       not Workflow.terminal?(wf.status) ->
         {{:error, {:not_found, "Workflow is still running.  status=#{status_name(wf.status)}"}},
@@ -120,7 +130,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
       true ->
         case retriable(state) do
           {:ok, retried} ->
-            state = retried |> push_parents(push_parents?) |> Decide.settle()
+            state = retried |> push_parents(operation) |> Decide.settle()
             {:ok, state}
 
           {:error, _reason} = error ->
@@ -309,7 +319,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
           state
           |> State.put_workflow(wf)
           |> State.save_workflow()
-          |> push_parents(true)
+          |> push_parents("restarted")
           |> Decide.settle()
 
         {:ok, state}
@@ -317,14 +327,30 @@ defmodule Archon.Runtime.Step.Lifecycle do
   end
 
   # updateAndPushParents starts at the parent: it gets a message once this workflow's commit is
-  # saved (ADR 0018, decision 1: a child only casts to its parent).
-  defp push_parents(state, false), do: state
+  # saved (ADR 0018, decision 1: a child only casts to its parent). The message names the
+  # operation and this workflow for the parent's log (ADR 0027, decision 6).
+  defp push_parents(state, :none), do: state
 
-  defp push_parents(%State{wf: %Workflow{parent_workflow_id: parent} = wf} = state, true)
-       when parent not in [nil, ""],
-       do: State.post(state, {:revive_parent, parent, wf.parent_workflow_task_id})
+  defp push_parents(state, operation),
+    do: ask_parent(state, {operation, short_string(state.wf)})
 
-  defp push_parents(state, true), do: state
+  # A revival without an operation (an outbox entry stored before ADR 0027) asks on without one,
+  # and no workflow above writes a log for it.
+  defp ask_parent(%State{wf: %Workflow{parent_workflow_id: parent} = wf} = state, revival)
+       when parent not in [nil, ""] do
+    effect =
+      case revival do
+        {operation, chain} ->
+          {:revive_parent, parent, wf.parent_workflow_task_id, operation, chain}
+
+        nil ->
+          {:revive_parent, parent, wf.parent_workflow_task_id}
+      end
+
+    State.post(state, effect)
+  end
+
+  defp ask_parent(state, _revival), do: state
 
   @doc """
   One level of upstream `updateAndPushParents`, on the parent of a child that runs again. The
@@ -334,23 +360,28 @@ defmodule Archon.Runtime.Step.Lifecycle do
   task that failed follows its child (one that runs again) or retries it, canceled `JOIN` and
   `DO_WHILE` tasks run again in place and other canceled tasks are scheduled again; then the
   workflow is decided and asks its own parent.
+
+  `revival` is the operation (`"retried"`, `"restarted"` or `"reran"`) and the chain of
+  workflows below (`name.version/id` joined by `" -> "`): the task gets upstream's log
+  `"Sub workflow <chain> <operation>."` and the parent is asked with this workflow put in front
+  of the chain (ADR 0027, decision 6). A revival stored without them (`nil`) writes no log.
   """
-  @spec child_revived(State.t(), String.t()) :: State.t()
-  def child_revived(%State{} = state, task_id) do
+  @spec child_revived(State.t(), String.t(), revival() | nil) :: State.t()
+  def child_revived(%State{} = state, task_id, revival) do
     case State.task(state, task_id) do
       %Task{workflow_task: %WorkflowTask{optional: false}} = task ->
         if task.retried and task.task_type == "SUB_WORKFLOW",
           do: state,
-          else: revive(state, task)
+          else: revive(state, task, revival)
 
       _gone_or_optional ->
         state
     end
   end
 
-  defp revive(%State{now: now} = state, task) do
+  defp revive(%State{now: now} = state, task, revival) do
     task = %{task | subworkflow_changed: true, status: :in_progress, reason_for_incompletion: nil}
-    state = State.save_task(state, task)
+    state = state |> State.save_task(task) |> revival_log(task, revival)
 
     # A child that already ended again (a restart that finished in its first decide) is read
     # now instead of on the next :wake: its notice reached this workflow before the revival.
@@ -380,11 +411,27 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
     state = State.put_workflow(state, wf)
 
-    state.wf.tasks
-    |> Enum.reduce(state, &repair(&2, &1))
-    |> State.save_workflow()
-    |> push_parents(true)
+    state = state.wf.tasks |> Enum.reduce(state, &repair(&2, &1)) |> State.save_workflow()
+
+    state
+    |> ask_parent(chain_above(state, revival))
     |> Decide.settle()
+  end
+
+  # updateAndPushParents' next level: this workflow in front of the chain below.
+  defp chain_above(_state, nil), do: nil
+
+  defp chain_above(%State{wf: wf}, {operation, chain}),
+    do: {operation, "#{short_string(wf)} -> #{chain}"}
+
+  defp revival_log(state, _task, nil), do: state
+
+  # Every path of upstream's rerunWF walks the parents twice, once before its decide and once
+  # after; the first walk's revival changes nothing the second does not, so a rerun asks once
+  # and each workflow above writes the log twice (ADR 0027, decision 6, slice 8d).
+  defp revival_log(%State{now: now} = state, task, {operation, chain}) do
+    log = TaskLogs.revived(task.task_id, chain, operation, now)
+    State.add_logs(state, List.duplicate(log, if(operation == "reran", do: 2, else: 1)))
   end
 
   # ADR 0026, decision 7: a SCHEDULED HTTP task whose pollCount counted a start is taken as
@@ -579,7 +626,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
       task_id == nil ->
         state = State.delete_tasks(state, Enum.map(wf.tasks, & &1.task_id))
-        {:ok, state |> rerun_workflow(request) |> push_parents(true) |> Decide.settle()}
+        {:ok, state |> rerun_workflow(request) |> push_parents("reran") |> Decide.settle()}
 
       true ->
         case State.task(state, task_id) do
@@ -657,7 +704,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
         case Schedule.schedule(state, new) do
           {:terminate, termination, state} -> terminate_rerun(state, termination)
-          {state, _started?} -> state |> push_parents(true) |> Decide.settle()
+          {state, _started?} -> state |> push_parents("reran") |> Decide.settle()
         end
 
       {:terminate, termination} ->
@@ -723,7 +770,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
   # A rerun that ends in a termination: the workflow ends as a decide's termination ends it.
   defp terminate_rerun(state, termination),
-    do: state |> push_parents(true) |> Terminate.by_decider(termination)
+    do: state |> push_parents("reran") |> Terminate.by_decider(termination)
 
   # addTaskToQueue for an asynchronous system task: evaluated at once without a callback delay,
   # else when the delay is over (the next :wake), as repair_canceled does.
@@ -779,7 +826,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
           state |> State.save_task(task) |> due_now(task)
       end
     end)
-    |> push_parents(true)
+    |> push_parents("reran")
     |> Decide.settle()
   end
 
@@ -864,7 +911,7 @@ defmodule Archon.Runtime.Step.Lifecycle do
         reason_for_incompletion: nil
     }
 
-    {:ok, state |> State.save_task(task) |> push_parents(true) |> Decide.settle()}
+    {:ok, state |> State.save_task(task) |> push_parents("reran") |> Decide.settle()}
   end
 
   defp put_last_retried_time(%State{wf: wf} = state, time),

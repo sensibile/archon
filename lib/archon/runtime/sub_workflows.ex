@@ -28,9 +28,9 @@ defmodule Archon.Runtime.SubWorkflows do
       commit (in its process) or `{:terminate_sub_workflow, child_id, reason, parent_end_count}`
       from its outbox: sends `{:cancel_by_parent, reason, parent_end_count}` to the child with
       `Archon.Runtime.WorkflowServer.cancel_by_parent/3`.
-    * `notify_parent/3`, `revive_parent/2` - `{:notify_parent, ...}`, `{:revive_parent, ...}`
+    * `notify_parent/3`, `revive_parent/3` - `{:notify_parent, ...}`, `{:revive_parent, ...}`
       from the child's outbox: call the parent with `{:child_changed, parent_task_id, child}` or
-      `{:child_revived, parent_task_id}`.
+      `{:child_revived, parent_task_id, ...}`.
     * `retry_child/2` - `{:retry_sub_workflow, child_id}` from a reviving parent's outbox.
     * `start_failure_workflow/1` - `{:start_failure_workflow, start}` from the outbox.
 
@@ -51,7 +51,7 @@ defmodule Archon.Runtime.SubWorkflows do
 
   alias Archon.Domain.Workflow
   alias Archon.Runtime
-  alias Archon.Runtime.Step.{Effect, Event, SubWorkflow}
+  alias Archon.Runtime.Step.{Effect, Event, Lifecycle, SubWorkflow}
   alias Archon.Runtime.WorkflowServer
 
   @doc """
@@ -173,14 +173,16 @@ defmodule Archon.Runtime.SubWorkflows do
 
   @doc """
   Asks the parent to revive because its child runs again (one level of upstream
-  `updateAndPushParents`) with `Archon.Runtime.WorkflowServer.child_revived/2` and returns its
-  answer.
+  `updateAndPushParents`) with `Archon.Runtime.WorkflowServer.child_revived/3` and returns its
+  answer. `revival` is the operation and the chain below for the parent's log, or `nil` for an
+  outbox entry stored without them (ADR 0027, decision 6).
   """
-  @spec revive_parent(String.t(), String.t() | nil) :: :ok | {:error, term()}
-  def revive_parent(parent_id, parent_task_id) when is_binary(parent_task_id),
-    do: WorkflowServer.child_revived(parent_id, parent_task_id)
+  @spec revive_parent(String.t(), String.t() | nil, Lifecycle.revival() | nil) ::
+          :ok | {:error, term()}
+  def revive_parent(parent_id, parent_task_id, revival) when is_binary(parent_task_id),
+    do: WorkflowServer.child_revived(parent_id, parent_task_id, revival)
 
-  def revive_parent(_parent_id, _parent_task_id), do: :ok
+  def revive_parent(_parent_id, _parent_task_id, _revival), do: :ok
 
   @doc """
   Retries a failed child for a reviving parent `owner_id` (upstream `updateAndPushParents` calls

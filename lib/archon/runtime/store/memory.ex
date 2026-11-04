@@ -9,7 +9,8 @@
 # Modified by sensibile: an in-memory GenServer holding the structs as they are (ADR 0018,
 # decision 3); a commit is applied in one message, so readers never see half of it, and also holds
 # the outbox, re-evaluation times and limit checks of ADR 0021, the ordered queries by name
-# of ADR 0025, and the search index of ADR 0027 (SqliteIndexDAO's upserts and removals).
+# of ADR 0025, and the search index and task logs of ADR 0027 (SqliteIndexDAO's upserts, logs and
+# removals).
 
 defmodule Archon.Runtime.Store.Memory do
   @moduledoc """
@@ -37,7 +38,7 @@ defmodule Archon.Runtime.Store.Memory do
 
   use GenServer
 
-  alias Archon.Domain.{Task, Workflow}
+  alias Archon.Domain.{Task, TaskExecLog, Workflow}
   alias Archon.Runtime.{Commit, Store}
   alias Archon.Runtime.Queue.Memory, as: Queue
   alias Archon.Runtime.Step.Effect
@@ -220,6 +221,18 @@ defmodule Archon.Runtime.Store.Memory do
       when is_integer(start) and is_integer(size),
       do: search(server, :task_index, query, start, size)
 
+  @impl Store
+  @spec add_task_logs(GenServer.server(), [TaskExecLog.t()]) :: :ok
+  def add_task_logs(server \\ __MODULE__, logs) when is_list(logs) do
+    Commit.check_logs!(logs)
+    GenServer.call(server, {:add_task_logs, logs})
+  end
+
+  @impl Store
+  @spec task_logs(GenServer.server(), String.t()) :: [TaskExecLog.t()]
+  def task_logs(server \\ __MODULE__, task_id) when is_binary(task_id),
+    do: GenServer.call(server, {:task_logs, task_id})
+
   # The rows are copied out and searched in the caller, so a slow search does not hold the store.
   defp search(server, table, query, start, size) do
     rows = GenServer.call(server, {:index_rows, table})
@@ -246,7 +259,7 @@ defmodule Archon.Runtime.Store.Memory do
       workflow_index: %{},
       task_index: %{},
       index_seq: 0,
-      # task ID => execution logs (task_execution_logs)
+      # task ID => execution logs (task_execution_logs), newest first
       task_logs: %{}
     }
 
@@ -357,6 +370,22 @@ defmodule Archon.Runtime.Store.Memory do
     {:reply, ids, state}
   end
 
+  def handle_call({:add_task_logs, logs}, _from, state) do
+    {:reply, :ok, add_logs(state, logs)}
+  end
+
+  def handle_call({:task_logs, task_id}, _from, state) do
+    logs =
+      state.task_logs
+      |> Map.get(task_id, [])
+      |> Enum.reverse()
+      |> Enum.with_index()
+      |> Enum.sort_by(fn {log, index} -> {log.created_time, index} end)
+      |> Enum.map(&elem(&1, 0))
+
+    {:reply, logs, state}
+  end
+
   def handle_call({:index_rows, table}, _from, state) do
     {:reply, state |> Map.fetch!(table) |> Map.values(), state}
   end
@@ -413,6 +442,7 @@ defmodule Archon.Runtime.Store.Memory do
         |> put_wake(workflow_id, commit.wake)
         |> index_workflow(commit.index_workflow)
         |> index_tasks(commit.index_tasks)
+        |> add_logs(commit.task_logs)
 
       with :ok <- check_limits(state, commit.limits), do: {:ok, state}
     end
@@ -453,6 +483,14 @@ defmodule Archon.Runtime.Store.Memory do
         |> Map.put(table, Map.put(rows, id, Map.put(row, :seq, seq)))
         |> Map.put(:index_seq, seq)
     end
+  end
+
+  # SqliteIndexDAO#addTaskExecutionLogs; the list is newest first, and reversed it is the order
+  # they were added (log_id).
+  defp add_logs(state, logs) do
+    Enum.reduce(logs, state, fn %TaskExecLog{task_id: id} = log, state ->
+      %{state | task_logs: Map.update(state.task_logs, id, [log], &[log | &1])}
+    end)
   end
 
   defp newer?(time, stored) when is_integer(time) and is_integer(stored), do: time >= stored

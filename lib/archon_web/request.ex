@@ -23,6 +23,8 @@ defmodule ArchonWeb.Request do
   or none (Spring reads it as `application/octet-stream`), is a 500
   `"Content-Type '<type>' is not supported"`. This also keeps a browser's cross-origin "simple"
   request (`text/plain`, a form), which needs no CORS preflight, from reaching an action.
+  `read_text/2` reads a body upstream takes as a `String` whatever its type, so its actions need
+  `ArchonWeb.Plugs.RefuseCrossOrigin` instead.
 
   ## Query values
 
@@ -73,6 +75,104 @@ defmodule ArchonWeb.Request do
         {:error, reason, conn}
     end
   end
+
+  @doc """
+  Reads the body as text, as Spring's `StringHttpMessageConverter` gives a `@RequestBody String`:
+  whatever its `Content-Type` (a JSON string keeps its quotes), with no byte order mark skipped
+  (ADR 0027, decision 6). The bytes are decoded with the `charset` of the `Content-Type`:
+  `ISO-8859-1`, `US-ASCII` (a byte over 127 is U+FFFD, as Java decodes it) and `UTF-16`,
+  `UTF-16BE`, `UTF-16LE`; any other charset, or none, is UTF-8 (Spring Boot's default). Invalid
+  UTF-8 is left to the caller. An empty body is the missing body of `read_json/2`, and a body
+  over 8 MB is a 413.
+  """
+  @spec read_text(Plug.Conn.t(), handler: String.t()) ::
+          {:ok, binary(), Plug.Conn.t()} | {:error, term(), Plug.Conn.t()}
+  def read_text(conn, opts \\ []) do
+    case read_all(conn, []) do
+      {:ok, "", conn} -> {:error, missing_body(opts), conn}
+      {:ok, bytes, conn} -> {:ok, decode_charset(bytes, charset(conn)), conn}
+      error -> error
+    end
+  end
+
+  # The charset parameter of the Content-Type, lower case, "utf-8" without one.
+  defp charset(conn) do
+    params =
+      case Plug.Conn.get_req_header(conn, "content-type") do
+        [value | _rest] -> value |> String.split(";") |> tl()
+        [] -> []
+      end
+
+    params
+    |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
+    |> Enum.find_value("utf-8", fn
+      "charset=" <> name -> name |> String.trim() |> String.trim(~s("))
+      _other -> nil
+    end)
+  end
+
+  defp decode_charset(bytes, charset) when charset in ["iso-8859-1", "iso_8859-1", "latin1"],
+    do: :unicode.characters_to_binary(bytes, :latin1)
+
+  defp decode_charset(bytes, charset) when charset in ["us-ascii", "ascii"],
+    do: for(<<byte <- bytes>>, into: "", do: if(byte < 128, do: <<byte>>, else: "\uFFFD"))
+
+  defp decode_charset(bytes, "utf-16be"), do: utf16(bytes, :big, [])
+  defp decode_charset(bytes, "utf-16le"), do: utf16(bytes, :little, [])
+
+  # Java's UTF-16 reads a byte order mark and drops it; without one it is big-endian.
+  defp decode_charset(<<0xFE, 0xFF, rest::binary>>, charset) when charset in ["utf-16", "utf16"],
+    do: utf16(rest, :big, [])
+
+  defp decode_charset(<<0xFF, 0xFE, rest::binary>>, charset) when charset in ["utf-16", "utf16"],
+    do: utf16(rest, :little, [])
+
+  defp decode_charset(bytes, charset) when charset in ["utf-16", "utf16"],
+    do: utf16(bytes, :big, [])
+
+  defp decode_charset(bytes, _utf8), do: bytes
+
+  # One pass over the units, as Java's decoder (checked on OpenJDK 25): a surrogate pair is one
+  # character, a high surrogate with the unit after it, a low surrogate alone and an odd last byte
+  # are U+FFFD each, and decoding goes on after them.
+  defp utf16(<<>>, _endian, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+
+  defp utf16(<<hi::16-big, lo::16-big, rest::binary>>, :big = endian, acc)
+       when hi in 0xD800..0xDBFF and lo in 0xDC00..0xDFFF,
+       do: utf16(rest, endian, [<<pair(hi, lo)::utf8>> | acc])
+
+  defp utf16(<<hi::16-little, lo::16-little, rest::binary>>, :little = endian, acc)
+       when hi in 0xD800..0xDBFF and lo in 0xDC00..0xDFFF,
+       do: utf16(rest, endian, [<<pair(hi, lo)::utf8>> | acc])
+
+  # A high surrogate and the unit after it that is not its pair are one malformed sequence, and
+  # so are a high surrogate and an odd last byte.
+  defp utf16(<<hi::16-big, _next::16, rest::binary>>, :big = endian, acc)
+       when hi in 0xD800..0xDBFF,
+       do: utf16(rest, endian, ["\uFFFD" | acc])
+
+  defp utf16(<<hi::16-little, _next::16, rest::binary>>, :little = endian, acc)
+       when hi in 0xD800..0xDBFF,
+       do: utf16(rest, endian, ["\uFFFD" | acc])
+
+  defp utf16(<<hi::16-big, _odd>>, :big = endian, acc) when hi in 0xD800..0xDBFF,
+    do: utf16(<<>>, endian, ["\uFFFD" | acc])
+
+  defp utf16(<<hi::16-little, _odd>>, :little = endian, acc) when hi in 0xD800..0xDBFF,
+    do: utf16(<<>>, endian, ["\uFFFD" | acc])
+
+  defp utf16(<<unit::16-big, rest::binary>>, :big = endian, acc),
+    do: utf16(rest, endian, [unit_text(unit) | acc])
+
+  defp utf16(<<unit::16-little, rest::binary>>, :little = endian, acc),
+    do: utf16(rest, endian, [unit_text(unit) | acc])
+
+  defp utf16(<<_odd>>, endian, acc), do: utf16(<<>>, endian, ["\uFFFD" | acc])
+
+  defp pair(hi, lo), do: 0x10000 + Bitwise.bsl(hi - 0xD800, 10) + (lo - 0xDC00)
+
+  defp unit_text(unit) when unit in 0xD800..0xDFFF, do: "\uFFFD"
+  defp unit_text(unit), do: <<unit::utf8>>
 
   # An empty body is the missing body whatever its type (decode/3).
   defp json_content_type(_conn, ""), do: :ok

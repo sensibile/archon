@@ -148,8 +148,12 @@ defmodule Archon.Runtime.Outbox do
   def run_effect(_owner_id, {:notify_parent, parent_id, parent_task_id, %Workflow{} = child}),
     do: SubWorkflows.notify_parent(parent_id, parent_task_id, child)
 
+  def run_effect(_owner_id, {:revive_parent, parent_id, parent_task_id, operation, chain}),
+    do: SubWorkflows.revive_parent(parent_id, parent_task_id, {operation, chain})
+
+  # An entry stored before ADR 0027 (decision 6) names no operation: the parent writes no log.
   def run_effect(_owner_id, {:revive_parent, parent_id, parent_task_id}),
-    do: SubWorkflows.revive_parent(parent_id, parent_task_id)
+    do: SubWorkflows.revive_parent(parent_id, parent_task_id, nil)
 
   def run_effect(owner_id, {:retry_sub_workflow, child_id}),
     do: SubWorkflows.retry_child(owner_id, child_id)

@@ -22,6 +22,7 @@ defmodule Archon.Runtime.Step.State do
   #   * `index`/`index_order` - the tasks upstream indexes in this step (`updateTask`), as they
   #     were saved then, by ID, and the IDs in the order they were first indexed (ADR 0027,
   #     decision 2).
+  #   * `logs` - task execution logs the commit adds (ADR 0027, decision 6), newest first.
   #   * `pre`/`post` - effects, newest first.
   #   * `iterations` - decide loop iterations so far (ADR 0018, decision 4); `halted?` once the
   #     limit stopped the loop.
@@ -36,7 +37,7 @@ defmodule Archon.Runtime.Step.State do
   #     upstream's `startWorkflow` until its first decide returns (`createWorkflowModel` sets the
   #     definition's map, which a `SET_VARIABLE` then changes in both; ADR 0026, decision 3).
 
-  alias Archon.Domain.{Task, TaskDef, Workflow}
+  alias Archon.Domain.{Task, TaskDef, TaskExecLog, Workflow}
   alias Archon.Runtime.{Commit, SearchIndex}
   alias Archon.Runtime.Step.{Effect, Env}
 
@@ -54,6 +55,7 @@ defmodule Archon.Runtime.Step.State do
     index_order: [],
     deletes: [],
     workflow_dirty?: false,
+    logs: [],
     pre: [],
     post: [],
     iterations: 0,
@@ -79,6 +81,7 @@ defmodule Archon.Runtime.Step.State do
           index_order: [String.t() | nil],
           deletes: [String.t() | nil],
           workflow_dirty?: boolean(),
+          logs: [TaskExecLog.t()],
           pre: [Effect.t()],
           post: [Effect.t()],
           iterations: non_neg_integer(),
@@ -220,6 +223,10 @@ defmodule Archon.Runtime.Step.State do
     %{workflow | status: status, previous_status: previous, end_count: end_count}
   end
 
+  @doc "Adds task execution logs to the commit, after the ones added before."
+  @spec add_logs(t(), [TaskExecLog.t()]) :: t()
+  def add_logs(state, logs), do: %{state | logs: Enum.reverse(logs, state.logs)}
+
   @spec pre(t(), Effect.t()) :: t()
   def pre(state, effect), do: %{state | pre: [effect | state.pre]}
 
@@ -268,7 +275,8 @@ defmodule Archon.Runtime.Step.State do
       create: stored,
       limits: held_limits(state.limits, stored.tasks),
       index_workflow: SearchIndex.workflow_row(stored),
-      index_tasks: index_rows(state)
+      index_tasks: index_rows(state),
+      task_logs: Enum.reverse(state.logs)
     }
   end
 
@@ -285,7 +293,8 @@ defmodule Archon.Runtime.Step.State do
       delete_task_ids: state.deletes,
       limits: held_limits(state.limits, upserts),
       index_workflow: if(state.workflow_dirty?, do: SearchIndex.workflow_row(state.stored)),
-      index_tasks: index_rows(state)
+      index_tasks: index_rows(state),
+      task_logs: Enum.reverse(state.logs)
     }
   end
 
