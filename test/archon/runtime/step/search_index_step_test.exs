@@ -12,10 +12,10 @@ defmodule Archon.Runtime.Step.SearchIndexStepTest do
 
   use ExUnit.Case, async: true
 
-  alias Archon.Domain.{TaskDef, TaskResult, Workflow, WorkflowDef, WorkflowTask}
+  alias Archon.Domain.{Task, TaskDef, TaskResult, Workflow, WorkflowDef, WorkflowTask}
   alias Archon.Runtime.{Commit, SearchIndex}
   alias Archon.Runtime.Step
-  alias Archon.Runtime.Step.Env
+  alias Archon.Runtime.Step.{Env, State}
 
   @now 1_000_000
 
@@ -126,6 +126,24 @@ defmodule Archon.Runtime.Step.SearchIndexStepTest do
     assert indexed(commit)[by_ref(workflow, "fork").task_id] == "COMPLETED"
     # The branches are only scheduled.
     refute Map.has_key?(indexed(commit), by_ref(workflow, "left").task_id)
+  end
+
+  # upstream indexes in the order of its updateTask calls, whenever the tasks were created.
+  test "task rows come in the order the tasks were first indexed" do
+    stored = %Workflow{workflow_id: "wf", status: :running}
+    new = fn id -> %Task{task_id: id, workflow_instance_id: "wf", status: :scheduled} end
+
+    commit =
+      stored
+      |> State.new(env())
+      |> State.create_tasks([new.("a"), new.("b")])
+      |> State.save_task(new.("b"))
+      |> State.save_task(%{new.("a") | status: :in_progress})
+      |> State.save_task(%{new.("b") | status: :in_progress})
+      |> State.commit()
+
+    assert Enum.map(commit.index_tasks, &{&1.task_id, &1.status}) ==
+             [{"b", "IN_PROGRESS"}, {"a", "IN_PROGRESS"}]
   end
 
   test "a task skiptask makes is not indexed, then or when the workflow ends" do

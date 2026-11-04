@@ -19,8 +19,9 @@ defmodule Archon.Runtime.Step.State do
   #   * `stored` - the workflow as the store holds it once the commit is applied: what upstream
   #     wrote through `ExecutionDAOFacade`.
   #   * `upserts`/`order`, `deletes`, `workflow_dirty?`, `created?` - the commit.
-  #   * `index` - the tasks upstream indexes in this step (`updateTask`), as they were saved
-  #     then, by ID (ADR 0027, decision 2).
+  #   * `index`/`index_order` - the tasks upstream indexes in this step (`updateTask`), as they
+  #     were saved then, by ID, and the IDs in the order they were first indexed (ADR 0027,
+  #     decision 2).
   #   * `pre`/`post` - effects, newest first.
   #   * `iterations` - decide loop iterations so far (ADR 0018, decision 4); `halted?` once the
   #     limit stopped the loop.
@@ -50,6 +51,7 @@ defmodule Archon.Runtime.Step.State do
     upserts: %{},
     order: [],
     index: %{},
+    index_order: [],
     deletes: [],
     workflow_dirty?: false,
     pre: [],
@@ -74,6 +76,7 @@ defmodule Archon.Runtime.Step.State do
           upserts: %{optional(String.t() | nil) => Task.t() | map()},
           order: [String.t() | nil],
           index: %{optional(String.t() | nil) => Task.t()},
+          index_order: [String.t() | nil],
           deletes: [String.t() | nil],
           workflow_dirty?: boolean(),
           pre: [Effect.t()],
@@ -134,9 +137,20 @@ defmodule Archon.Runtime.Step.State do
     task = if terminal? and task.end_time == 0, do: %{task | end_time: now}, else: task
     state = write(state, task)
 
-    if Keyword.get(opts, :index, true),
-      do: %{state | index: Map.put(state.index, task.task_id, task)},
-      else: state
+    cond do
+      not Keyword.get(opts, :index, true) ->
+        state
+
+      Map.has_key?(state.index, task.task_id) ->
+        %{state | index: Map.put(state.index, task.task_id, task)}
+
+      true ->
+        %{
+          state
+          | index: Map.put(state.index, task.task_id, task),
+            index_order: [task.task_id | state.index_order]
+        }
+    end
   end
 
   @spec save_tasks(t(), [Task.t()]) :: t()
@@ -275,13 +289,11 @@ defmodule Archon.Runtime.Step.State do
     }
   end
 
-  # In the order the tasks were first saved, once each; a task deleted afterwards stays indexed,
+  # In the order upstream's updateTask first indexed them; a task deleted afterwards stays indexed,
   # as upstream's removeTask leaves the index.
   defp index_rows(%__MODULE__{index: index, now: now} = state) do
-    state.order
+    state.index_order
     |> Enum.reverse()
-    |> Enum.uniq()
-    |> Enum.filter(&Map.has_key?(index, &1))
     |> Enum.map(&SearchIndex.task_row(Map.fetch!(index, &1), now))
   end
 

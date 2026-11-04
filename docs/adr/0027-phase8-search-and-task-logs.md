@@ -118,6 +118,7 @@ archon에 이미 있는 것(`541865c` 기준):
     - 상태는 upstream 상수 이름(`RUNNING`)이다.
   - 색인 자리는 `Step.State`에서 정한다.
     - `save_task`는 그때 저장한 버전을 색인한다. 같은 Step에서 다시 저장하면 마지막 버전이고, 요약 시각은 Step의 `now`다.
+    - 한 커밋의 태스크 행 순서는 upstream `updateTask`처럼 처음 색인한 순서다(태스크를 만든 순서가 아니다).
     - `create_tasks`는 색인하지 않는다.
     - `save_task(..., index: false)`는 두 곳뿐이다. 하나는 extendLease이고, 다른 하나는 sweeper의 `forceSetLastTaskAsNotExecuted`다
       (upstream이 `executionDAO.updateWorkflow`만 부른다).

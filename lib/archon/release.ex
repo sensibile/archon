@@ -7,8 +7,8 @@ defmodule Archon.Release do
   Database migrations outside Mix (ADR 0021, decision 1).
 
   A release runs `migrate/0`, which migrates the runtime schema only. Development and tests also
-  migrate the contract test schema (`migrate/1` with both prefixes; `mix ecto.setup` and
-  `test/test_helper.exs` do this). Each Postgres schema keeps its own `schema_migrations` table.
+  migrate the contract test schema (`migrate/1` with both prefixes, as `mix ecto.setup`
+  does; `test/test_helper.exs` uses `migrate/2`). Each Postgres schema keeps its own `schema_migrations` table.
 
   `migrate/0` and `migrate/1` end with `backfill_search_index/2` for each schema, so the search
   index holds the rows written before it existed before the application starts (ADR 0027,
@@ -21,9 +21,9 @@ defmodule Archon.Release do
   @backfill_batch 500
   # Task index rows per INSERT, so one statement stays small whatever a workflow holds.
   @backfill_insert 1_000
-  # The first key of the backfill's advisory lock ("Arch" in ASCII, as the store's limit locks);
-  # the second is a key of the schema.
-  @backfill_lock_class 0x41726368
+  # The first key of the backfill's advisory lock ("ArBf" in ASCII, apart from the store's limit
+  # locks); the second is a key of the schema.
+  @backfill_lock_class 0x41724266
 
   @workflow_index_columns [
     workflow_id: :text,
@@ -193,8 +193,8 @@ defmodule Archon.Release do
     tasks =
       for id <- ids,
           Map.has_key?(json, id),
-          {task_id, json} <- Map.get(tasks, id, []),
-          do: SearchIndex.task_row(decode!(Task, json, task_id), now)
+          {task_id, task_json} <- Map.get(tasks, id, []),
+          do: SearchIndex.task_row(decode!(Task, task_json, task_id), now)
 
     insert_index(repo, table.("workflow_index"), workflows, @workflow_index_columns)
 

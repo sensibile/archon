@@ -161,7 +161,14 @@ defmodule Archon.Runtime.PostgresTest do
       tasks = [
         task("b", "t2", 2, start_time: 20, scheduled_time: 15),
         task("b", "t1", 1, status: :scheduled),
-        task("a", "t3", 1, status: :completed, start_time: 10, end_time: 11)
+        task("a", "t3", 1, status: :completed, start_time: 10, end_time: 11),
+        # queueWaitTime counts from the callback's due time to the run.
+        task("a", "t4", 2,
+          scheduled_time: 1,
+          start_time: 2,
+          update_time: 3,
+          callback_after_seconds: 1
+        )
       ]
 
       for task <- tasks do
@@ -185,7 +192,9 @@ defmodule Archon.Runtime.PostgresTest do
         ~s|INSERT INTO "#{@scratch}".task_index (task_id, json_data) VALUES ('t3', 'kept')|
       )
 
-      assert Release.backfill_search_index(Repo, @scratch) == {:ok, 4, 3}
+      before = System.system_time(:millisecond)
+      assert Release.backfill_search_index(Repo, @scratch) == {:ok, 4, 4}
+      after_run = System.system_time(:millisecond)
 
       assert index(@scratch, "workflow_index", "workflow_id") == [
                {"b",
@@ -197,8 +206,11 @@ defmodule Archon.Runtime.PostgresTest do
                {"n", SearchIndex.workflow_row(with_definition(Enum.at(workflows, 3), definition))}
              ]
 
-      assert [{"t3", %{json_data: "kept"}}, {"t1", t1}, {"t2", t2}] =
+      assert [{"t3", %{json_data: "kept"}}, {"t1", t1}, {"t2", t2}, {"t4", t4}] =
                index(@scratch, "task_index", "task_id")
+
+      wait = JSON.decode!(t4.json_data)["queueWaitTime"]
+      assert wait in (before - 1_003)..(after_run - 1_003)
 
       assert t1 == SearchIndex.task_row(Enum.at(tasks, 1), 0)
       assert t2 == SearchIndex.task_row(Enum.at(tasks, 0), 0)
@@ -207,13 +219,21 @@ defmodule Archon.Runtime.PostgresTest do
       assert "search_index_backfill" in marked(@scratch)
     end
 
-    test "backfills of one schema run one at a time, and the second finds the marker" do
+    test "a backfill waits for one running on the same schema and then finds the marker" do
       assert [_ | _] = Release.migrate(Repo, @scratch)
+      <<key::signed-32>> = <<:erlang.crc32("search_index_backfill:" <> @scratch)::32>>
+      lock = [0x41724266, key]
 
-      runs =
-        for _ <- 1..2, do: Task.async(fn -> Release.backfill_search_index(Repo, @scratch) end)
+      Repo.checkout(fn ->
+        Repo.query!("SELECT pg_advisory_lock($1::integer, $2::integer)", lock)
+        waiting = Task.async(fn -> Release.backfill_search_index(Repo, @scratch) end)
+        assert Task.yield(waiting, 300) == nil
 
-      assert runs |> Enum.map(&Task.await/1) |> Enum.sort() == [:done, {:ok, 0, 0}]
+        # What the running one leaves when it finishes.
+        Repo.query!(~s|INSERT INTO "#{@scratch}".search_index_backfill VALUES (1)|)
+        Repo.query!("SELECT pg_advisory_unlock($1::integer, $2::integer)", lock)
+        assert Task.await(waiting) == :done
+      end)
     end
 
     test "migrate/1 backfills each schema it migrates" do
