@@ -88,6 +88,19 @@ defmodule ArchonWeb.TaskLogControllerTest do
     expected = String.duplicate("A", 5000) <> "\uFFFD" <> String.duplicate("B", 5000)
     assert [%{"log" => ^expected}] = json_response(logs(id), 200)
 
+    # Java's decoder (OpenJDK 25): a high surrogate swallows the unit after it.
+    for {bytes, expected} <- [
+          {<<0xD8, 0x00, 0, ?A, 0, ?B>>, "\uFFFDB"},
+          {<<0xD8, 0x00, 0xD8, 0x00, 0xDC, 0x00>>, "\uFFFD\uFFFD"},
+          {<<0xD8, 0x00, ?A>>, "\uFFFD"},
+          {<<0xDC, 0x00, 0, ?A>>, "\uFFFDA"},
+          {<<0xD8, 0x3D, 0xDE, 0x00>>, "\u{1F600}"}
+        ] do
+      other = task_id()
+      assert response(post_log(other, bytes, "text/plain;charset=UTF-16BE"), 200)
+      assert [%{"log" => ^expected}] = json_response(logs(other), 200)
+    end
+
     # 4 MB of alternating valid and unpaired units: quadratic decoding would take hours.
     body = String.duplicate(<<0, ?A, 0xDC, 0x00>>, 1_000_000)
     {micros, conn} = :timer.tc(fn -> post_log(id, body, "text/plain;charset=UTF-16BE") end)

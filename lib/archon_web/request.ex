@@ -132,8 +132,9 @@ defmodule ArchonWeb.Request do
 
   defp decode_charset(bytes, _utf8), do: bytes
 
-  # One pass over the units, as Java's decoder: a surrogate pair is one character, a surrogate
-  # without its pair and an odd last byte are U+FFFD each, and decoding goes on after them.
+  # One pass over the units, as Java's decoder (checked on OpenJDK 25): a surrogate pair is one
+  # character, a high surrogate with the unit after it, a low surrogate alone and an odd last byte
+  # are U+FFFD each, and decoding goes on after them.
   defp utf16(<<>>, _endian, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
 
   defp utf16(<<hi::16-big, lo::16-big, rest::binary>>, :big = endian, acc)
@@ -143,6 +144,22 @@ defmodule ArchonWeb.Request do
   defp utf16(<<hi::16-little, lo::16-little, rest::binary>>, :little = endian, acc)
        when hi in 0xD800..0xDBFF and lo in 0xDC00..0xDFFF,
        do: utf16(rest, endian, [<<pair(hi, lo)::utf8>> | acc])
+
+  # A high surrogate and the unit after it that is not its pair are one malformed sequence, and
+  # so are a high surrogate and an odd last byte.
+  defp utf16(<<hi::16-big, _next::16, rest::binary>>, :big = endian, acc)
+       when hi in 0xD800..0xDBFF,
+       do: utf16(rest, endian, ["\uFFFD" | acc])
+
+  defp utf16(<<hi::16-little, _next::16, rest::binary>>, :little = endian, acc)
+       when hi in 0xD800..0xDBFF,
+       do: utf16(rest, endian, ["\uFFFD" | acc])
+
+  defp utf16(<<hi::16-big, _odd>>, :big = endian, acc) when hi in 0xD800..0xDBFF,
+    do: utf16(<<>>, endian, ["\uFFFD" | acc])
+
+  defp utf16(<<hi::16-little, _odd>>, :little = endian, acc) when hi in 0xD800..0xDBFF,
+    do: utf16(<<>>, endian, ["\uFFFD" | acc])
 
   defp utf16(<<unit::16-big, rest::binary>>, :big = endian, acc),
     do: utf16(rest, endian, [unit_text(unit) | acc])
