@@ -10,7 +10,7 @@
   머지 권한이고, Codex 실행 가능 여부는 Codex CLI 설정이 정한다. 맥락의 상시 허용 기록은 사실 기록으로 남긴다.
 - 비고(2026-11-04): 경로 허용 목록 검사 도구 `scripts/worker_path_check.sh`는
   [ADR 0029](0029-taeguk-worker-scope-and-validation-suites.md)가 `.taeguk/tools/check_worker_scope.py`와
-  `.taeguk/worker-scope.toml`로 대체한다. 허용 범위와 auto-merge 조건은 그대로다.
+  `.taeguk/worker-scope.toml`로 대체한다. auto-merge 조건은 그대로이고, 허용 범위는 줄기만 했다.
 
 ## 맥락
 

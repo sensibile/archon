@@ -44,7 +44,8 @@ CI는 push와 PR 때만 돌아서 변경이 없는 날의 `main`은 검증을 �
 - 툴체인 기록: `elixir --version`(Elixir, OTP), `cc --version`, `make --version`(archon_js 빌드),
   `docker version --format '{{.Server.Version}}'`, Postgres 이미지와 서버 버전, `python3 --version`, OS 버전. 이전 보고와 비교해 바뀐 값을 표시한다.
 - 스위트는 태극 `validation_health.py`로 돌린다. 도구는 태극 체크아웃의 `origin/main`에서 임시 파일로 꺼내고,
-  태극 체크아웃은 읽기만 한다. 도구가 스위트를 하나씩 따로 돌려 종료 코드, 소요 시간, 건수, 출력 끝부분을 표로 남기고,
+  태극 체크아웃은 읽기만 한다. 목록은 `--root`가 아니라 현재 디렉터리 기준으로 열리므로 반드시 시험 대상 worktree의
+  절대 경로로 준다. 검사기와 이 도구는 Python 3.11 이상(`tomllib`)이 필요하다. 도구가 스위트를 하나씩 따로 돌려 종료 코드, 소요 시간, 건수, 출력 끝부분을 표로 남기고,
   실패한 스위트는 선행 스위트와 함께 한 번 다시 돌린다.
 
   ```bash
@@ -52,7 +53,7 @@ CI는 push와 PR 때만 돌아서 변경이 없는 날의 `main`은 검증을 �
     git -C <태극 체크아웃> fetch origin &&
     git -C <태극 체크아웃> show origin/main:scripts/validation_health.py >"$tool" &&
     VALIDATOR_PYTHON=<main checkout>/.taeguk/validation-health/venv/bin/python \
-      python3 -I "$tool" run --suites .taeguk/validation-suites.toml --root <worktree> --rerun-failed \
+      python3 -I "$tool" run --suites <worktree>/.taeguk/validation-suites.toml --root <worktree> --rerun-failed \
       --json <보고 디렉터리>/<날짜>.json --log-dir <보고 디렉터리>/<날짜>-logs
   ```
 

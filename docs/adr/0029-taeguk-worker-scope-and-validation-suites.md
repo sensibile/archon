@@ -5,7 +5,7 @@
 - 태극 원본: sensibile/taeguk `7d0a7a82a0386651848f9b86411b2f48923acba8`(archon 설치본, [ADR 0028](0028-taeguk-ver005-convergence-and-tools.md))
 - 대체: [ADR 0028](0028-taeguk-ver005-convergence-and-tools.md) 결정 4·5, [ADR 0013](0013-taeguk-daily-workers.md)
   결정의 경로 허용 목록 검사 도구(`scripts/worker_path_check.sh`), [ADR 0016](0016-taeguk-review-order-and-model.md)
-  결정 5의 "Scope check는 `scripts/worker_path_check.sh` 경로 검사다". 허용 범위와 auto-merge 조건 자체는 그대로다.
+  결정 5의 "Scope check는 `scripts/worker_path_check.sh` 경로 검사다". auto-merge 조건은 그대로이고, 허용 범위는 `test/scripts/`를 막아 줄기만 했다.
 
 ## 맥락
 
@@ -50,7 +50,8 @@ ADR 0028은 태극 `7d0a7a8`을 재설치하면서 두 도구를 설치만 하�
      거부한 경로를 새 검사기가 통과시킨 경우는 0건이다. 실제 워커 PR(#38, #45, #46, #57, #74, #85, #86)은 양쪽 판정이
      같았다.
 3. **검증 건강도 스위트 목록은 `.taeguk/validation-suites.toml`이다.** 태극 체크아웃의 `origin/main`에서 꺼낸
-   `validation_health.py`로 `run --suites .taeguk/validation-suites.toml --root <worktree> --rerun-failed`를 실행한다.
+   `validation_health.py`로 `run --suites <worktree>/.taeguk/validation-suites.toml --root <worktree> --rerun-failed`를
+   실행한다. 목록은 현재 디렉터리 기준으로 열리므로 시험 대상 worktree의 절대 경로로 준다.
    - 스위트: `mix deps.get`, `mix deps.unlock --check-unused`, AGENTS.md 검증 여섯 가지(`mix format --check-formatted`,
      `mix compile --warnings-as-errors`, `mix test`, `mix credo --strict`, `mix dialyzer`, `mix deps.audit`),
      `ARCHON_BACKEND=postgres mix test`, `mix hex.audit`, skill-creator 검증기. 모두 CI와 같이 `MIX_ENV=test`다.
