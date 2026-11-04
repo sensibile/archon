@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/workflow/78a9b93f-4695-401e-9969-159a0432e5b1",
+    "path": "/api/workflow/9bf03f5c-e505-4890-ba2b-6c090e6228f1",
     "body": null
   },
   "response": {
@@ -9,7 +9,7 @@
     "content_type": "application/json",
     "body": {
       "status": 404,
-      "message": "No such workflow found by id: 78a9b93f-4695-401e-9969-159a0432e5b1",
+      "message": "No such workflow found by id: 9bf03f5c-e505-4890-ba2b-6c090e6228f1",
       "instance": "<redacted-hostname>",
       "retryable": false
     }

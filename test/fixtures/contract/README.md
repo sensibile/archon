@@ -161,7 +161,7 @@ Phase 6 단계는 조각 6a~6g가 구현하는 동안 미구현 액션으로 가
 `pollCount`, stub `date` 헤더)만 다른 것을 확인하고 새 4개만 넣었다.
 
 아래는 Phase 8(검색·색인과 task 로그, [ADR 0027](../../../docs/adr/0027-phase8-search-and-task-logs.md) 결정 7)의 첫 조각
-8a가 더한 것이다(166개, 모두 687개). 이름은 모두 `p8_*`, 정의 이름은 `archon_p8_*`다. 색인에는 캡처의 모든 워크플로우가
+8a가 더한 것이다(171개, 모두 691개). 이름은 모두 `p8_*`, 정의 이름은 `archon_p8_*`다. 색인에는 캡처의 모든 워크플로우가
 있으므로 질의는 이 절의 정의 이름이나 상관 ID로 거르고, 목록은 결과 사이에서 유일한 키(`correlationId`, `status`, `taskType`,
 `workflowType`)로 정렬하거나 결과가 하나다. 그전까지 404로 기대하던 Later 픽스처 넷(`route_later_workflow_search`,
 `route_later_tasks_search`, `route_later_workflow_bulk_search`, `route_later_task_log`)은 걸러지지 않은 캡처 DB 전체의 결과라 지웠다.
@@ -180,9 +180,9 @@ Phase 6 단계는 조각 6a~6g가 구현하는 동안 미구현 액션으로 가
 | `p8_parent_*`, `p8_child_*`, `p8_search_{family,top_level*,parent_id}` | 자식의 retry·restart·rerun이 부모 SUB_WORKFLOW 태스크에 남기는 로그(rerun은 두 번), `topLevelOnly`, `parentWorkflowId` |
 | `p8_bulk_search_*` | bulk/search 빈 목록·1001개 400, 섞인 결과, `includeTasks=false`, `null` body 500(`WorkflowModel` 모양) |
 
-8a가 다시 캡처한 기존 521개는 `normalize/1` 기준으로 알려진 값(bulk 오류 맵의 키, 람다 클래스 이름,
+8a가 다시 캡처한 기존 520개는 `normalize/1` 기준으로 알려진 값(bulk 오류 맵의 키, 람다 클래스 이름,
 `metadata_register_taskdefs_coerced`의 위반 순서, JOIN `pollCount`, stub `date` 헤더, `workflow_correlated_paused_closed`의 순서)만
-달랐다. 같은 시나리오를 두 번 캡처해 `p8_*`도 `normalize/1` 기준으로 같은 것을 확인했다(첫 캡처에서 이름이 겹친 `p8_remove_delete_get`은 지운 뒤의 GET을 `_removed`로 나눴다). Phase 8 단계는 조각 8b~8e가 구현하는
+달랐다. 같은 시나리오를 두 번 캡처해 `p8_*`도 `normalize/1` 기준으로 같은 것을 확인했다(첫 캡처에서 이름이 겹친 `p8_remove_delete_get`은 지운 뒤의 GET을 `_removed`로 나눴다). Phase 8 단계는 조각 8d·8e가 구현하는
 동안 미구현 액션으로 가는 단계를 건너뛴다(컨트롤러의 `unimplemented/0`, 단계 옵션 `requires:`). 8f가 그 장치를 없앤다.
 
 Archon이 일부러 다르게 답하는 픽스처(Later 경로와 405는 404, Jackson 문구)는 재생 도우미

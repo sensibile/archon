@@ -3,8 +3,8 @@
     "method": "POST",
     "path": "/api/tasks/update-v2",
     "body": {
-      "workflowInstanceId": "1b40c99e-7a40-4221-aede-47159e5eddf1",
-      "taskId": "98e8de5c-a813-420e-94a2-5da23175daad",
+      "workflowInstanceId": "d98d0e6b-12d3-4514-b826-992dfebba671",
+      "taskId": "81e64d1c-acc8-4ae6-a167-ce9838ecf628",
       "status": "COMPLETED",
       "workerId": "archon-contract",
       "outputData": {
@@ -27,18 +27,18 @@
       "correlationId": "archon-corr-3",
       "pollCount": 1,
       "taskDefName": "archon_task_c",
-      "scheduledTime": 1793750478920,
-      "startTime": 1793750479052,
+      "scheduledTime": 1793751710835,
+      "startTime": 1793751710983,
       "endTime": 0,
-      "updateTime": 1793750479052,
+      "updateTime": 1793751710983,
       "startDelayInSeconds": 0,
       "retried": false,
       "executed": false,
       "callbackFromWorker": true,
       "responseTimeoutSeconds": 60,
-      "workflowInstanceId": "f52bc709-5bfb-4aa5-bf1f-adf3694a87c4",
+      "workflowInstanceId": "2be8bc70-6521-4497-bde8-c7ea1ff3b2bc",
       "workflowType": "archon_inline",
-      "taskId": "4d17d695-0515-4d4f-abf9-e2e978a9c63a",
+      "taskId": "e51e14fd-59b4-45de-a90e-bfbb6558140f",
       "callbackAfterSeconds": 0,
       "workerId": "archon-contract",
       "outputData": {},
@@ -56,8 +56,8 @@
         "joinOn": [],
         "optional": false,
         "taskDefinition": {
-          "createTime": 1793750478006,
-          "updateTime": 1793750478042,
+          "createTime": 1793751709818,
+          "updateTime": 1793751709853,
           "createdBy": "",
           "updatedBy": "",
           "name": "archon_task_c",
@@ -96,12 +96,12 @@
       "firstStartTime": 0,
       "executionMetadata": {
         "additionalContext": {},
-        "additionalContextMap": {},
-        "empty": true
+        "empty": true,
+        "additionalContextMap": {}
       },
       "taskDefinition": {
-        "createTime": 1793750478006,
-        "updateTime": 1793750478042,
+        "createTime": 1793751709818,
+        "updateTime": 1793751709853,
         "createdBy": "",
         "updatedBy": "",
         "name": "archon_task_c",
@@ -126,7 +126,7 @@
         "enforceSchema": false
       },
       "loopOverTask": false,
-      "queueWaitTime": 132
+      "queueWaitTime": 148
     }
   }
 }

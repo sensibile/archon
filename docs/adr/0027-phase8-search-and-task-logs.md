@@ -230,10 +230,16 @@ archon에 이미 있는 것(`541865c` 기준):
   - 기존 `route_later_*` 넷은 걸러진 새 시나리오가 같은 경로를 다루므로 지웠다(바꾸지 않음).
   - 픽스처 요청에 `content_type`을 더했다. JSON이 아닌 `Content-Type`으로 보낸 요청(`text/plain` 로그 POST)에만 있고, 재생은 그
     값으로 보낸다. 없으면 지금처럼 `application/json`이다.
-  - 시각 정규화: `Archon.Contract`의 시각 키에 `createdTime`(task 로그), `updatedTime`·`firstScheduledTime`(bulk/search의
-    `WorkflowModel`·`TaskModel`)을 더했다. 요약의 시각 글자는 같은 키라 이미 가려지고, `mask_times/1`은 숫자 0처럼 0의 글자
-    `1970-01-01T00:00:00.000Z`를 남긴다(시작하지 않은 태스크의 `startTime`이 시각으로 바뀌면 드러나게).
-  - 재생 `until: :settled`가 검색(`totalHits`와 각 결과의 `status`)과 로그 목록(길이)에도 쓰인다. 캡처가 기다린 검색·로그 단계에 붙였다.
+  - 시각 정규화: `Archon.Contract`의 시각 키에 `updatedTime`·`firstScheduledTime`(bulk/search의 `WorkflowModel`·`TaskModel`)을
+    더했다. 요약의 시각 글자는 같은 키라 이미 가려지고, `mask_times/1`은 숫자 0처럼 0의 글자 `1970-01-01T00:00:00.000Z`를 남긴다
+    (시작하지 않은 태스크의 `startTime`이 시각으로 바뀌면 드러나게). task 로그의 `createdTime`은 `normalize/1`만 가리고 재생은
+    비교한다. 태스크 갱신의 로그는 워커가 보낸 값이고, POST와 자식 되살림이 쓴 로그 자리만 단계의 `ignore`로 뺀다.
+    요약 시각이 글자인지와 `executionTime` 값은 재생이 가리므로 8b의 단위 시험(JDK 프로브)이 정답으로 다룬다.
+  - 재생 `until: :settled`가 검색(`totalHits`와 각 결과의 `status`)과 로그 목록(길이)에도 쓰인다. 검색 단계 중 캡처가 기다린 것과
+    로그 목록 GET 전부에 붙였다(Archon은 자식 되살림 로그를 부모 커밋에서 쓰므로 늦을 수 있다).
+  - 정렬하는 글자 열의 순서는 SQLite BINARY와 같은 바이트 순이다(`p8_sys_tasks_*`의 `FORK, SET_VARIABLE, SWITCH, archon_p8_case`).
+    8c는 Postgres 색인 열이나 `ORDER BY`에 `COLLATE "C"`를 쓰고 메모리 평가는 바이트 비교를 한다(데이터베이스 기본 collation이
+    대소문자를 무시하면 Postgres 재생에서만 순서가 어긋난다). 저장소 계약 시험에 대소문자가 섞인 정렬 사례를 둔다.
   - 재생의 `ignore`: upstream이 만든 맵의 요약 글자(SWITCH 태스크 입력 `{kind=a, case=a, hasChildren=true}`, SUB_WORKFLOW가 만든 자식
     입력)는 삽입 순서라 결정 3의 정렬 순과 다르다(`p8_sys_tasks_*`, `p8_search_family`, `p8_search_parent_id`의 그 `input`). JOIN의
     `pollCount`·`updateTime`(`p8_sys_get_forked`)은 Phase 7처럼 upstream 시스템 태스크 작업자의 시점이다.
@@ -245,9 +251,13 @@ archon에 이미 있는 것(`541865c` 기준):
     `"5001"`)이고 태스크 검색은 제한이 없다. 숫자가 아닌 `size`는 Spring 변환 500(기존 쿼리 변환 문구).
   - 페이징·정렬(8e): `start=-1`은 0, `size=-1`은 전부, `size=0`은 빈 결과에 `totalHits`는 그대로. 정렬 방향은 대소문자를 가리지 않고
     (`correlationId:desc`), `:`가 없거나 방향이 틀린 항목은 버린다. `classifier` 매개변수는 값마다 공백을 자르지만 질의의 `IN` 값은
-    자르지 않는다(`IN (a, b)`는 `a`만 맞음). 시각 `IN`은 맞는 행이 없다. 따옴표는 지운다.
+    자르지 않는다(`IN (a, b)`는 `a`만 맞음). 따옴표는 지운다. 반복한 `sort` 매개변수는 Spring이 쉼표로 이어 한 항목이 되므로 upstream은 정렬을 버린다. 결과가 실행 계획 순서라
+    캡처하지 않았다(8e가 Spring처럼 이어 붙여 같은 규칙으로 버린다).
+    시각 `IN`의 캡처(`p8_search_time_in`)는 어느 행과도 같지 않은 값이라 0이다. 첫 값만 변환하는지는 재생이 보여 주지 못하므로
+    (캡처한 시각을 재생에서 다시 만들 수 없다) 8b의 단위 시험이 upstream `SqliteIndexQueryBuilder`를 기준으로 다룬다.
   - freeText(8e): 역슬래시 하나는 맞지 않고 둘(JSON 글자의 이스케이프)은 맞는다. `%`·`_`는 와일드카드, 빈 값은 거르지 않는다.
-  - 색인 시점(8c): 예약만 된 워커 태스크(시작 직후, FORK 가지)와 skiptask가 만든 `SKIPPED` 태스크는 워크플로우가 끝난 뒤에도 없다.
+  - 색인 시점(8c): 예약만 된 워커 태스크(시작 직후, 실행 중인 워크플로우의 FORK 가지)는 없고, skiptask가 만든 `SKIPPED` 태스크는
+    워크플로우가 끝난 뒤에도 없다.
     시작 때 실행된 SET_VARIABLE·SWITCH는 있고, FORK는 앞 태스크가 끝나 실행된 뒤 있다. 폴링한 태스크는 있다. `extendLease`의 출력은
     색인에 없다. `callbackAfterSeconds`가 있는 `IN_PROGRESS` 갱신은 색인 요약도 `SCHEDULED`다. 시작하지 않은 태스크 요약의
     `startTime`은 epoch 글자이고 `executionTime`은 `endTime − 0`이다.
@@ -258,7 +268,7 @@ archon에 이미 있는 것(`541865c` 기준):
     taskDefName, taskType, input, output, taskId, workflowPriority`. SIMPLE 태스크의 `taskType`은 태스크 이름이다.
   - remove(8c·8e): `archiveWorkflow=true` 뒤 workflow `search`와 태스크 `search`는 요약을 돌려주고, `search-v2`·태스크 `search-v2`·
     `search-by-tasks`(`-v2`)는 다시 읽지 못해 결과 0·`totalHits` 0이다. 로그는 남는다. `false`는 워크플로우·태스크 색인과 로그를
-    지운다(로그 GET 204).
+    지운다(로그 GET 204, `search-v2`·`search-by-tasks`도 0). `search-by-tasks`는 `size` 5001도 받는다(`@Max`가 없다).
   - 로그(8d): `TaskResult.logs`의 `createdTime`은 보낸 값 그대로다. POST 로그는 GET에서 그 뒤(`created_time` 순)에 오고, 빈 body는 400이
     아니라 500 `Required request body is missing: public void com.netflix.conductor.rest.controllers.TaskResource.log(java.lang.String,java.lang.String)`이다.
     자식 로그 글은 `Sub workflow archon_p8_child.1/<자식 ID> retried.`·`restarted.`·`reran.`이고 rerun은 같은 글을 **두 번** 쓴다.

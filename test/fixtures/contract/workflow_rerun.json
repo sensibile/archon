@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/workflow/08aa253b-34ec-45ed-9dd3-6728daf790a6/rerun",
+    "path": "/api/workflow/573800e2-b2b0-43d4-b883-dc4833a1e6ca/rerun",
     "body": {
       "workflowInput": {
         "x": 61
@@ -12,6 +12,6 @@
   "response": {
     "status": 200,
     "content_type": "text/plain;charset=UTF-8",
-    "body": "08aa253b-34ec-45ed-9dd3-6728daf790a6"
+    "body": "573800e2-b2b0-43d4-b883-dc4833a1e6ca"
   }
 }

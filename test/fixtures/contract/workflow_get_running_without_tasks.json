@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/workflow/1b40c99e-7a40-4221-aede-47159e5eddf1?includeTasks=false",
+    "path": "/api/workflow/d98d0e6b-12d3-4514-b826-992dfebba671?includeTasks=false",
     "body": null
   },
   "response": {
@@ -9,11 +9,11 @@
     "content_type": "application/json",
     "body": {
       "ownerApp": "",
-      "createTime": 1793750478737,
-      "updateTime": 1793750478740,
+      "createTime": 1793751710632,
+      "updateTime": 1793751710634,
       "status": "RUNNING",
       "endTime": 0,
-      "workflowId": "1b40c99e-7a40-4221-aede-47159e5eddf1",
+      "workflowId": "d98d0e6b-12d3-4514-b826-992dfebba671",
       "tasks": [],
       "input": {
         "n": 1
@@ -42,8 +42,8 @@
             "joinOn": [],
             "optional": false,
             "taskDefinition": {
-              "createTime": 1793750478006,
-              "updateTime": 1793750478042,
+              "createTime": 1793751709818,
+              "updateTime": 1793751709853,
               "createdBy": "",
               "updatedBy": "",
               "name": "archon_task_c",
@@ -94,7 +94,7 @@
       "failedTaskNames": [],
       "history": [],
       "rateLimited": false,
-      "startTime": 1793750478737,
+      "startTime": 1793751710632,
       "workflowName": "archon_inline",
       "workflowVersion": 1
     }

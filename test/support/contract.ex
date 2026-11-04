@@ -260,14 +260,16 @@ defmodule Archon.Contract do
 
   # Keys holding wall-clock timestamps or durations derived from them. Generated IDs are UUIDs and
   # are handled by uuid_regex/0 instead, which also covers IDs embedded in paths and text/plain bodies.
-  # The search summaries (ADR 0027, decision 3) hold the same keys as text in GMT, a task log its
-  # createdTime, and bulk/search's WorkflowModel and TaskModel (decision 5) updatedTime and
-  # firstScheduledTime.
+  # The search summaries (ADR 0027, decision 3) hold the same keys as text in GMT, and
+  # bulk/search's WorkflowModel and TaskModel (decision 5) updatedTime and firstScheduledTime.
   @volatile_keys ~w(
     createTime updateTime startTime endTime scheduledTime firstStartTime lastUpdated
-    lastPollTime lastRetriedTime queueWaitTime executionTime createdTime updatedTime
-    firstScheduledTime
+    lastPollTime lastRetriedTime queueWaitTime executionTime updatedTime firstScheduledTime
   )
+  # A task log's createdTime: the update's logs keep the time the worker sent, so the replay
+  # compares it and leaves out only the times a POST set (ADR 0027, decision 7); two captures
+  # differ in those.
+  @log_time_keys ~w(createdTime)
 
   @type schema_name :: :workflow_def | :workflow | :task_def | :task
   @type json :: nil | boolean() | number() | String.t() | [json()] | %{String.t() => json()}
@@ -371,6 +373,7 @@ defmodule Archon.Contract do
   def normalize(map) when is_map(map) do
     Map.new(map, fn
       {key, value} when key in @volatile_keys and not is_nil(value) -> {key, "<volatile>"}
+      {key, value} when key in @log_time_keys and not is_nil(value) -> {key, "<volatile>"}
       {key, value} -> {key, normalize(value)}
     end)
   end

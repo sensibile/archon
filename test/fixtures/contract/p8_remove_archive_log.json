@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/tasks/e4e7bb25-cafc-4200-a1f6-1cdf512a9591/log",
+    "path": "/api/tasks/caf68c3a-2969-4629-b647-534da01770e6/log",
     "body": null
   },
   "response": {
@@ -10,7 +10,7 @@
     "body": [
       {
         "log": "p8 removed log",
-        "taskId": "e4e7bb25-cafc-4200-a1f6-1cdf512a9591",
+        "taskId": "caf68c3a-2969-4629-b647-534da01770e6",
         "createdTime": 1700000000000
       }
     ]

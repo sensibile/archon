@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/tasks/6907a36c-9065-48bb-826a-f5d2237a04d7/log",
+    "path": "/api/tasks/7e21089d-6cd3-4393-9648-a899f5ff52ad/log",
     "body": null
   },
   "response": {
@@ -9,9 +9,9 @@
     "content_type": "application/json",
     "body": [
       {
-        "log": "Sub workflow archon_p8_child.1/a3d722ec-d7b7-3a08-a057-46f43277c53d retried.",
-        "taskId": "6907a36c-9065-48bb-826a-f5d2237a04d7",
-        "createdTime": 1793750514401
+        "log": "Sub workflow archon_p8_child.1/57e4192a-f0a1-3631-af74-6f9a75d4df6d retried.",
+        "taskId": "7e21089d-6cd3-4393-9648-a899f5ff52ad",
+        "createdTime": 1793751749755
       }
     ]
   }

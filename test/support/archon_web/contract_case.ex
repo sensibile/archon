@@ -229,6 +229,11 @@ defmodule ArchonWeb.ContractCase do
   @p8_switch_input_forked [ignore: [["results", 2, "input"]]]
   # The same for the child's input, which upstream's SUB_WORKFLOW task builds.
   @p8_child_input [ignore: [["results", 0, "input"]]]
+  # The createdTime of logs a POST or a child's revival wrote is the server's clock; the logs of
+  # a task update keep the worker's (compared).
+  @p8_posted_logs [ignore: [[10, "createdTime"], [11, "createdTime"]]]
+  @p8_posted_log [ignore: [[0, "createdTime"]]]
+  @p8_revived_logs [ignore: for(index <- 0..3, do: [index, "createdTime"])]
 
   @scenario [
     # metadata
@@ -896,9 +901,11 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "p8_tasks_search_time_not_number"},
     {:exchange, "p8_tasks_search_size_negative"},
     {:exchange, "p8_tasks_search_size_limit"},
+    {:exchange, "p8_tasks_search_start_negative"},
     {:exchange, "p8_search_by_tasks"},
     {:exchange, "p8_search_by_tasks_v2"},
     {:exchange, "p8_search_by_tasks_free_text"},
+    {:exchange, "p8_search_by_tasks_size_limit"},
     {:exchange, "p8_search_by_tasks_bad_clause"},
     # when tasks are indexed; task logs
     {:exchange, "p8_index_register"},
@@ -917,14 +924,14 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "p8_log_post_text"},
     {:exchange, "p8_log_post_json"},
     {:exchange, "p8_log_post_empty"},
-    {:exchange, "p8_index_logs_posted", @settled},
+    {:exchange, "p8_index_logs_posted", @settled ++ @p8_posted_logs},
     {:exchange, "p8_index_complete"},
     {:wait_status, "p8_index_start", "COMPLETED"},
     {:exchange, "p8_index_get_completed", @settled},
     {:exchange, "p8_index_tasks_completed", @settled},
     {:exchange, "p8_index_workflow_completed", @settled},
     {:exchange, "p8_log_post_missing"},
-    {:exchange, "p8_log_get_missing", @settled},
+    {:exchange, "p8_log_get_missing", @settled ++ @p8_posted_log},
     {:exchange, "p8_log_get_none"},
     # a synchronous first task, SWITCH, FORK
     {:exchange, "p8_sys_register"},
@@ -971,6 +978,8 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "p8_remove_delete"},
     {:exchange, "p8_remove_delete_search", @settled},
     {:exchange, "p8_remove_delete_tasks", @settled},
+    {:exchange, "p8_remove_delete_search_v2"},
+    {:exchange, "p8_remove_delete_by_tasks"},
     {:exchange, "p8_remove_delete_log"},
     {:exchange, "p8_remove_delete_get_removed"},
     # a child's retry, restart and rerun logged on the parent; topLevelOnly
@@ -983,7 +992,7 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "p8_parent_get_failed", @settled},
     {:exchange, "p8_child_retry"},
     {:exchange, "p8_parent_get_retried", @settled},
-    {:exchange, "p8_parent_log_retried", @settled},
+    {:exchange, "p8_parent_log_retried", @settled ++ @p8_posted_log},
     {:exchange, "p8_child_terminate"},
     {:exchange, "p8_parent_get_terminated", @settled},
     {:exchange, "p8_child_restart"},
@@ -993,7 +1002,7 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "p8_parent_get_completed", @settled},
     {:exchange, "p8_child_rerun"},
     {:exchange, "p8_parent_get_reran", @settled},
-    {:exchange, "p8_parent_logs", @settled},
+    {:exchange, "p8_parent_logs", @settled ++ @p8_revived_logs},
     {:exchange, "p8_search_family", @p8_child_input},
     {:exchange, "p8_search_top_level"},
     {:exchange, "p8_search_top_level_v2"},
@@ -1476,7 +1485,7 @@ defmodule ArchonWeb.ContractCase do
 
   defp sort(body, _unordered), do: body
 
-  defp drop_paths(body, paths) when is_map(body) do
+  defp drop_paths(body, paths) when is_map(body) or is_list(body) do
     Enum.reduce(paths, body, fn path, body ->
       # A path through a value that is not there (an error body) is left for the comparison.
       if container?(at(body, Enum.drop(path, -1)), List.last(path)) do

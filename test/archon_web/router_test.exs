@@ -104,9 +104,8 @@ defmodule ArchonWeb.RouterTest do
     {"GET", "/api/workflow/#{@id}/correlated/x", WorkflowQueryController, :correlated}
   ]
 
-  # The 9 Phase 8 paths (ADR 0027, decision 1), and the paths where they meet a parameter
-  # pattern: Spring takes the literal one.
-  @phase8 [
+  # The 9 Phase 8 paths (ADR 0027, decision 1).
+  @phase8_routes [
     {"GET", "/api/workflow/search", SearchController, :search_workflows},
     {"GET", "/api/workflow/search-v2", SearchController, :search_workflows_v2},
     {"GET", "/api/workflow/search-by-tasks", SearchController, :search_workflows_by_tasks},
@@ -115,8 +114,11 @@ defmodule ArchonWeb.RouterTest do
     {"GET", "/api/tasks/search-v2", SearchController, :search_tasks_v2},
     {"POST", "/api/tasks/#{@id}/log", TaskLogController, :log},
     {"GET", "/api/tasks/#{@id}/log", TaskLogController, :get_logs},
-    {"POST", "/api/workflow/bulk/search", WorkflowBulkController, :search},
-    # Where patterns meet: the literal segments win, a parameter takes the rest.
+    {"POST", "/api/workflow/bulk/search", WorkflowBulkController, :search}
+  ]
+
+  # Where they meet a parameter pattern: the literal segments win, a parameter takes the rest.
+  @phase8_meetings [
     {"GET", "/api/workflow/search/status", WorkflowController, :status},
     {"GET", "/api/workflow/search/tasks", WorkflowQueryController, :tasks},
     {"GET", "/api/tasks/search/log", TaskLogController, :get_logs},
@@ -208,7 +210,7 @@ defmodule ArchonWeb.RouterTest do
   end
 
   test "every Phase 8 path reaches its action" do
-    for {method, path, controller, action} <- @phase8 do
+    for {method, path, controller, action} <- @phase8_routes ++ @phase8_meetings do
       assert %{plug: ^controller, plug_opts: ^action} =
                Phoenix.Router.route_info(ArchonWeb.Router, method, path, "localhost"),
              "#{method} #{path}"
@@ -217,8 +219,7 @@ defmodule ArchonWeb.RouterTest do
 
   test "the Phase 8 routes are the 9 of ADR 0027, each with an action" do
     actions =
-      @phase8
-      |> Enum.take(9)
+      @phase8_routes
       |> MapSet.new(fn {_method, _path, controller, action} -> {controller, action} end)
 
     routes =

@@ -3,8 +3,8 @@
     "method": "POST",
     "path": "/api/tasks",
     "body": {
-      "workflowInstanceId": "5eac87ab-d030-4d48-8e82-b1ae1cd58537",
-      "taskId": "cfd012fe-e692-44c3-80e7-18abd03204c0",
+      "workflowInstanceId": "970eeef5-6f6d-44bf-92a9-01a96cdce361",
+      "taskId": "fe49470f-2bbb-41e4-bddd-4a2343f96760",
       "status": "COMPLETED",
       "workerId": "archon-contract",
       "outputData": {
@@ -15,6 +15,6 @@
   "response": {
     "status": 200,
     "content_type": "text/plain;charset=UTF-8",
-    "body": "cfd012fe-e692-44c3-80e7-18abd03204c0"
+    "body": "fe49470f-2bbb-41e4-bddd-4a2343f96760"
   }
 }

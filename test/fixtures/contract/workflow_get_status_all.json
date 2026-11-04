@@ -1,14 +1,14 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/workflow/f4649642-e875-4f27-850a-556a8964c14e/status?includeOutput=true&includeVariables=true",
+    "path": "/api/workflow/bce16b00-ec53-4261-939d-810cb173fa8e/status?includeOutput=true&includeVariables=true",
     "body": null
   },
   "response": {
     "status": 200,
     "content_type": "application/json",
     "body": {
-      "workflowId": "f4649642-e875-4f27-850a-556a8964c14e",
+      "workflowId": "bce16b00-ec53-4261-939d-810cb173fa8e",
       "correlationId": "archon-corr-1",
       "output": {
         "y": 3

@@ -45,11 +45,12 @@ curl -sf "$HTTP_STUB/json" >/dev/null || { echo "the HTTP stub does not answer a
 # call NAME METHOD PATH [BODY]
 # Writes $OUT/NAME.json and leaves the response body in $tmp/body, status in $tmp/status.
 # A BODY argument is sent as JSON even when it is empty ('' sends an empty body), or with the
-# Content-Type CONTENT_TYPE names (CONTENT_TYPE=text/plain call ...), which the fixture then
+# Content-Type ARCHON_REQUEST_CONTENT_TYPE names (ARCHON_REQUEST_CONTENT_TYPE=text/plain call ...),
+# which the fixture then
 # records as the request's content_type.
 call() {
   local name="$1" method="$2" path="$3" body="${4:-}" has_body=$(($# >= 4))
-  local req_ctype="${CONTENT_TYPE:-}"
+  local req_ctype="${ARCHON_REQUEST_CONTENT_TYPE:-}"
   local args=(-sS -X "$method" -o "$tmp/body" -D "$tmp/headers" -w '%{http_code}')
   if ((has_body)); then
     args+=(-H "Content-Type: ${req_ctype:-application/json}" --data "$body")
@@ -1349,10 +1350,12 @@ p8_search p8_tasks_search_bad_clause "$p8_tasks" 'query=taskType~SIMPLE'
 p8_search p8_tasks_search_time_not_number "$p8_tasks" "query=updateTime<later AND $p8_type"
 p8_search p8_tasks_search_size_negative "$p8_tasks" "query=$p8_type" 'sort=status:ASC' 'size=-1'
 p8_search p8_tasks_search_size_limit "$p8_tasks" "query=$p8_type" 'sort=status:ASC' 'size=5001'
+p8_search p8_tasks_search_start_negative "$p8_tasks" "query=$p8_type" 'sort=status:ASC' 'start=-1' 'size=1'
 # search-by-tasks: the workflows of the tasks found.
 p8_search p8_search_by_tasks "$p8_by_tasks" "query=$p8_type" 'sort=status:ASC'
 p8_search p8_search_by_tasks_v2 "$p8_by_tasks_v2" "query=$p8_type" 'sort=status:ASC'
-p8_search p8_search_by_tasks_free_text "$p8_by_tasks" "query=$p8_type" 'freeText=p8'
+p8_search p8_search_by_tasks_free_text "$p8_by_tasks" "query=$p8_type" 'freeText=p8' 'sort=status:ASC'
+p8_search p8_search_by_tasks_size_limit "$p8_by_tasks" "query=$p8_type" 'sort=status:ASC' 'size=5001'
 p8_search p8_search_by_tasks_bad_clause "$p8_by_tasks" 'query=taskType~SIMPLE'
 
 # When tasks are indexed: a scheduled worker task is not (createTasks), a polled one is, an
@@ -1380,7 +1383,7 @@ call p8_index_update_logs POST /api/tasks "$(jq -nc --arg w "$p8_index" --arg t 
 p8_search_until p8_index_tasks_updated "$p8_tasks" '.totalHits == 1' "$p8_index_q" \
   'freeText=p8progress'
 call p8_index_logs GET "/api/tasks/$p8_index_task/log"
-CONTENT_TYPE=text/plain call p8_log_post_text POST "/api/tasks/$p8_index_task/log" 'p8 plain log'
+ARCHON_REQUEST_CONTENT_TYPE=text/plain call p8_log_post_text POST "/api/tasks/$p8_index_task/log" 'p8 plain log'
 call p8_log_post_json POST "/api/tasks/$p8_index_task/log" '"p8 json log"'
 call p8_log_post_empty POST "/api/tasks/$p8_index_task/log" ''
 call p8_index_logs_posted GET "/api/tasks/$p8_index_task/log"
@@ -1393,7 +1396,7 @@ p8_search_until p8_index_tasks_completed "$p8_tasks" '.results[0].status == "COM
 p8_search_until p8_index_workflow_completed "$p8_wf" '.results[0].status == "COMPLETED"' \
   "$p8_index_q"
 # Logs of a task that does not exist: a POST stores them, a GET reads them; no logs is a 204.
-CONTENT_TYPE=text/plain call p8_log_post_missing POST \
+ARCHON_REQUEST_CONTENT_TYPE=text/plain call p8_log_post_missing POST \
   /api/tasks/00000000-0000-0000-0000-0000000008a1/log 'p8 log of no task'
 call p8_log_get_missing GET /api/tasks/00000000-0000-0000-0000-0000000008a1/log
 call p8_log_get_none GET /api/tasks/00000000-0000-0000-0000-0000000008a2/log
@@ -1478,6 +1481,8 @@ p8_search_until p8_remove_delete_search "$p8_wf" '.totalHits == 0' \
   "$p8_rm_q AND correlationId=p8-remove-delete"
 p8_search_until p8_remove_delete_tasks "$p8_tasks" '.totalHits == 0' "$p8_rm_q" \
   'freeText=p8-remove-delete'
+p8_search p8_remove_delete_search_v2 "$p8_wf_v2" "$p8_rm_q AND correlationId=p8-remove-delete"
+p8_search p8_remove_delete_by_tasks "$p8_by_tasks" "$p8_rm_q" 'freeText=p8-remove-delete'
 p8_wait_log_status "$p8_remove_delete_task" 204
 call p8_remove_delete_log GET "/api/tasks/$p8_remove_delete_task/log"
 call p8_remove_delete_get_removed GET "/api/workflow/$p8_remove_delete_id"

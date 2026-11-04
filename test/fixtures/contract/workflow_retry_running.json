@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/workflow/e6b4c4d7-ac3b-49ef-9552-bc3542f484d2/retry",
+    "path": "/api/workflow/487cf206-5cc7-4ff0-b481-9c04a5070a23/retry",
     "body": null
   },
   "response": {

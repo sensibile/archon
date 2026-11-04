@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/tasks/f4649642-e875-4f27-850a-556a8964c14e/task_a_ref/COMPLETED/sync",
+    "path": "/api/tasks/bce16b00-ec53-4261-939d-810cb173fa8e/task_a_ref/COMPLETED/sync",
     "body": {}
   },
   "response": {
@@ -9,7 +9,7 @@
     "content_type": "application/json",
     "body": {
       "status": 404,
-      "message": "Found no running task task_a_ref of workflow f4649642-e875-4f27-850a-556a8964c14e to update",
+      "message": "Found no running task task_a_ref of workflow bce16b00-ec53-4261-939d-810cb173fa8e to update",
       "instance": "<redacted-hostname>",
       "retryable": false
     }

@@ -13,10 +13,10 @@
         {
           "workflowType": "archon_p8_sys",
           "version": 1,
-          "workflowId": "53b3ff9c-d61a-40ed-a9f9-f3d4702a8e12",
+          "workflowId": "2ba6f76e-1f57-4b1e-baec-bfe1b75638a5",
           "correlationId": "p8-sys",
-          "startTime": "2026-11-04T00:01:52.127Z",
-          "updateTime": "2026-11-04T00:01:52.442Z",
+          "startTime": "2026-11-04T00:22:27.408Z",
+          "updateTime": "2026-11-04T00:22:27.577Z",
           "status": "RUNNING",
           "input": "{kind=a}",
           "output": "{}",

@@ -57,6 +57,10 @@ defmodule ArchonWeb.ContractCaseTest do
       end)
     end
 
+    test "the scenario skips steps while an action is not implemented" do
+      if unimplemented_step(), do: assert(Enum.any?(scenario(), &skip?/1))
+    end
+
     test "a step reaching an action its controller has not implemented is skipped" do
       for {name, controller, action} <- @unimplemented_steps,
           action in controller.unimplemented() do

@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/workflow/d9cffc5b-5a9d-439b-a994-bbb9012038e9/resetcallbacks",
+    "path": "/api/workflow/9c73fe4d-48b5-44c2-9cc6-ad196f4a236f/resetcallbacks",
     "body": null
   },
   "response": {

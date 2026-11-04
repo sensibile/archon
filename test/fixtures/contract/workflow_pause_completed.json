@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "PUT",
-    "path": "/api/workflow/f4649642-e875-4f27-850a-556a8964c14e/pause",
+    "path": "/api/workflow/bce16b00-ec53-4261-939d-810cb173fa8e/pause",
     "body": null
   },
   "response": {
@@ -9,7 +9,7 @@
     "content_type": "application/json",
     "body": {
       "status": 409,
-      "message": "Workflow archon_simple.1/f4649642-e875-4f27-850a-556a8964c14e has ended, status cannot be updated.",
+      "message": "Workflow archon_simple.1/bce16b00-ec53-4261-939d-810cb173fa8e has ended, status cannot be updated.",
       "instance": "<redacted-hostname>",
       "retryable": false
     }

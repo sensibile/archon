@@ -9,7 +9,7 @@
     "content_type": "application/json",
     "body": {
       "status": 500,
-      "message": "The mapper [com.netflix.conductor.rest.controllers.WorkflowSignalResponder$$Lambda/0x0000007001c9cbc0] returned a null value.",
+      "message": "The mapper [com.netflix.conductor.rest.controllers.WorkflowSignalResponder$$Lambda/0x0000000501ca6940] returned a null value.",
       "instance": "<redacted-hostname>",
       "retryable": false
     }
