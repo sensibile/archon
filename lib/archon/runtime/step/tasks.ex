@@ -24,11 +24,14 @@ defmodule Archon.Runtime.Step.Tasks do
     * `update/2` - upstream `WorkflowExecutorOps#updateTask` up to the decide, which
       `lazy_evaluate?/2` (`isLazyEvaluateWorkflow`) may skip. A `SUB_WORKFLOW` task keeps the
       `subWorkflowId` the runtime gave it (ADR 0024, decision 1): the result's is ignored and an
-      output `subWorkflowId` key takes the stored value (or is dropped without one).
+      output `subWorkflowId` key takes the stored value (or is dropped without one). The result's
+      `logs` go to the commit (`Archon.Runtime.TaskLogs.prepare/4`) unless the update is ignored
+      or an `extendLease` (ADR 0027, decision 6).
   """
 
   alias Archon.Domain.{Task, TaskDef, TaskResult, Workflow, WorkflowDef, WorkflowTask}
   alias Archon.Runtime.Step.{Postpone, Schedule, State}
+  alias Archon.Runtime.TaskLogs
 
   @doc """
   Upstream `ExecutionService#poll` for one task. Returns the task given to the worker, or `nil`
@@ -126,11 +129,16 @@ defmodule Archon.Runtime.Step.Tasks do
     else
       task = result_task(state, task, result)
       state = state |> queue(task, queue_effect(task, result)) |> State.save_task(task)
+      state = State.add_logs(state, result_logs(state, task, result))
       task = State.task(state, task.task_id)
       evaluate = if lazy_evaluate?(wf.workflow_definition, task), do: :lazy, else: :decide
       {:ok, task, state, evaluate}
     end
   end
+
+  # updateTask's TaskResult logs, written after the task (ADR 0027, decision 6).
+  defp result_logs(%State{env: env, now: now}, task, %TaskResult{logs: logs}),
+    do: TaskLogs.prepare(logs, task.task_id, now, env.task_exec_log_size_limit)
 
   defp result_task(%State{env: env, now: now}, task, %TaskResult{} = result) do
     status =

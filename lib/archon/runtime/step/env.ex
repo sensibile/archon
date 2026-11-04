@@ -56,6 +56,8 @@ defmodule Archon.Runtime.Step.Env do
       decision 4).
     * `max_workflow_variables_payload_kb` - 256, the cap of a workflow's `variables`
       (`maxWorkflowVariablesPayloadSizeThresholdKB`, ADR 0026, decision 3).
+    * `task_exec_log_size_limit` - 10 (`taskExecLogSizeLimit`), the logs one task update keeps
+      (ADR 0027, decision 6).
   """
 
   alias Archon.Decider.{Context, SystemTasks}
@@ -88,7 +90,8 @@ defmodule Archon.Runtime.Step.Env do
     task_execution_postpone_ms: 60_000,
     system_task_callback_seconds: 30,
     system_task_postpone_threshold: 200,
-    max_decide_iterations: 100
+    max_decide_iterations: 100,
+    task_exec_log_size_limit: 10
   ]
 
   @type t :: %__MODULE__{
@@ -116,7 +119,8 @@ defmodule Archon.Runtime.Step.Env do
           task_execution_postpone_ms: non_neg_integer(),
           system_task_callback_seconds: non_neg_integer(),
           system_task_postpone_threshold: non_neg_integer(),
-          max_decide_iterations: pos_integer()
+          max_decide_iterations: pos_integer(),
+          task_exec_log_size_limit: non_neg_integer()
         }
 
   @doc """

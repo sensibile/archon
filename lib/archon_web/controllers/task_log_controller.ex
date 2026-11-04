@@ -4,41 +4,71 @@
 # Licensed under the Apache License, Version 2.0 (see LICENSE).
 #
 # Derived from conductor-oss rest/src/main/java/com/netflix/conductor/rest/controllers/
-# TaskResource.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
-# Modified by sensibile: skeletons of the Phase 8 task log handlers (ADR 0027); every action
-# answers the 404 of a path without a handler until slice 8d implements it.
+# TaskResource.java (log, getTaskLogs) at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
+# Modified by sensibile: the Phase 8 task log handlers (ADR 0027, decision 6) on
+# Archon.Runtime.Tasks; a browser's cross-origin log request is refused.
 
 defmodule ArchonWeb.TaskLogController do
   @moduledoc """
-  Task execution logs (upstream `TaskResource#log` and `#getTaskLogs`, ADR 0027 decision 6).
+  Task execution logs (upstream `TaskResource#log` and `#getTaskLogs`, ADR 0027 decision 6) on
+  `Archon.Runtime.Tasks`.
 
-  The actions are skeletons (ADR 0027, decision 7): each answers the 404 of a path without a
-  handler, and the contract replay (`ArchonWeb.ContractCase`) skips the steps that reach an
-  action of `unimplemented/0`. Slice 8d empties the list.
+  `POST /api/tasks/{taskId}/log` takes its body as text whatever its `Content-Type`, as upstream's
+  `@RequestBody String` does (`ArchonWeb.Request.read_text/2`), so the JSON `Content-Type` check
+  that keeps a browser's cross-origin "simple" request from an action does not run for it.
+  `ArchonWeb.Plugs.RefuseCrossOrigin` refuses such a request with a 403 instead (a deliberate
+  difference, as for ADR 0025's bodyless actions).
+
+  `unimplemented/0` is the list of actions the contract replay (`ArchonWeb.ContractCase`) skips
+  (ADR 0027, decision 7); slice 8f removes it.
   """
 
   use ArchonWeb, :controller
 
+  alias Archon.Domain.TaskExecLog
+  alias Archon.Runtime.Tasks
+
+  @log_handler "public void com.netflix.conductor.rest.controllers.TaskResource.log(" <>
+                 "java.lang.String,java.lang.String)"
+
   # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
   Module.register_attribute(__MODULE__, :unimplemented, persist: true)
 
-  @unimplemented [:log, :get_logs]
+  @unimplemented []
+
+  plug ArchonWeb.Plugs.RefuseCrossOrigin when action in [:log]
 
   @doc "The actions not implemented yet."
   @spec unimplemented() :: [atom()]
   def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
 
   @doc """
-  `POST /api/tasks/{taskId}/log` (`log`, the body's text as the log): 200 without a body. Not
-  implemented yet.
+  `POST /api/tasks/{taskId}/log` (`log`, the body's text as the log): 200 without a body, whether
+  or not the task exists. An empty body is the missing-body 500.
   """
   @spec log(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def log(conn, _params), do: Errors.send_no_route(conn)
+  def log(conn, %{"taskId" => task_id}) do
+    case Request.read_text(conn, handler: @log_handler) do
+      {:ok, text, conn} ->
+        case Tasks.log(task_id, text) do
+          :ok -> Response.empty(conn)
+          {:error, reason} -> Errors.send_error(conn, reason)
+        end
+
+      {:error, reason, conn} ->
+        Errors.send_error(conn, reason)
+    end
+  end
 
   @doc """
-  `GET /api/tasks/{taskId}/log` (`getTaskLogs`): the task's logs, or 204 without any. Not
-  implemented yet.
+  `GET /api/tasks/{taskId}/log` (`getTaskLogs`): the task's logs in `createdTime` order, or 204
+  without any.
   """
   @spec get_logs(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def get_logs(conn, _params), do: Errors.send_no_route(conn)
+  def get_logs(conn, %{"taskId" => task_id}) do
+    case Tasks.logs(task_id) do
+      [] -> Response.no_content(conn)
+      logs -> Response.json(conn, Enum.map(logs, &TaskExecLog.to_json/1))
+    end
+  end
 end

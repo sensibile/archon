@@ -10,7 +10,8 @@
 # workflow and task writes are one atomic `Archon.Runtime.Commit` and the store never stamps times;
 # a commit also carries queue operations, an outbox, a re-evaluation time and limits (ADR 0021);
 # the queries by name and correlation ID are ordered (ADR 0025, decision 4); the search index is
-# written by the commit and removed with the workflow (ADR 0027, decision 2).
+# written by the commit and removed with the workflow (ADR 0027, decision 2), and so are the task
+# execution logs, which a log request also adds outside a commit (decision 6).
 
 defmodule Archon.Runtime.Store do
   @moduledoc """
@@ -74,6 +75,13 @@ defmodule Archon.Runtime.Store do
       is the stored summary JSON, in the query's order (`Archon.Search.Query`: its sort items,
       then insertion order) from `start`, at most `size` (`Archon.Search.Query.page/3`). A query
       the table cannot run is `{:error, error}` (`Archon.Search.Query.check/2`).
+    * `c:add_task_logs/1` - adds task execution logs outside a commit (upstream
+      `ExecutionService#log`, `POST /api/tasks/{taskId}/log`), whether or not the task exists
+      (ADR 0027, decision 6). A Postgres store whose node lost the database refuses with
+      `{:error, :fenced}`, as a commit does. A commit adds its `task_logs` the same way, after its
+      index rows.
+    * `c:task_logs/1` - the task's execution logs in `created_time` order, then the order they
+      were added (upstream `getTaskExecutionLogs`; `[]` for a task ID no log can have).
 
   The three queries by name answer in `create_time` order and then workflow ID in binary order
   (upstream leaves the order unspecified; ADR 0025, decision 4). A name or correlation ID that
@@ -83,7 +91,7 @@ defmodule Archon.Runtime.Store do
   and retry count already exist; `Archon.Runtime.Step` deduplicates them (`dedupAndAddTasks`).
   """
 
-  alias Archon.Domain.{Task, Workflow}
+  alias Archon.Domain.{Task, TaskExecLog, Workflow}
   alias Archon.Runtime.Commit
   alias Archon.Runtime.Step.Effect
   alias Archon.Search.Query
@@ -147,4 +155,6 @@ defmodule Archon.Runtime.Store do
               {:ok, poll_data()} | {:error, :not_found}
   @callback search_workflows(Query.t(), start :: integer(), size :: integer()) :: search_page()
   @callback search_tasks(Query.t(), start :: integer(), size :: integer()) :: search_page()
+  @callback add_task_logs([TaskExecLog.t()]) :: :ok | {:error, :fenced}
+  @callback task_logs(task_id :: String.t()) :: [TaskExecLog.t()]
 end

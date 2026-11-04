@@ -43,7 +43,7 @@ defmodule Archon.Runtime.WorkflowServer do
   with a `concurrentExecLimit`, and for `:wake` and `:recover` also `queued` (the `SCHEDULED`
   worker tasks that have a queue message) and `workflows` (the parent, the children of
   `IN_PROGRESS` and `CANCELED` `SUB_WORKFLOW` tasks and the failure workflow), and for `:recover`
-  `outbox_pending?`. For `{:child_revived, task_id}`, `workflows` holds the parent and the
+  `outbox_pending?`. For `{:child_revived, task_id, ...}`, `workflows` holds the parent and the
   children of the `SUB_WORKFLOW` tasks that ended unsuccessfully and of the task that revives;
   for `{:retry, _}`, `{:restart, _}`, `{:rerun, _}` and `{:rerun_parent, ...}` the parent (its
   `endCount`, ADR 0021, L2). For
@@ -58,7 +58,7 @@ defmodule Archon.Runtime.WorkflowServer do
   `cancel_by_parent/3`, the lifecycle operations (`pause/1`, `resume/1`, `retry/2`,
   `restart/2`, `skip_task/2`, `reset_callbacks/1`, `rerun/2`, `rerun_parent/2`, `remove/2`) and
   the outbox notices
-  `child_changed/3`, `child_revived/2` call the workflow's process, starting it first when it is
+  `child_changed/3`, `child_revived/3` call the workflow's process, starting it first when it is
   not running (activation, `activate/2`). A call that meets a process just ending is tried once
   more. The call timeout is `config :archon, Archon.Runtime, call_timeout:` (30 s). A call that
   exits (a timeout, a process shut down, one ended again on the second try) and an activation
@@ -347,11 +347,15 @@ defmodule Archon.Runtime.WorkflowServer do
   def remove(id, archive?) when is_boolean(archive?), do: call(id, :existing, {:remove, archive?})
 
   @doc """
-  `{:child_revived, task_id}` to the parent, from the child's outbox runner: `:ok` once the
-  parent saved it, or `{:error, reason}`.
+  `{:child_revived, task_id, operation, chain}` to the parent, from the child's outbox runner
+  (`{:child_revived, task_id}` for a revival stored without them, `nil`): `:ok` once the parent
+  saved it, or `{:error, reason}`.
   """
-  @spec child_revived(String.t(), String.t()) :: :ok | {:error, term()}
-  def child_revived(parent_id, task_id),
+  @spec child_revived(String.t(), String.t(), Lifecycle.revival() | nil) :: :ok | {:error, term()}
+  def child_revived(parent_id, task_id, {operation, chain}),
+    do: call(parent_id, :existing, {:child_revived, task_id, operation, chain})
+
+  def child_revived(parent_id, task_id, nil),
     do: call(parent_id, :existing, {:child_revived, task_id})
 
   @doc """
@@ -887,7 +891,8 @@ defmodule Archon.Runtime.WorkflowServer do
          limits: limits,
          queue: [],
          index_workflow: nil,
-         index_tasks: []
+         index_tasks: [],
+         task_logs: []
        })
        when map_size(limits) == 0,
        do: true
@@ -1352,8 +1357,9 @@ defmodule Archon.Runtime.WorkflowServer do
       :wake ->
         %{env | queued: queued(env, wf), workflows: workflows(wf)}
 
-      {:child_revived, task_id} ->
-        %{env | workflows: Map.merge(failed_children(wf, task_id), parent(wf))}
+      # with its operation and chain (ADR 0027, decision 6) or, from an older entry, without
+      revived when elem(revived, 0) == :child_revived ->
+        %{env | workflows: Map.merge(failed_children(wf, elem(revived, 1)), parent(wf))}
 
       {lifecycle, _arg} when lifecycle in [:retry, :restart, :rerun, :rerun_parent] ->
         %{env | workflows: parent(wf)}

@@ -35,8 +35,11 @@ defmodule Archon.Runtime.Step.Event do
       asked to revive (a parent retrying its failed child, `updateAndPushParents`).
     * `{:restart, definition}` - upstream `restart`, with the stored definition (`nil`) or the
       latest one.
-    * `{:child_revived, task_id}` - the child of the `SUB_WORKFLOW` task runs again (one level of
-      upstream `updateAndPushParents`).
+    * `{:child_revived, task_id, operation, chain}` - the child of the `SUB_WORKFLOW` task runs
+      again (one level of upstream `updateAndPushParents`) after `operation` (`"retried"`,
+      `"restarted"` or `"reran"`) on the last workflow of `chain`, the workflows below
+      (`name.version/id` joined by `" -> "`), which the task's log names (ADR 0027, decision 6).
+      `{:child_revived, task_id}` is the same from an outbox entry stored without them: no log.
     * `{:skip_task, reference_name}` - upstream `skipTaskFromWorkflow` (ADR 0025, decision 2).
     * `:reset_callbacks` - upstream `resetCallbacksForWorkflow`; the env has made the queue
       messages due (`Env.offsets_reset`).
@@ -73,6 +76,7 @@ defmodule Archon.Runtime.Step.Event do
           | :resume
           | {:retry, boolean()}
           | {:restart, WorkflowDef.t() | nil}
+          | {:child_revived, String.t(), String.t(), String.t()}
           | {:child_revived, String.t()}
           | {:skip_task, String.t()}
           | :reset_callbacks

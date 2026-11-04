@@ -1402,8 +1402,11 @@ defmodule Archon.Runtime.LifecycleTest do
 
       RuntimeHooks.install(
         hook: fn
-          :step, id, {:child_revived, _task_id} -> send(me, {:revive_handled, id})
-          _point, _id, _data -> :ok
+          :step, id, {:child_revived, _task_id, _operation, _chain} ->
+            send(me, {:revive_handled, id})
+
+          _point, _id, _data ->
+            :ok
         end
       )
 
@@ -1488,10 +1491,12 @@ defmodule Archon.Runtime.LifecycleTest do
         workflow_definition: %WorkflowDef{name: "p", version: 1}
       }
 
-      for task_id <- ["gone", "sub"] do
+      for task_id <- ["gone", "sub"],
+          event <- [{:child_revived, task_id}, {:child_revived, task_id, "retried", "c.1/x"}] do
         assert {:ok, ^wf, [], %Archon.Runtime.Commit{} = commit, []} =
-                 Step.run(wf, {:child_revived, task_id}, Env.new(now: 1000))
+                 Step.run(wf, event, Env.new(now: 1000))
 
+        # upstream stops the walk before it writes the log
         assert commit == %Archon.Runtime.Commit{}
       end
     end
@@ -1576,7 +1581,49 @@ defmodule Archon.Runtime.LifecycleTest do
       assert stored.failed_reference_task_names == []
       assert stored.last_retried_time == 1000
       assert [%Task{status: :in_progress, reason_for_incompletion: nil}] = commit.upsert_tasks
+      # a revival an outbox entry stored before ADR 0027 asks on in its shape, with no log
       assert {:revive_parent, "grandparent", "gp-task"} in post
+      assert commit.task_logs == []
+    end
+
+    # ADR 0027, decision 6: updateAndPushParents' log on the task, and the chain one level up.
+    test "a revival with its operation logs on the task and asks the parent with the chain" do
+      sub = %Task{
+        task_id: "sub",
+        task_type: "SUB_WORKFLOW",
+        status: :failed,
+        reference_task_name: "st",
+        sub_workflow_id: "child",
+        workflow_task: %Archon.Domain.WorkflowTask{name: "st", task_reference_name: "st"}
+      }
+
+      wf = %Workflow{
+        workflow_id: "parent",
+        parent_workflow_id: "grandparent",
+        parent_workflow_task_id: "gp-task",
+        status: :failed,
+        end_time: 100,
+        tasks: [sub],
+        workflow_definition: %WorkflowDef{name: "p", version: 3, tasks: []}
+      }
+
+      event = {:child_revived, "sub", "restarted", "c.1/child -> g.2/leaf"}
+
+      {:ok, _stored, [], commit, post} =
+        Step.run(wf, event, Env.new(now: 1000, workflows: %{}))
+
+      assert commit.task_logs == [
+               %Archon.Domain.TaskExecLog{
+                 task_id: "sub",
+                 log: "Sub workflow c.1/child -> g.2/leaf restarted.",
+                 created_time: 1000
+               }
+             ]
+
+      assert [{:revive_parent, "grandparent", "gp-task", "restarted", chain}] =
+               Enum.filter(post, &(elem(&1, 0) == :revive_parent))
+
+      assert chain == "p.3/parent -> c.1/child -> g.2/leaf"
     end
   end
 
