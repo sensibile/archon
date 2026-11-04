@@ -381,6 +381,14 @@ defmodule Archon.Runtime.Step.HttpTest do
       assert task.output_data["response"]["body"] == "true"
     end
 
+    # extractBody's last branch: readTree("null") is a NullNode, and its asText() is the text
+    # "null" (Jackson 2.18.8), not a missing body.
+    test "a JSON null body is the text null" do
+      {task, _workflow} = complete(ok(200, "null"))
+      assert %Task{status: :completed} = task
+      assert task.output_data["response"]["body"] === "null"
+    end
+
     test "testPostNoContent: an empty 2xx body is null" do
       {task, _workflow} = complete(ok(204, "", []))
       assert %Task{status: :completed} = task
