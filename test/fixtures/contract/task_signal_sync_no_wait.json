@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/tasks/6a2a4d51-e5ee-462d-9bd4-ae8babe09226/COMPLETED/signal/sync?returnStrategy=BLOCKING_TASK",
+    "path": "/api/tasks/f15351ad-2894-472a-ade7-5d1f3760190e/COMPLETED/signal/sync?returnStrategy=BLOCKING_TASK",
     "body": {
       "s": 6
     }
@@ -11,7 +11,7 @@
     "content_type": "application/json",
     "body": {
       "status": 404,
-      "message": "Found no blocked task in workflow 6a2a4d51-e5ee-462d-9bd4-ae8babe09226 to signal",
+      "message": "Found no blocked task in workflow f15351ad-2894-472a-ade7-5d1f3760190e to signal",
       "instance": "<redacted-hostname>",
       "retryable": false
     }

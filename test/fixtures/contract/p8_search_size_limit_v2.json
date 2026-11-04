@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search-v2?query=workflowType%3Darchon_p8_search&size=5001",
+    "body": null
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Validation failed, check below errors for detail.",
+      "retryable": false,
+      "validationErrors": [
+        {
+          "path": "searchWorkflowsV2.arg1",
+          "message": "Cannot return more than 5000 workflows. Please use pagination.",
+          "invalidValue": "5001"
+        }
+      ]
+    }
+  }
+}

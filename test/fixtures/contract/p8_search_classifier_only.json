@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?classifier=p8cls",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 1,
+      "results": [
+        {
+          "workflowType": "archon_p8_classified",
+          "version": 1,
+          "workflowId": "007752d0-2ace-469c-b6eb-9213fc06fb10",
+          "correlationId": "p8-classified",
+          "startTime": "2026-11-04T00:01:48.527Z",
+          "updateTime": "2026-11-04T00:01:48.529Z",
+          "status": "RUNNING",
+          "input": "{}",
+          "output": "{}",
+          "executionTime": 0,
+          "failedReferenceTaskNames": "",
+          "priority": 0,
+          "failedTaskNames": [],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "p8cls",
+          "inputSize": 2,
+          "outputSize": 2
+        }
+      ]
+    }
+  }
+}

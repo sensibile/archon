@@ -1,0 +1,40 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=correlationId%20IN%20%28%27p8-search-2%27%29%20AND%20workflowType%3Darchon_p8_search",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 1,
+      "results": [
+        {
+          "workflowType": "archon_p8_search",
+          "version": 1,
+          "workflowId": "8af04db9-1716-48ce-a253-a964d02fb319",
+          "correlationId": "p8-search-2",
+          "startTime": "2026-11-04T00:01:47.981Z",
+          "updateTime": "2026-11-04T00:01:48.282Z",
+          "endTime": "2026-11-04T00:01:48.282Z",
+          "status": "FAILED",
+          "input": "{text=p8 beta, x=2}",
+          "output": "{reason=p8}",
+          "reasonForIncompletion": "Task 5f054f4a-4aa5-4b78-965d-6cff941ce269 failed with status: FAILED and reason: 'null'",
+          "executionTime": 301,
+          "failedReferenceTaskNames": "worker_ref",
+          "priority": 0,
+          "failedTaskNames": [
+            "archon_p8_worker"
+          ],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "workflow",
+          "inputSize": 19,
+          "outputSize": 11
+        }
+      ]
+    }
+  }
+}

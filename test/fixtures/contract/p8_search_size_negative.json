@@ -1,0 +1,80 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=workflowType%3Darchon_p8_search&sort=correlationId%3AASC&size=-1",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 3,
+      "results": [
+        {
+          "workflowType": "archon_p8_search",
+          "version": 1,
+          "workflowId": "3e1ebbec-98b7-4b51-953d-9b9f1b354f68",
+          "startTime": "2026-11-04T00:01:48.028Z",
+          "updateTime": "2026-11-04T00:01:48.081Z",
+          "status": "RUNNING",
+          "input": "{text=p8 gamma}",
+          "output": "{}",
+          "executionTime": 0,
+          "failedReferenceTaskNames": "",
+          "priority": 0,
+          "failedTaskNames": [],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "workflow",
+          "inputSize": 15,
+          "outputSize": 2
+        },
+        {
+          "workflowType": "archon_p8_search",
+          "version": 1,
+          "workflowId": "a8fe974a-dad9-4336-966a-3513d1e29381",
+          "correlationId": "p8-search-1",
+          "startTime": "2026-11-04T00:01:47.935Z",
+          "updateTime": "2026-11-04T00:01:48.186Z",
+          "endTime": "2026-11-04T00:01:48.186Z",
+          "status": "COMPLETED",
+          "input": "{a={b=c}, f=2.5, list=[1, two], m={k1=1, k2=v}, n=1, none=null, text=P8 Alpha%Beta\\Gamma, x=p8-x}",
+          "output": "{done=true, z=[1]}",
+          "executionTime": 251,
+          "failedReferenceTaskNames": "",
+          "priority": 0,
+          "failedTaskNames": [],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "workflow",
+          "inputSize": 97,
+          "outputSize": 18
+        },
+        {
+          "workflowType": "archon_p8_search",
+          "version": 1,
+          "workflowId": "8af04db9-1716-48ce-a253-a964d02fb319",
+          "correlationId": "p8-search-2",
+          "startTime": "2026-11-04T00:01:47.981Z",
+          "updateTime": "2026-11-04T00:01:48.282Z",
+          "endTime": "2026-11-04T00:01:48.282Z",
+          "status": "FAILED",
+          "input": "{text=p8 beta, x=2}",
+          "output": "{reason=p8}",
+          "reasonForIncompletion": "Task 5f054f4a-4aa5-4b78-965d-6cff941ce269 failed with status: FAILED and reason: 'null'",
+          "executionTime": 301,
+          "failedReferenceTaskNames": "worker_ref",
+          "priority": 0,
+          "failedTaskNames": [
+            "archon_p8_worker"
+          ],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "workflow",
+          "inputSize": 19,
+          "outputSize": 11
+        }
+      ]
+    }
+  }
+}

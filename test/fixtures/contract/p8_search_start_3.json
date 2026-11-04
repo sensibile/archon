@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p8_search",
+    "body": {
+      "text": "p8 gamma"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "3e1ebbec-98b7-4b51-953d-9b9f1b354f68"
+  }
+}

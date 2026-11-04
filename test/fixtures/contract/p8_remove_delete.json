@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/workflow/ba0b9450-43bc-45d2-98d8-3ba46233ecb8/remove?archiveWorkflow=false",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

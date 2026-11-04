@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p8_remove?correlationId=p8-remove-delete",
+    "body": {}
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "ba0b9450-43bc-45d2-98d8-3ba46233ecb8"
+  }
+}

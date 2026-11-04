@@ -3,8 +3,8 @@
     "method": "POST",
     "path": "/api/tasks/update-v2",
     "body": {
-      "workflowInstanceId": "bf8f4974-febb-4f45-89c7-564a723fb59f",
-      "taskId": "96f78676-1dd0-4ef3-ad57-23002e167593",
+      "workflowInstanceId": "1b40c99e-7a40-4221-aede-47159e5eddf1",
+      "taskId": "98e8de5c-a813-420e-94a2-5da23175daad",
       "status": "COMPLETED",
       "workerId": "archon-contract",
       "outputData": {
@@ -27,18 +27,18 @@
       "correlationId": "archon-corr-3",
       "pollCount": 1,
       "taskDefName": "archon_task_c",
-      "scheduledTime": 1793629043416,
-      "startTime": 1793629043527,
+      "scheduledTime": 1793750478920,
+      "startTime": 1793750479052,
       "endTime": 0,
-      "updateTime": 1793629043527,
+      "updateTime": 1793750479052,
       "startDelayInSeconds": 0,
       "retried": false,
       "executed": false,
       "callbackFromWorker": true,
       "responseTimeoutSeconds": 60,
-      "workflowInstanceId": "62e10c0b-0a42-4f93-a605-b519617418c9",
+      "workflowInstanceId": "f52bc709-5bfb-4aa5-bf1f-adf3694a87c4",
       "workflowType": "archon_inline",
-      "taskId": "d4b76745-387e-4651-9570-4e14cd0db829",
+      "taskId": "4d17d695-0515-4d4f-abf9-e2e978a9c63a",
       "callbackAfterSeconds": 0,
       "workerId": "archon-contract",
       "outputData": {},
@@ -56,8 +56,8 @@
         "joinOn": [],
         "optional": false,
         "taskDefinition": {
-          "createTime": 1793629042506,
-          "updateTime": 1793629042535,
+          "createTime": 1793750478006,
+          "updateTime": 1793750478042,
           "createdBy": "",
           "updatedBy": "",
           "name": "archon_task_c",
@@ -100,8 +100,8 @@
         "empty": true
       },
       "taskDefinition": {
-        "createTime": 1793629042506,
-        "updateTime": 1793629042535,
+        "createTime": 1793750478006,
+        "updateTime": 1793750478042,
         "createdBy": "",
         "updatedBy": "",
         "name": "archon_task_c",
@@ -125,8 +125,8 @@
         "taskStatusListenerEnabled": true,
         "enforceSchema": false
       },
-      "queueWaitTime": 111,
-      "loopOverTask": false
+      "loopOverTask": false,
+      "queueWaitTime": 132
     }
   }
 }

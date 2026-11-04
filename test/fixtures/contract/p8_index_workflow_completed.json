@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=workflowType%3Darchon_p8_index",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 1,
+      "results": [
+        {
+          "workflowType": "archon_p8_index",
+          "version": 1,
+          "workflowId": "2096f393-9f63-432c-ba2a-cedc066ec0eb",
+          "correlationId": "p8-index",
+          "startTime": "2026-11-04T00:01:51.141Z",
+          "updateTime": "2026-11-04T00:01:51.801Z",
+          "endTime": "2026-11-04T00:01:51.801Z",
+          "status": "COMPLETED",
+          "input": "{x=p8}",
+          "output": "{y=1}",
+          "executionTime": 660,
+          "failedReferenceTaskNames": "",
+          "priority": 0,
+          "failedTaskNames": [],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "workflow",
+          "inputSize": 6,
+          "outputSize": 5
+        }
+      ]
+    }
+  }
+}

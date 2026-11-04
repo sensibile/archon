@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/e4e7bb25-cafc-4200-a1f6-1cdf512a9591/log",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": [
+      {
+        "log": "p8 removed log",
+        "taskId": "e4e7bb25-cafc-4200-a1f6-1cdf512a9591",
+        "createdTime": 1700000000000
+      }
+    ]
+  }
+}

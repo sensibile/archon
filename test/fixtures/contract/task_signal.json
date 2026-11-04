@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/tasks/77b641c3-94d4-4b22-9e04-55ba0c0a2323/COMPLETED/signal",
+    "path": "/api/tasks/33f94afe-ed53-43cd-8b96-bb6193197602/COMPLETED/signal",
     "body": {
       "s": 8
     }

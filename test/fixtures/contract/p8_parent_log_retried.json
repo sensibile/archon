@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/6907a36c-9065-48bb-826a-f5d2237a04d7/log",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": [
+      {
+        "log": "Sub workflow archon_p8_child.1/a3d722ec-d7b7-3a08-a057-46f43277c53d retried.",
+        "taskId": "6907a36c-9065-48bb-826a-f5d2237a04d7",
+        "createdTime": 1793750514401
+      }
+    ]
+  }
+}

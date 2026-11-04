@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/workflow/4db676bb-c38e-471f-8cd8-c5e01bfb49f2/rerun",
+    "path": "/api/workflow/f4649642-e875-4f27-850a-556a8964c14e/rerun",
     "body": {
       "reRunFromTaskId": "00000000-0000-0000-0000-000000000000"
     }

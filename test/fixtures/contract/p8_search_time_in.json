@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=updateTime%20IN%20%281700000000000%2C4102444800000%29%20AND%20workflowType%3Darchon_p8_search",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 0,
+      "results": []
+    }
+  }
+}

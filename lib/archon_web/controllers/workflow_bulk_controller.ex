@@ -9,7 +9,8 @@
 # 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the Phase 6 handlers (ADR 0025, decision 6) on the single workflow
 # functions of Archon.Runtime and Archon.Runtime.Lifecycle; a failure's message is the one the
-# single REST action answers.
+# single REST action answers. The Phase 8 search handler (ADR 0027) is a skeleton that answers
+# the 404 of a path without a handler until slice 8e implements it.
 
 defmodule ArchonWeb.WorkflowBulkController do
   @moduledoc """
@@ -35,9 +36,18 @@ defmodule ArchonWeb.WorkflowBulkController do
   `ArchonWeb.Request` (ADR 0023, decision 3), or, without a body, by the missing body. `PUT` and
   `DELETE` always need a CORS preflight. Unlike the single `retry`, `restart` and
   `resetcallbacks` (ADR 0025, decision 3) no cross-origin check is added.
+
+  `search` (Phase 8, ADR 0027 decision 5) is a skeleton (decision 7): it answers the 404 of a
+  path without a handler, and the contract replay (`ArchonWeb.ContractCase`) skips the steps that
+  reach an action of `unimplemented/0`. Slice 8e empties the list.
   """
 
   use ArchonWeb, :controller
+
+  # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
+  Module.register_attribute(__MODULE__, :unimplemented, persist: true)
+
+  @unimplemented [:search]
 
   alias Archon.Domain.{BulkResponse, Codec}
   alias Archon.Runtime
@@ -55,6 +65,17 @@ defmodule ArchonWeb.WorkflowBulkController do
   @handler "public com.netflix.conductor.common.model.BulkResponse<java.lang.String> " <>
              "com.netflix.conductor.rest.controllers.WorkflowBulkResource."
   @ids_type "java.util.List<java.lang.String>"
+
+  @doc "The actions not implemented yet."
+  @spec unimplemented() :: [atom()]
+  def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
+
+  @doc """
+  `POST /api/workflow/bulk/search` (`searchWorkflow`, `includeTasks` query): the workflows of the
+  body's IDs as a `BulkResponse`. Not implemented yet.
+  """
+  @spec search(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def search(conn, _params), do: Errors.send_no_route(conn)
 
   @doc "`PUT /api/workflow/bulk/pause` (`pauseWorkflow`): `Archon.Runtime.Lifecycle.pause/1` for each ID."
   @spec pause(Plug.Conn.t(), map()) :: Plug.Conn.t()

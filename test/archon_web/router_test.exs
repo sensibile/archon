@@ -1,11 +1,11 @@
 defmodule ArchonWeb.RouterTest do
   @moduledoc """
-  The MVP routes of ADR 0001, the Phase 6 routes of ADR 0025 and the 404 for every other request
-  (ADR 0023 decision 2, ADR 0025 decision 1). Paths and handlers come from upstream's
+  The MVP routes of ADR 0001, the Phase 6 routes of ADR 0025, the Phase 8 routes of ADR 0027 and
+  the 404 for every other request (ADR 0023 decision 2, ADR 0025 decision 1, ADR 0027 decision 1). Paths and handlers come from upstream's
   `MetadataResource`, `WorkflowResource`, `WorkflowBulkResource`, `TaskResource` and
-  `HealthCheckResource` (conductor-oss 1488804). The Phase 6 routes are checked by resolution
-  only (`Phoenix.Router.route_info/4`), so the slices implementing their actions leave this file
-  alone.
+  `HealthCheckResource` (conductor-oss 1488804). The Phase 6 and Phase 8 routes are checked by
+  resolution only (`Phoenix.Router.route_info/4`), so the slices implementing their actions leave
+  this file alone.
   """
 
   use ArchonWeb.ContractCase, async: true
@@ -13,8 +13,10 @@ defmodule ArchonWeb.RouterTest do
   alias ArchonWeb.{
     HealthController,
     MetadataController,
+    SearchController,
     SignalController,
     TaskController,
+    TaskLogController,
     WorkflowBulkController,
     WorkflowController,
     WorkflowLifecycleController,
@@ -102,18 +104,34 @@ defmodule ArchonWeb.RouterTest do
     {"GET", "/api/workflow/#{@id}/correlated/x", WorkflowQueryController, :correlated}
   ]
 
-  # Later and Unsupported routes shaped like an MVP or Phase 6 parameter route, and requests no
-  # route takes.
+  # The 9 Phase 8 paths (ADR 0027, decision 1), and the paths where they meet a parameter
+  # pattern: Spring takes the literal one.
+  @phase8 [
+    {"GET", "/api/workflow/search", SearchController, :search_workflows},
+    {"GET", "/api/workflow/search-v2", SearchController, :search_workflows_v2},
+    {"GET", "/api/workflow/search-by-tasks", SearchController, :search_workflows_by_tasks},
+    {"GET", "/api/workflow/search-by-tasks-v2", SearchController, :search_workflows_by_tasks_v2},
+    {"GET", "/api/tasks/search", SearchController, :search_tasks},
+    {"GET", "/api/tasks/search-v2", SearchController, :search_tasks_v2},
+    {"POST", "/api/tasks/#{@id}/log", TaskLogController, :log},
+    {"GET", "/api/tasks/#{@id}/log", TaskLogController, :get_logs},
+    {"POST", "/api/workflow/bulk/search", WorkflowBulkController, :search},
+    # Where patterns meet: the literal segments win, a parameter takes the rest.
+    {"GET", "/api/workflow/search/status", WorkflowController, :status},
+    {"GET", "/api/workflow/search/tasks", WorkflowQueryController, :tasks},
+    {"GET", "/api/tasks/search/log", TaskLogController, :get_logs},
+    {"POST", "/api/tasks/search/log", TaskLogController, :log},
+    {"POST", "/api/tasks/log/COMPLETED/signal", SignalController, :signal},
+    {"POST", "/api/tasks/#{@id}/log/COMPLETED", SignalController, :update_by_ref},
+    {"GET", "/api/tasks/log", TaskController, :get}
+  ]
+
+  # Later and Unsupported routes shaped like an MVP, Phase 6 or Phase 8 parameter route, and
+  # requests no route takes.
   @no_route [
-    {"GET", "/api/workflow/search"},
-    {"GET", "/api/workflow/search-v2"},
-    {"GET", "/api/workflow/search-by-tasks"},
-    {"GET", "/api/workflow/search-by-tasks-v2"},
     {"GET", "/api/workflow/externalstoragelocation"},
     {"GET", "/api/workflow/external-storage-location"},
     {"POST", "/api/workflow/test"},
-    {"GET", "/api/tasks/search"},
-    {"GET", "/api/tasks/search-v2"},
     {"GET", "/api/tasks/externalstoragelocation"},
     {"GET", "/api/tasks/external-storage-location"},
     # Unsupported decide has the shape of `{workflowId}/pause` and `/resume` (Spring sends
@@ -124,11 +142,11 @@ defmodule ArchonWeb.RouterTest do
     # Later requeue is a task update by reference in shape (`queue/requeue/signal` too).
     {"POST", "/api/tasks/queue/requeue/archon_task_a"},
     {"POST", "/api/tasks/queue/requeue/signal"},
-    # Later routes no Phase 6 route meets: no route of their shape.
-    {"POST", "/api/workflow/bulk/search"},
-    {"POST", "/api/tasks/#{@id}/log"},
-    {"GET", "/api/tasks/#{@id}/log"},
+    # Later routes no Phase 6 or Phase 8 route meets: no route of their shape.
     {"POST", "/api/workflow/#{@id}/messages"},
+    {"PUT", "/api/tasks/#{@id}/log"},
+    {"DELETE", "/api/tasks/#{@id}/log"},
+    {"GET", "/api/workflow/bulk/search"},
     {"GET", "/api/admin/config"},
     {"GET", "/api/tasks/queue/sizes"},
     # An MVP path with another method (upstream: 405)
@@ -171,13 +189,46 @@ defmodule ArchonWeb.RouterTest do
       WorkflowBulkController
     ]
 
+    # bulk/search is a Phase 8 action of a Phase 6 controller.
+    phase8 = [{WorkflowBulkController, :search}]
+
     routes =
       for route <- ArchonWeb.Router.__routes__(),
-          route.plug in new_controllers or {route.plug, route.plug_opts} in actions,
-          do: {route.plug, route.plug_opts}
+          action = {route.plug, route.plug_opts},
+          (route.plug in new_controllers or action in actions) and action not in phase8,
+          do: action
 
     assert MapSet.size(actions) == 33
     assert length(routes) == 33
+    assert MapSet.new(routes) == actions
+
+    for {controller, action} <- routes do
+      assert Code.ensure_loaded?(controller) and function_exported?(controller, action, 2)
+    end
+  end
+
+  test "every Phase 8 path reaches its action" do
+    for {method, path, controller, action} <- @phase8 do
+      assert %{plug: ^controller, plug_opts: ^action} =
+               Phoenix.Router.route_info(ArchonWeb.Router, method, path, "localhost"),
+             "#{method} #{path}"
+    end
+  end
+
+  test "the Phase 8 routes are the 9 of ADR 0027, each with an action" do
+    actions =
+      @phase8
+      |> Enum.take(9)
+      |> MapSet.new(fn {_method, _path, controller, action} -> {controller, action} end)
+
+    routes =
+      for route <- ArchonWeb.Router.__routes__(),
+          route.plug in [SearchController, TaskLogController] or
+            {route.plug, route.plug_opts} in actions,
+          do: {route.plug, route.plug_opts}
+
+    assert MapSet.size(actions) == 9
+    assert length(routes) == 9
     assert MapSet.new(routes) == actions
 
     for {controller, action} <- routes do
@@ -228,13 +279,24 @@ defmodule ArchonWeb.RouterTest do
   end
 
   # route_later_workflow_running and route_later_metadata_names became Phase 6 queries: they
-  # need the scenario's workflows and definitions, so the full replay has them.
+  # need the scenario's workflows and definitions, so the full replay has them. The Later search
+  # and task log fixtures gave way to Phase 8's (ADR 0027, decision 7).
   test "the routing fixtures replay: Later routes and other methods are 404s, not upstream's answers" do
-    names = ~w(route_not_found route_later_workflow_search route_later_workflow_test
-               route_later_tasks_search route_method_patch_workflow route_method_put_task
-               route_unsupported_workflow_decide route_later_tasks_requeue
-               route_later_workflow_bulk_search route_later_task_log)
+    names = ~w(route_not_found route_later_workflow_test route_method_patch_workflow
+               route_method_put_task route_unsupported_workflow_decide route_later_tasks_requeue)
 
     replay(Enum.filter(scenario(), &(elem(&1, 1) in names)))
+  end
+
+  # A slice that implements an action and forgets its list would skip its fixtures silently.
+  test "every action listed as not implemented still answers the 404 of a path without a handler" do
+    for controller <- [SearchController, TaskLogController, WorkflowBulkController],
+        action <- controller.unimplemented() do
+      conn = apply(controller, action, [build_conn(:get, "/api/archon/x"), %{}])
+
+      assert {conn.status, JSON.decode!(conn.resp_body)["message"]} ==
+               {404, "No static resource api/archon/x."},
+             "#{inspect(controller)}.#{action}"
+    end
   end
 end

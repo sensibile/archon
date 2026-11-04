@@ -217,14 +217,56 @@ defmodule Archon.Contract do
     "p7_http_async_get" => {:response, :workflow},
     "p7_http_async_get_completed" => {:response, :workflow},
     "p7_http_register_async_input" => {:request, :workflow_def},
-    "p7_http_async_input_get" => {:response, :workflow}
+    "p7_http_async_input_get" => {:response, :workflow},
+    # Phase 8 (ADR 0027, decision 7).
+    "p8_register_taskdefs" => {:request, {:list, :task_def}},
+    "p8_search_register" => {:request, :workflow_def},
+    "p8_search_get_1" => {:response, :workflow},
+    "p8_search_get_2" => {:response, :workflow},
+    "p8_search_get_3" => {:response, :workflow},
+    "p8_search_get_1_completed" => {:response, :workflow},
+    "p8_search_get_2_failed" => {:response, :workflow},
+    "p8_classified_register" => {:request, :workflow_def},
+    "p8_classified_get" => {:response, :workflow},
+    "p8_index_register" => {:request, :workflow_def},
+    "p8_index_get" => {:response, :workflow},
+    "p8_index_poll" => {:response, :task},
+    "p8_index_get_extended" => {:response, :workflow},
+    "p8_index_get_completed" => {:response, :workflow},
+    "p8_sys_register" => {:request, :workflow_def},
+    "p8_sys_get" => {:response, :workflow},
+    "p8_sys_get_forked" => {:response, :workflow},
+    "p8_skip_register" => {:request, :workflow_def},
+    "p8_skip_get" => {:response, :workflow},
+    "p8_skip_get_skipped" => {:response, :workflow},
+    "p8_skip_get_completed" => {:response, :workflow},
+    "p8_remove_register" => {:request, :workflow_def},
+    "p8_remove_archive_get" => {:response, :workflow},
+    "p8_remove_archive_get_completed" => {:response, :workflow},
+    "p8_remove_delete_get" => {:response, :workflow},
+    "p8_remove_delete_get_completed" => {:response, :workflow},
+    "p8_child_register" => {:request, :workflow_def},
+    "p8_parent_register" => {:request, :workflow_def},
+    "p8_parent_get" => {:response, :workflow},
+    "p8_child_get" => {:response, :workflow},
+    "p8_parent_get_failed" => {:response, :workflow},
+    "p8_parent_get_retried" => {:response, :workflow},
+    "p8_parent_get_terminated" => {:response, :workflow},
+    "p8_parent_get_restarted" => {:response, :workflow},
+    "p8_child_get_restarted" => {:response, :workflow},
+    "p8_parent_get_completed" => {:response, :workflow},
+    "p8_parent_get_reran" => {:response, :workflow}
   }
 
   # Keys holding wall-clock timestamps or durations derived from them. Generated IDs are UUIDs and
   # are handled by uuid_regex/0 instead, which also covers IDs embedded in paths and text/plain bodies.
+  # The search summaries (ADR 0027, decision 3) hold the same keys as text in GMT, a task log its
+  # createdTime, and bulk/search's WorkflowModel and TaskModel (decision 5) updatedTime and
+  # firstScheduledTime.
   @volatile_keys ~w(
     createTime updateTime startTime endTime scheduledTime firstStartTime lastUpdated
-    lastPollTime lastRetriedTime queueWaitTime executionTime
+    lastPollTime lastRetriedTime queueWaitTime executionTime createdTime updatedTime
+    firstScheduledTime
   )
 
   @type schema_name :: :workflow_def | :workflow | :task_def | :task
@@ -340,18 +382,26 @@ defmodule Archon.Contract do
   # Durations derived from the clock: any value, 0 included, may differ between runs.
   @duration_keys ~w(queueWaitTime executionTime)
 
+  # A summary's text for a timestamp of 0 (TaskSummary formats every time, ADR 0027 decision 3).
+  @epoch_text "1970-01-01T00:00:00.000Z"
+
   @doc """
   Like `normalize/1` but for comparisons that check IDs too (the replay of
   `ArchonWeb.ContractCase`): UUIDs are kept, and a timestamp of `0` (upstream's "not set") is kept
-  as well, so a time written where upstream has none still differs. Other timestamps and every
-  duration become `"<volatile>"`.
+  as well, so a time written where upstream has none still differs; so is a summary's text for it,
+  `"1970-01-01T00:00:00.000Z"`. Other timestamps and every duration become `"<volatile>"`.
   """
   @spec mask_times(json()) :: json()
   def mask_times(map) when is_map(map) do
     Map.new(map, fn
-      {key, value} when key in @duration_keys and not is_nil(value) -> {key, "<volatile>"}
-      {key, value} when key in @volatile_keys and value not in [nil, 0] -> {key, "<volatile>"}
-      {key, value} -> {key, mask_times(value)}
+      {key, value} when key in @duration_keys and not is_nil(value) ->
+        {key, "<volatile>"}
+
+      {key, value} when key in @volatile_keys and value not in [nil, 0, @epoch_text] ->
+        {key, "<volatile>"}
+
+      {key, value} ->
+        {key, mask_times(value)}
     end)
   end
 

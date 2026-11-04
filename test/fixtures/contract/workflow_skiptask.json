@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "PUT",
-    "path": "/api/workflow/170543e1-474a-4bcc-949d-4c93fe6df598/skiptask/ops_b_ref",
+    "path": "/api/workflow/2a1dc851-9cca-4b9d-ba14-e73be26043a9/skiptask/ops_b_ref",
     "body": {
       "taskInput": {
         "ignored": true

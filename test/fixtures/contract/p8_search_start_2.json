@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p8_search?correlationId=p8-search-2",
+    "body": {
+      "text": "p8 beta",
+      "x": 2
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "8af04db9-1716-48ce-a253-a964d02fb319"
+  }
+}

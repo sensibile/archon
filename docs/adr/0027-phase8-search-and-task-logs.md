@@ -223,6 +223,48 @@ archon에 이미 있는 것(`541865c` 기준):
 - **아직 구현하지 않은 액션의 재생.** ADR 0025 결정 7의 장치(컨트롤러의 미구현 목록, 재생의 건너뛰기, 단계 옵션 `requires:`)를
   다시 쓴다. 장치는 조각 6a(`c39f066`, sensibile/archon#68)가 만들고 6h(`5c2355f`, #77)가 지웠으니 그 diff로 되살린다. 8a가 컨트롤러
   골격·목록·`requires:`를 만들고, 각 조각은 자기 액션을 목록에서 빼면 단계가 켜진다. 8f가 장치를 없앤다.
+- **조각 8a에서 정한 것(2026-11-04).**
+  - 액션 이름: `ArchonWeb.SearchController`의 `search_workflows`, `search_workflows_v2`, `search_workflows_by_tasks`,
+    `search_workflows_by_tasks_v2`, `search_tasks`, `search_tasks_v2`(8e), `ArchonWeb.TaskLogController`의 `log`(POST)·`get_logs`(GET)(8d),
+    `ArchonWeb.WorkflowBulkController`의 `search`(8e). 각 컨트롤러의 `unimplemented/0`에 있다.
+  - 기존 `route_later_*` 넷은 걸러진 새 시나리오가 같은 경로를 다루므로 지웠다(바꾸지 않음).
+  - 픽스처 요청에 `content_type`을 더했다. JSON이 아닌 `Content-Type`으로 보낸 요청(`text/plain` 로그 POST)에만 있고, 재생은 그
+    값으로 보낸다. 없으면 지금처럼 `application/json`이다.
+  - 시각 정규화: `Archon.Contract`의 시각 키에 `createdTime`(task 로그), `updatedTime`·`firstScheduledTime`(bulk/search의
+    `WorkflowModel`·`TaskModel`)을 더했다. 요약의 시각 글자는 같은 키라 이미 가려지고, `mask_times/1`은 숫자 0처럼 0의 글자
+    `1970-01-01T00:00:00.000Z`를 남긴다(시작하지 않은 태스크의 `startTime`이 시각으로 바뀌면 드러나게).
+  - 재생 `until: :settled`가 검색(`totalHits`와 각 결과의 `status`)과 로그 목록(길이)에도 쓰인다. 캡처가 기다린 검색·로그 단계에 붙였다.
+  - 재생의 `ignore`: upstream이 만든 맵의 요약 글자(SWITCH 태스크 입력 `{kind=a, case=a, hasChildren=true}`, SUB_WORKFLOW가 만든 자식
+    입력)는 삽입 순서라 결정 3의 정렬 순과 다르다(`p8_sys_tasks_*`, `p8_search_family`, `p8_search_parent_id`의 그 `input`). JOIN의
+    `pollCount`·`updateTime`(`p8_sys_get_forked`)은 Phase 7처럼 upstream 시스템 태스크 작업자의 시점이다.
+- **조각 8a의 캡처에서 확인한 것(2026-11-04).** 이 응답이 정답이고 해당 조각이 맞춘다.
+  - 오류(8e): 잘못된 절은 400 `Incorrectly formatted query string: <절>`(`instance` 있음), 숫자가 아닌 시각은 500
+    `For input string: "<값>"`, 표에 없는 허용 필드는 질의·정렬 모두 500 `Cannot prepare statement for query: [SQLITE_ERROR] SQL error
+    or missing database (no such column: <열>)`(workflow의 `task_id`, 태스크의 `correlation_id`).
+    `size` 5001은 workflow `search`·`-v2`만 400 `validationErrors`(`searchWorkflows.arg1`·`searchWorkflowsV2.arg1`, `invalidValue`
+    `"5001"`)이고 태스크 검색은 제한이 없다. 숫자가 아닌 `size`는 Spring 변환 500(기존 쿼리 변환 문구).
+  - 페이징·정렬(8e): `start=-1`은 0, `size=-1`은 전부, `size=0`은 빈 결과에 `totalHits`는 그대로. 정렬 방향은 대소문자를 가리지 않고
+    (`correlationId:desc`), `:`가 없거나 방향이 틀린 항목은 버린다. `classifier` 매개변수는 값마다 공백을 자르지만 질의의 `IN` 값은
+    자르지 않는다(`IN (a, b)`는 `a`만 맞음). 시각 `IN`은 맞는 행이 없다. 따옴표는 지운다.
+  - freeText(8e): 역슬래시 하나는 맞지 않고 둘(JSON 글자의 이스케이프)은 맞는다. `%`·`_`는 와일드카드, 빈 값은 거르지 않는다.
+  - 색인 시점(8c): 예약만 된 워커 태스크(시작 직후, FORK 가지)와 skiptask가 만든 `SKIPPED` 태스크는 워크플로우가 끝난 뒤에도 없다.
+    시작 때 실행된 SET_VARIABLE·SWITCH는 있고, FORK는 앞 태스크가 끝나 실행된 뒤 있다. 폴링한 태스크는 있다. `extendLease`의 출력은
+    색인에 없다. `callbackAfterSeconds`가 있는 `IN_PROGRESS` 갱신은 색인 요약도 `SCHEDULED`다. 시작하지 않은 태스크 요약의
+    `startTime`은 epoch 글자이고 `executionTime`은 `endTime − 0`이다.
+  - 요약(8b): WorkflowSummary 키 순서는 `workflowType, version, workflowId, correlationId, startTime, updateTime, endTime, status, input,
+    output, reasonForIncompletion, executionTime, failedReferenceTaskNames, priority, failedTaskNames, taskToDomain, parentWorkflowId,
+    classifier, inputSize, outputSize`(값 없는 키는 빠짐). 실행 중이면 `executionTime`은 0이고 `output`은 `"{}"`다. TaskSummary는
+    `workflowId, workflowType, correlationId, scheduledTime, startTime, updateTime, endTime, status, executionTime, queueWaitTime,
+    taskDefName, taskType, input, output, taskId, workflowPriority`. SIMPLE 태스크의 `taskType`은 태스크 이름이다.
+  - remove(8c·8e): `archiveWorkflow=true` 뒤 workflow `search`와 태스크 `search`는 요약을 돌려주고, `search-v2`·태스크 `search-v2`·
+    `search-by-tasks`(`-v2`)는 다시 읽지 못해 결과 0·`totalHits` 0이다. 로그는 남는다. `false`는 워크플로우·태스크 색인과 로그를
+    지운다(로그 GET 204).
+  - 로그(8d): `TaskResult.logs`의 `createdTime`은 보낸 값 그대로다. POST 로그는 GET에서 그 뒤(`created_time` 순)에 오고, 빈 body는 400이
+    아니라 500 `Required request body is missing: public void com.netflix.conductor.rest.controllers.TaskResource.log(java.lang.String,java.lang.String)`이다.
+    자식 로그 글은 `Sub workflow archon_p8_child.1/<자식 ID> retried.`·`restarted.`·`reran.`이고 rerun은 같은 글을 **두 번** 쓴다.
+  - bulk/search(8e): 빈 목록 400 `WorkflowIds list cannot be null.`, 1001개 400 `Cannot process more than 1000 workflows. Please use
+    multiple requests.`(`searchWorkflow.arg0`), `null` body 500 `Required request body is missing: ...searchWorkflow(...)`, 없는 ID는
+    `bulkErrorResults`의 `No such workflow found by id: <ID>`.
 
 ### 8. 구현 조각
 

@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks/5400ece8-6992-4d8b-b781-229490ffa77d/log",
+    "body": "p8 plain log",
+    "content_type": "text/plain"
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

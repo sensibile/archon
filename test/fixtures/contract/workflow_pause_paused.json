@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "PUT",
-    "path": "/api/workflow/22eb0d9e-7c8b-4bc3-b9e1-216854acd077/pause",
+    "path": "/api/workflow/50033728-566b-4c2d-8bc8-595a9349137e/pause",
     "body": null
   },
   "response": {

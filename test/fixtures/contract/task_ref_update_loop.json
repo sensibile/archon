@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/tasks/4b81893a-5f63-4a75-aea5-436faa079f8f/loop_b_ref/COMPLETED",
+    "path": "/api/tasks/e0f739a3-f55f-4622-95d7-ee6a98d8d417/loop_b_ref/COMPLETED",
     "body": {
       "i": 1
     }
@@ -9,6 +9,6 @@
   "response": {
     "status": 200,
     "content_type": "text/plain;charset=UTF-8",
-    "body": "a6fce1f3-3bbe-4b6e-b23f-bf4da6439813"
+    "body": "24de6219-bdfa-4de1-9c13-1e094c36a5b6"
   }
 }

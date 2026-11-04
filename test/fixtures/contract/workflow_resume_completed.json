@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "PUT",
-    "path": "/api/workflow/4db676bb-c38e-471f-8cd8-c5e01bfb49f2/resume",
+    "path": "/api/workflow/f4649642-e875-4f27-850a-556a8964c14e/resume",
     "body": null
   },
   "response": {
@@ -9,7 +9,7 @@
     "content_type": "application/json",
     "body": {
       "status": 500,
-      "message": "The workflow 4db676bb-c38e-471f-8cd8-c5e01bfb49f2 is not PAUSED so cannot resume. Current status is COMPLETED",
+      "message": "The workflow f4649642-e875-4f27-850a-556a8964c14e is not PAUSED so cannot resume. Current status is COMPLETED",
       "instance": "<redacted-hostname>",
       "retryable": false
     }

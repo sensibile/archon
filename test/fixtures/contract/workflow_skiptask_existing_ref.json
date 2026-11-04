@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "PUT",
-    "path": "/api/workflow/2f7b49e0-c5b4-47e6-a061-d3fd4d06cce8/skiptask/task_a_ref",
+    "path": "/api/workflow/e6b4c4d7-ac3b-49ef-9552-bc3542f484d2/skiptask/task_a_ref",
     "body": null
   },
   "response": {

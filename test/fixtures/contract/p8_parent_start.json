@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p8_parent?correlationId=p8-parent",
+    "body": {
+      "x": "p8"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "d2c1b829-d9c9-4fd4-b5c5-0cb0a6ce0b27"
+  }
+}

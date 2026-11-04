@@ -10,7 +10,8 @@ defmodule ArchonWeb.ContractReplayTest do
   fixtures' definitions other tests registered are removed first and put back afterwards. Every
   Phase 6 step runs (ADR 0025, decision 7; slice 6h removed the skipping of steps not
   implemented yet), and so does every Phase 7 step (ADR 0026, decision 8; slice 7h removed the
-  skipping of steps whose task type had no mapper yet).
+  skipping of steps whose task type had no mapper yet). The Phase 8 steps that reach an action
+  not implemented yet are skipped until their slice implements it (ADR 0027, decision 7).
 
   Runs on either backend (`ARCHON_BACKEND`, ADR 0021 decision 9).
   """
@@ -34,10 +35,14 @@ defmodule ArchonWeb.ContractReplayTest do
             archon_p7_exclusive_join archon_p7_dynamic archon_p7_fjd_simple archon_p7_fjd_param
             archon_p7_fjd_legacy archon_p7_fjd_no_join archon_p7_inline archon_p7_lambda
             archon_p7_jq archon_p7_jq_invalid archon_p7_start_workflow archon_p7_http
-            archon_p7_http_async archon_p7_http_async_input archon_p7_http_invalid)
+            archon_p7_http_async archon_p7_http_async_input archon_p7_http_invalid
+            archon_p8_worker archon_p8_poll archon_p8_case archon_p8_fork_a archon_p8_fork_b
+            archon_p8_sub archon_p8_search archon_p8_classified archon_p8_index archon_p8_sys
+            archon_p8_skip archon_p8_remove archon_p8_child archon_p8_parent)
 
   @queues ~w(archon_task_a archon_task_b archon_task_c archon_ops_a archon_ops_b archon_ops_c
-             archon_ops_cb archon_ops_idle archon_p7_worker)
+             archon_ops_cb archon_ops_idle archon_p7_worker archon_p8_worker archon_p8_poll
+             archon_p8_case archon_p8_fork_a archon_p8_fork_b)
 
   setup do
     Archon.RuntimeHooks.reset()

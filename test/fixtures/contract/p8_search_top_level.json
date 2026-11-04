@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=workflowType%20IN%20%28archon_p8_parent%2Carchon_p8_child%29&topLevelOnly=true",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 1,
+      "results": [
+        {
+          "workflowType": "archon_p8_parent",
+          "version": 1,
+          "workflowId": "d2c1b829-d9c9-4fd4-b5c5-0cb0a6ce0b27",
+          "correlationId": "p8-parent",
+          "startTime": "2026-11-04T00:01:54.163Z",
+          "updateTime": "2026-11-04T00:01:54.797Z",
+          "endTime": "2026-11-04T00:01:54.721Z",
+          "status": "RUNNING",
+          "input": "{x=p8}",
+          "output": "{subWorkflowId=a3d722ec-d7b7-3a08-a057-46f43277c53d, y=2}",
+          "executionTime": 558,
+          "failedReferenceTaskNames": "",
+          "priority": 0,
+          "failedTaskNames": [],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "workflow",
+          "inputSize": 6,
+          "outputSize": 57
+        }
+      ]
+    }
+  }
+}

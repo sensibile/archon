@@ -18,13 +18,16 @@ defmodule ArchonWeb.ContractCase do
     * `{:poll_until, name}` - repeat the request until it answers 200 (a task arrived), then
       compare the last answer.
     * `{:batch_poll_until, name}` - repeat until the answer is a non-empty list.
-    * `{:wait_status, name, status}` - wait until the
+    * `{:wait_status, name, status}` or `{:wait_status, name, status, opts}` - wait until the
       workflow whose ID fixture `name` answered (a start's text body) reaches `status`. It reads
-      `Archon.Runtime` directly, as the script's wait is not a fixture.
+      `Archon.Runtime` directly, as the script's wait is not a fixture. The only option is
+      `requires:` (below).
 
   A fixture request body is sent as JSON, except a string, which is sent as the raw text it holds
   (the capture script stores a body that is not a JSON object, array, number or boolean as a
-  string: an empty body, `null`, text that is not JSON).
+  string: an empty body, `null`, text that is not JSON). A request that names its
+  `content_type` (a task log POST as `text/plain`, ADR 0027 decision 6) is sent with that
+  `Content-Type` instead of JSON's.
 
   Exchange options record the deliberate differences from upstream:
 
@@ -55,13 +58,23 @@ defmodule ArchonWeb.ContractCase do
       body, then compare the last answer, for a state the capture waited for (a child started).
       `path` is a list of keys and list indexes; `condition` is `:present` (not `nil`),
       `{:length, n}` or the value itself. `until: :settled` waits for the workflow GET to show
-      the fixture's workflow status, number of tasks and status of each task.
+      the fixture's workflow status, number of tasks and status of each task; for a search
+      (Phase 8) its `totalHits` and each result's status, for a list of task logs its length.
 
   ## HTTP stub
 
   The `HTTP` task fixtures call `Archon.HttpStub`, which the capture ran at `captured_http_stub/0`.
   A replay started with `new_state(http_stub: url)` puts `url` (its own stub) in place of that
   address in the requests it sends and the bodies it expects.
+
+  ## Phase 8 actions not implemented yet
+
+  ADR 0027 (decision 7) captured the fixtures of every Phase 8 route before the slices implement
+  them, as ADR 0025 (decision 7) did for Phase 6. A step whose request reaches an action its
+  controller lists in `unimplemented/0` is skipped (the action answers the 404 of a path without
+  a handler meanwhile). A step that only holds after such an action ran names those actions with
+  `requires: [{controller, action}]` and is skipped while any of them is in its controller's list.
+  A slice empties its controller's list and the steps run; slice 8f removes the mechanism.
 
   `steps/2` cuts a part of the scenario. Run them with `replay/2`, threading the state from one
   call to the next.
@@ -108,6 +121,7 @@ defmodule ArchonWeb.ContractCase do
   @attempt_ms 25
 
   @type condition :: :present | {:length, non_neg_integer()} | term()
+  @type action :: {module(), atom()}
   @type exchange_opts :: [
           expect:
             :no_route
@@ -116,7 +130,8 @@ defmodule ArchonWeb.ContractCase do
           ignore: [[String.t() | non_neg_integer()]],
           only: :expected_names | :bound_ids,
           unordered: boolean(),
-          until: [{[String.t() | non_neg_integer()], condition()}] | :settled
+          until: [{[String.t() | non_neg_integer()], condition()}] | :settled,
+          requires: [action()]
         ]
   @type step ::
           {:exchange, String.t()}
@@ -124,6 +139,7 @@ defmodule ArchonWeb.ContractCase do
           | {:poll_until, String.t()}
           | {:batch_poll_until, String.t()}
           | {:wait_status, String.t(), String.t()}
+          | {:wait_status, String.t(), String.t(), [requires: [action()]]}
 
   @type state :: %{
           :ids => %{String.t() => String.t()},
@@ -203,6 +219,16 @@ defmodule ArchonWeb.ContractCase do
       ["output", "response", "headers", "date"]
     ]
   ]
+
+  # Phase 8 (ADR 0027, decision 7): upstream's system task worker evaluates the JOIN on its own
+  # clock, as for @fjd_join_poll.
+  @p8_join_poll [ignore: [["tasks", 6, "pollCount"], ["tasks", 6, "updateTime"]]]
+  # The SWITCH task's input map in upstream's insertion order (`{kind=a, case=a,
+  # hasChildren=true}`); a summary's map is in sorted key order here (ADR 0027, decision 3).
+  @p8_switch_input_started [ignore: [["results", 1, "input"]]]
+  @p8_switch_input_forked [ignore: [["results", 2, "input"]]]
+  # The same for the child's input, which upstream's SUB_WORKFLOW task builds.
+  @p8_child_input [ignore: [["results", 0, "input"]]]
 
   @scenario [
     # metadata
@@ -296,11 +322,9 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "task_update_v2_invalid"},
     # routing: unknown path, Later paths shaped like MVP parameter paths, other methods, bad input
     {:exchange, "route_not_found"},
-    {:exchange, "route_later_workflow_search", @no_route},
     {:exchange, "route_later_workflow_running", @ids_unordered},
     {:exchange, "route_later_workflow_test", @no_route},
     {:exchange, "route_later_metadata_names", @expected_names},
-    {:exchange, "route_later_tasks_search", @no_route},
     {:exchange, "route_method_patch_workflow", @no_route},
     {:exchange, "route_method_put_task", @no_route},
     {:exchange, "request_body_not_json", @jackson_message},
@@ -443,8 +467,6 @@ defmodule ArchonWeb.ContractCase do
     # Later and Unsupported routes shaped like the new parameter routes
     {:exchange, "route_unsupported_workflow_decide", @no_route},
     {:exchange, "route_later_tasks_requeue", @no_route},
-    {:exchange, "route_later_workflow_bulk_search", @no_route},
-    {:exchange, "route_later_task_log", @no_route},
     # execute
     {:exchange, "workflow_execute_not_found"},
     {:exchange, "workflow_execute"},
@@ -801,7 +823,188 @@ defmodule ArchonWeb.ContractCase do
     {:exchange, "p7_http_register_async_input"},
     {:exchange, "p7_http_async_input_start"},
     {:exchange, "p7_http_async_input_get", @settled ++ @http_volatile},
-    {:exchange, "p7_http_register_invalid"}
+    {:exchange, "p7_http_register_invalid"},
+    # Phase 8 search, indexing and task logs (ADR 0027, decision 7)
+    {:exchange, "p8_register_taskdefs"},
+    # workflow search: sort, paging, freeText, query, classifier, v2; task search
+    {:exchange, "p8_search_register"},
+    {:exchange, "p8_search_start_1"},
+    {:exchange, "p8_search_start_2"},
+    {:exchange, "p8_search_start_3"},
+    {:exchange, "p8_search_get_1", @settled},
+    {:exchange, "p8_search_update_1"},
+    {:exchange, "p8_search_get_2", @settled},
+    {:exchange, "p8_search_update_2"},
+    {:exchange, "p8_search_get_3", @settled},
+    {:wait_status, "p8_search_start_1", "COMPLETED"},
+    {:wait_status, "p8_search_start_2", "FAILED"},
+    {:exchange, "p8_search_get_1_completed", @settled},
+    {:exchange, "p8_search_get_2_failed", @settled},
+    {:exchange, "p8_classified_register"},
+    {:exchange, "p8_classified_start"},
+    {:exchange, "p8_classified_get", @settled},
+    {:exchange, "p8_search_all", @settled},
+    {:exchange, "p8_search_desc"},
+    {:exchange, "p8_search_sort_many"},
+    {:exchange, "p8_search_sort_invalid"},
+    {:exchange, "p8_search_sort_missing_column"},
+    {:exchange, "p8_search_page"},
+    {:exchange, "p8_search_size_negative"},
+    {:exchange, "p8_search_start_negative"},
+    {:exchange, "p8_search_start_past_end"},
+    {:exchange, "p8_search_size_limit"},
+    {:exchange, "p8_search_size_limit_v2"},
+    {:exchange, "p8_search_size_zero"},
+    {:exchange, "p8_search_size_not_number"},
+    {:exchange, "p8_search_free_text"},
+    {:exchange, "p8_search_free_text_case"},
+    {:exchange, "p8_search_free_text_percent"},
+    {:exchange, "p8_search_free_text_underscore"},
+    {:exchange, "p8_search_free_text_backslash"},
+    {:exchange, "p8_search_free_text_backslashes"},
+    {:exchange, "p8_search_free_text_star"},
+    {:exchange, "p8_search_free_text_empty"},
+    {:exchange, "p8_search_free_text_java"},
+    {:exchange, "p8_search_status"},
+    {:exchange, "p8_search_in_many"},
+    {:exchange, "p8_search_in_one"},
+    {:exchange, "p8_search_in_spaces"},
+    {:exchange, "p8_search_time_range"},
+    {:exchange, "p8_search_time_future"},
+    {:exchange, "p8_search_time_not_number"},
+    {:exchange, "p8_search_time_in"},
+    {:exchange, "p8_search_wildcard"},
+    {:exchange, "p8_search_json_data"},
+    {:exchange, "p8_search_unknown_field"},
+    {:exchange, "p8_search_bad_clause"},
+    {:exchange, "p8_search_missing_column"},
+    {:exchange, "p8_search_quoted"},
+    {:exchange, "p8_search_classifier"},
+    {:exchange, "p8_search_classifier_workflow"},
+    {:exchange, "p8_search_classifier_both"},
+    {:exchange, "p8_search_classifier_only"},
+    {:exchange, "p8_search_v2"},
+    {:exchange, "p8_search_v2_page"},
+    {:exchange, "p8_search_v2_bad_clause"},
+    {:exchange, "p8_tasks_search"},
+    {:exchange, "p8_tasks_search_v2"},
+    {:exchange, "p8_tasks_search_free_text"},
+    {:exchange, "p8_tasks_search_page"},
+    {:exchange, "p8_tasks_search_missing_column"},
+    {:exchange, "p8_tasks_search_sort_missing_column"},
+    {:exchange, "p8_tasks_search_bad_clause"},
+    {:exchange, "p8_tasks_search_time_not_number"},
+    {:exchange, "p8_tasks_search_size_negative"},
+    {:exchange, "p8_tasks_search_size_limit"},
+    {:exchange, "p8_search_by_tasks"},
+    {:exchange, "p8_search_by_tasks_v2"},
+    {:exchange, "p8_search_by_tasks_free_text"},
+    {:exchange, "p8_search_by_tasks_bad_clause"},
+    # when tasks are indexed; task logs
+    {:exchange, "p8_index_register"},
+    {:exchange, "p8_index_start"},
+    {:exchange, "p8_index_get", @settled},
+    {:exchange, "p8_index_tasks_scheduled"},
+    {:exchange, "p8_index_workflow_scheduled"},
+    {:poll_until, "p8_index_poll"},
+    {:exchange, "p8_index_tasks_polled", @settled},
+    {:exchange, "p8_index_extend_lease"},
+    {:exchange, "p8_index_tasks_extended"},
+    {:exchange, "p8_index_get_extended", @settled},
+    {:exchange, "p8_index_update_logs"},
+    {:exchange, "p8_index_tasks_updated", @settled},
+    {:exchange, "p8_index_logs", @settled},
+    {:exchange, "p8_log_post_text"},
+    {:exchange, "p8_log_post_json"},
+    {:exchange, "p8_log_post_empty"},
+    {:exchange, "p8_index_logs_posted", @settled},
+    {:exchange, "p8_index_complete"},
+    {:wait_status, "p8_index_start", "COMPLETED"},
+    {:exchange, "p8_index_get_completed", @settled},
+    {:exchange, "p8_index_tasks_completed", @settled},
+    {:exchange, "p8_index_workflow_completed", @settled},
+    {:exchange, "p8_log_post_missing"},
+    {:exchange, "p8_log_get_missing", @settled},
+    {:exchange, "p8_log_get_none"},
+    # a synchronous first task, SWITCH, FORK
+    {:exchange, "p8_sys_register"},
+    {:exchange, "p8_sys_start"},
+    {:exchange, "p8_sys_get", @settled},
+    {:exchange, "p8_sys_tasks_started", @p8_switch_input_started},
+    {:exchange, "p8_sys_case_update"},
+    {:exchange, "p8_sys_get_forked", @settled ++ @p8_join_poll},
+    {:exchange, "p8_sys_tasks_forked", @p8_switch_input_forked},
+    {:exchange, "p8_sys_search_by_tasks"},
+    {:exchange, "p8_sys_search_by_tasks_v2"},
+    # skiptask
+    {:exchange, "p8_skip_register"},
+    {:exchange, "p8_skip_start"},
+    {:exchange, "p8_skip_get", @settled},
+    {:exchange, "p8_skip_skiptask"},
+    {:exchange, "p8_skip_get_skipped", @settled},
+    {:exchange, "p8_skip_tasks_skipped"},
+    {:exchange, "p8_skip_complete"},
+    {:wait_status, "p8_skip_start", "COMPLETED"},
+    {:exchange, "p8_skip_get_completed", @settled},
+    {:exchange, "p8_skip_tasks_completed", @settled},
+    {:exchange, "p8_skip_search_by_tasks"},
+    # remove with and without archiving
+    {:exchange, "p8_remove_register"},
+    {:exchange, "p8_remove_archive_start"},
+    {:exchange, "p8_remove_archive_get", @settled},
+    {:exchange, "p8_remove_archive_update"},
+    {:wait_status, "p8_remove_archive_start", "COMPLETED"},
+    {:exchange, "p8_remove_archive_get_completed", @settled},
+    {:exchange, "p8_remove_delete_start"},
+    {:exchange, "p8_remove_delete_get", @settled},
+    {:exchange, "p8_remove_delete_update"},
+    {:wait_status, "p8_remove_delete_start", "COMPLETED"},
+    {:exchange, "p8_remove_delete_get_completed", @settled},
+    {:exchange, "p8_remove_archive"},
+    {:exchange, "p8_remove_archive_search"},
+    {:exchange, "p8_remove_archive_search_v2"},
+    {:exchange, "p8_remove_archive_tasks"},
+    {:exchange, "p8_remove_archive_tasks_v2"},
+    {:exchange, "p8_remove_archive_by_tasks"},
+    {:exchange, "p8_remove_archive_by_tasks_v2"},
+    {:exchange, "p8_remove_archive_log", @settled},
+    {:exchange, "p8_remove_delete"},
+    {:exchange, "p8_remove_delete_search", @settled},
+    {:exchange, "p8_remove_delete_tasks", @settled},
+    {:exchange, "p8_remove_delete_log"},
+    {:exchange, "p8_remove_delete_get_removed"},
+    # a child's retry, restart and rerun logged on the parent; topLevelOnly
+    {:exchange, "p8_child_register"},
+    {:exchange, "p8_parent_register"},
+    {:exchange, "p8_parent_start"},
+    {:exchange, "p8_parent_get", @settled},
+    {:exchange, "p8_child_get", @settled},
+    {:exchange, "p8_child_fail"},
+    {:exchange, "p8_parent_get_failed", @settled},
+    {:exchange, "p8_child_retry"},
+    {:exchange, "p8_parent_get_retried", @settled},
+    {:exchange, "p8_parent_log_retried", @settled},
+    {:exchange, "p8_child_terminate"},
+    {:exchange, "p8_parent_get_terminated", @settled},
+    {:exchange, "p8_child_restart"},
+    {:exchange, "p8_parent_get_restarted", @settled},
+    {:exchange, "p8_child_get_restarted", @settled},
+    {:exchange, "p8_child_complete"},
+    {:exchange, "p8_parent_get_completed", @settled},
+    {:exchange, "p8_child_rerun"},
+    {:exchange, "p8_parent_get_reran", @settled},
+    {:exchange, "p8_parent_logs", @settled},
+    {:exchange, "p8_search_family", @p8_child_input},
+    {:exchange, "p8_search_top_level"},
+    {:exchange, "p8_search_top_level_v2"},
+    {:exchange, "p8_search_top_level_only"},
+    {:exchange, "p8_search_parent_id", @p8_child_input},
+    # bulk/search
+    {:exchange, "p8_bulk_search_empty"},
+    {:exchange, "p8_bulk_search_too_many"},
+    {:exchange, "p8_bulk_search_mixed"},
+    {:exchange, "p8_bulk_search_no_tasks"},
+    {:exchange, "p8_bulk_search_null_body"}
   ]
 
   @doc "Every captured exchange in capture order, with the waits between them."
@@ -893,11 +1096,47 @@ defmodule ArchonWeb.ContractCase do
     :ok
   end
 
-  @doc "Replays `steps`, asserting every response; returns the ID mapping for the next steps."
+  @doc """
+  Replays `steps`, asserting every response; returns the ID mapping for the next steps. A step
+  `skip?/1` is true for is left out.
+  """
   @spec replay([step()], state()) :: state()
   def replay(steps, state \\ new_state()) do
-    Enum.reduce(steps, state, &run/2)
+    Enum.reduce(steps, state, fn step, state ->
+      if skip?(step), do: state, else: run(step, state)
+    end)
   end
+
+  @doc """
+  Whether `step` waits for a Phase 8 action not implemented yet: its request reaches one, or one
+  of its `requires:` is one (see the moduledoc).
+  """
+  @spec skip?(step()) :: boolean()
+  def skip?({:wait_status, _name, _status}), do: false
+
+  def skip?({:wait_status, _name, _status, opts}),
+    do: Enum.any?(opts[:requires] || [], &unimplemented?/1)
+
+  def skip?({kind, name}), do: skip?({kind, name, []})
+
+  def skip?({_kind, name, opts}) do
+    Enum.any?(opts[:requires] || [], &unimplemented?/1) or
+      unimplemented?(route(Contract.fixture(name)["request"]))
+  end
+
+  defp route(%{"method" => method, "path" => path}) do
+    case Phoenix.Router.route_info(ArchonWeb.Router, method, URI.parse(path).path, "localhost") do
+      %{plug: controller, plug_opts: action} when is_atom(action) -> {controller, action}
+      :error -> nil
+    end
+  end
+
+  defp unimplemented?({controller, action}) do
+    Code.ensure_loaded?(controller) and function_exported?(controller, :unimplemented, 0) and
+      action in controller.unimplemented()
+  end
+
+  defp unimplemented?(nil), do: false
 
   defp run({:exchange, name}, state), do: run({:exchange, name, []}, state)
 
@@ -922,6 +1161,9 @@ defmodule ArchonWeb.ContractCase do
 
   defp run({:batch_poll_until, name}, state),
     do: repeat(name, state, fn actual -> match?([_ | _], actual.body) end, [])
+
+  defp run({:wait_status, name, status, _opts}, state),
+    do: run({:wait_status, name, status}, state)
 
   defp run({:wait_status, name, status}, state) do
     %{"response" => %{"body" => captured}} = Contract.fixture(name)
@@ -950,6 +1192,16 @@ defmodule ArchonWeb.ContractCase do
       for {%{"status" => task_status}, index} <- Enum.with_index(tasks),
           do: {["tasks", index, "status"], task_status}
   end
+
+  # A search's totalHits and each result's status (ADR 0027, decision 7).
+  defp settled(%{"totalHits" => hits, "results" => results}) do
+    [{["totalHits"], hits}, {["results"], {:length, length(results)}}] ++
+      for {%{"status" => status}, index} <- Enum.with_index(results),
+          do: {["results", index, "status"], status}
+  end
+
+  # A list of task logs: its length.
+  defp settled(list) when is_list(list), do: [{[], {:length, length(list)}}]
 
   defp holds?(body, conditions) do
     Enum.all?(conditions, fn {path, condition} -> holds_at?(at(body, path), condition) end)
@@ -1007,10 +1259,17 @@ defmodule ArchonWeb.ContractCase do
     {state, dispatch(request)}
   end
 
-  defp prepare_request(%{"method" => method, "path" => path, "body" => body}, state) do
+  defp prepare_request(%{"method" => method, "path" => path, "body" => body} = request, state) do
     {state, path} = request_ids(path, state)
     {state, body} = request_ids(body, state)
-    {state, %{method: method, path: path, body: body}}
+
+    {state,
+     %{
+       method: method,
+       path: path,
+       body: body,
+       content_type: Map.get(request, "content_type", "application/json")
+     }}
   end
 
   # A captured ID that is not bound yet appears first in a request: it is sent as it is.
@@ -1047,7 +1306,7 @@ defmodule ArchonWeb.ContractCase do
 
   defp swap({state, value}), do: {value, state}
 
-  defp dispatch(%{method: method, path: path, body: body}) do
+  defp dispatch(%{method: method, path: path, body: body, content_type: request_type}) do
     conn = Phoenix.ConnTest.build_conn()
 
     conn =
@@ -1059,7 +1318,7 @@ defmodule ArchonWeb.ContractCase do
           raw = if is_binary(body), do: body, else: JSON.encode!(body)
 
           conn
-          |> Plug.Conn.put_req_header("content-type", "application/json")
+          |> Plug.Conn.put_req_header("content-type", request_type)
           |> Phoenix.ConnTest.dispatch(@endpoint, method, path, raw)
       end
 

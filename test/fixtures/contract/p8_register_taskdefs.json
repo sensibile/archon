@@ -1,0 +1,55 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/taskdefs",
+    "body": [
+      {
+        "name": "archon_p8_worker",
+        "retryCount": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600,
+        "timeoutPolicy": "TIME_OUT_WF"
+      },
+      {
+        "name": "archon_p8_poll",
+        "retryCount": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600,
+        "timeoutPolicy": "TIME_OUT_WF"
+      },
+      {
+        "name": "archon_p8_case",
+        "retryCount": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600,
+        "timeoutPolicy": "TIME_OUT_WF"
+      },
+      {
+        "name": "archon_p8_fork_a",
+        "retryCount": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600,
+        "timeoutPolicy": "TIME_OUT_WF"
+      },
+      {
+        "name": "archon_p8_fork_b",
+        "retryCount": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600,
+        "timeoutPolicy": "TIME_OUT_WF"
+      },
+      {
+        "name": "archon_p8_sub",
+        "retryCount": 0,
+        "timeoutSeconds": 3600,
+        "responseTimeoutSeconds": 3600,
+        "timeoutPolicy": "TIME_OUT_WF"
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}
