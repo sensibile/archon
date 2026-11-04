@@ -261,11 +261,12 @@ defmodule Archon.Search.Query do
       clauses =
         Enum.map(query.conditions, &condition_sql/1) ++ free_text_sql(query.free_text)
 
-      {fragments, params} =
-        Enum.map_reduce(clauses, [], fn {template, values}, params ->
-          {template.(placeholders(values, first + length(params))), params ++ values}
+      {fragments, {_next, bound}} =
+        Enum.map_reduce(clauses, {first, []}, fn {template, values}, {at, bound} ->
+          {template.(placeholders(values, at)), {at + length(values), [values | bound]}}
         end)
 
+      params = bound |> Enum.reverse() |> Enum.concat()
       where = if fragments == [], do: "", else: "WHERE " <> Enum.join(fragments, " AND ")
       {:ok, %{where: where, params: params, order_by: order_by_sql(query.sort)}}
     end
