@@ -255,6 +255,42 @@ archon에 이미 있는 것(`541865c` 기준):
   `WorkflowModel`을 직렬화하므로 `Workflow`와 모양이 다르다(`previousStatus` 등 내부 필드, `failed*`의 NON_EMPTY, 태스크는 `TaskModel`).
   8e가 `WorkflowModel`·`TaskModel` 모양 인코더를 만들고 골든 픽스처로 맞춘다. 지금 문자열만 담는 `BulkResponse`와 태스크만 담는
   `SearchResult`는 8e가 원소 타입을 받게 일반화한다.
+- **조각 8e에서 정한 것(2026-11-04).**
+  - 검색 함수는 `Archon.Runtime.search_workflows/5`, `search_workflows_v2/5`, `search_workflows_by_tasks/5`,
+    `search_workflows_by_tasks_v2/5`, `search_tasks/5`, `search_tasks_v2/5`다. 인자는 `query`, `freeText`, `sort` 항목 목록,
+    `start`, `size`이고, `Archon.Search.Query.parse/3`로 파싱해 저장소 검색 콜백에 넘긴다. 결과는 `{:ok, totalHits, 결과}` 또는
+    `{:error, Query.error()}`다. 컨트롤러는 쿼리 변환, `classifier`·`topLevelOnly` 절, 5000 검사만 한다.
+  - 다시 읽기는 upstream 병렬 스트림 대신 결과마다 차례로 한다. 결과 순서는 같다(색인 순서).
+  - by-tasks의 중복 제거는 워크플로우 ID로 하고, 워크플로우는 ID마다 한 번만 읽는다. upstream `Workflow.equals`는 ID 비교다.
+    `WorkflowSummary.equals`는 필드 비교라서, 같은 워크플로우를 두 번 읽는 사이에 바뀌면 upstream만 둘 다 남긴다(동시 갱신 때만
+    생기는 차이). `totalHits`는 upstream 식(`totalHits − (페이지 수 − 결과 수)`) 그대로다. by-tasks-v2는 태스크 다시 읽기에서 한 번,
+    워크플로우에서 또 한 번 뺀다.
+  - 오류 상태: `Query.describe/1`의 예외가 `IllegalArgumentException`이면 400이다. 그 밖(`NumberFormatException`, 표에 없는 열, 캡처에
+    없는 값 없음·바인드 넘침·LIKE 패턴 상한)은 500이고 문구는 `describe/1` 그대로다.
+  - 쿼리는 upstream 매개변수 순서(`start`, `size`, `sort`, `freeText`, `query`, `classifier`, `topLevelOnly`)로 변환한다. 변환 실패는
+    기존 Spring 변환 500이고, 5000 검사는 변환이 다 끝난 뒤 질의 파싱보다 먼저 한다(400 `searchWorkflows.arg1`·
+    `searchWorkflowsV2.arg1`). 반복한 `sort`는 쉼표로 이은 한 값이다(`ArchonWeb.Request.string/3`).
+  - 요약 JSON 글자는 `Archon.Domain.SearchResult.Json`(JSON 인코더가 글자를 그대로 쓰는 구조체)으로 결과에 끼운다.
+    `SearchResult.results`는 `Task`·`Workflow`·`Json`을 담고, 디코드는 태스크만 한다. `BulkResponse.to_json/2`는 결과 인코더를 받는다.
+  - `Archon.Domain.WorkflowModelJson.workflow/2`·`task/2`는 REST 인코딩에서 getter 차이를 고쳐 만든다.
+    - `WorkflowModel`: `updatedTime`, `previousStatus`, `failedTaskId`를 더하고, `failed*`는 비면 뺀다. `startTime`,
+      `updateTime`, `history`, `idempotencyKey`, `rateLimitKey`, `rateLimited`, `aggregateTokenUsage`는 없다.
+    - `TaskModel`: `callbackAfterMs`, `firstScheduledTime`, `waitTimeout`, `loopTaskId`를 더한다. `onStateChange`는 태스크 매퍼가 워크플로우
+      태스크에서 복사한 값이다(`TaskMapperContext`). 매퍼를 거치지 않는 태스크에는 없다. 실행된 `FORK_JOIN_DYNAMIC` 태스크가 만든, 정의에서
+      그 바로 뒤의 JOIN(`ForkJoinDynamicTaskMapper#createJoinTask`, 재시도는 그 복사본. skiptask로 건너뛴 동적 포크 뒤의 JOIN은 JOIN
+      매퍼가 만들므로 있다)과 skiptask 태스크가 그렇다. skiptask 태스크는 `workflowTask`도 없다. upstream은 저장할 때 넣지 않고
+      이름·참조 이름 스텁은 `toTask`(REST `Task`)만 만드는데, archon은 그 스텁을 저장하므로 인코더가 스텁을 알아보고 뺀다. `idempotent`·`cachedOutput`·`nonWorkflowEventTask`는 늘 false(core가 켜지 않음), `notifications`는
+      `{}`, `asyncComplete`는 upstream getter대로(입력에 키가 있으면 그 값, 없으면 워크플로우 태스크 값), `idempotentExecution`은
+      false다. 입력의 `asyncComplete`가 불리언이 아니면 upstream은 직렬화 중 `ClassCastException`(500)이지만 archon은 false로
+      쓴다(의도적 차이, upstream decider가 먼저 막아 닿기 어렵다). `firstStartTime`, `executionMetadata`, `runtimeMetadata`는
+      없다. `reasonForIncompletion`은 자르지 않고, `outputData`는 저장값이다(500자 자르기와 `subWorkflowId` 복사는 `toTask`가 한다).
+  - `bulk/search`의 검증 순서는 Phase 6 bulk와 같다(body → `includeTasks` → 빈 목록·1000 초과 400 `searchWorkflow.arg0`). 반복한 ID는
+    결과에 다시 들어간다. `null` ID는 다른 ID를 읽은 뒤 Phase 6 bulk와 같은 500(Jackson null 키)이다(캡처 없음, upstream 같은 코드 경로).
+  - 다시 읽기에서 저장소 예외(풀 수 없는 행, DB 오류)는 검색 전체를 500으로 만든다. upstream은 결과마다 `Exception`을 잡아 빼고
+    `totalHits`를 줄이지만, archon은 저장소 장애를 빈 결과로 감추지 않는다(의도적 차이). 없는 행만 빼고 줄인다.
+  - `classifier`·`query`의 UTF-8이 아닌 바이트는 Tomcat처럼 U+FFFD로 바꾼 뒤 절을 덧붙인다.
+  - 음수 `size`(모든 결과)와 태스크·by-tasks 검색의 큰 `size`는 upstream처럼 상한이 없다. `-v2`·by-tasks는 결과마다 저장소를 한 번씩
+    읽는다(결정 7의 상속 위험과 같은 범위).
 
 ### 6. task 실행 로그
 
