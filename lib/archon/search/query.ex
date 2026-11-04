@@ -11,38 +11,44 @@
 
 defmodule Archon.Search.Query do
   @moduledoc """
-  The search grammar of upstream's default server (`SqliteIndexQueryBuilder`; ADR 0027,
+  The search grammar of upstream's default server (`SqliteIndexQueryBuilder` on SQLite; ADR 0027,
   decision 4), shared by both stores.
 
-  `parse/3` turns the `query`, `freeText` and `sort` parameters into a `t:t/0`:
+  `parse/3` turns the `query`, `freeText` and `sort` parameters into a `t:t/0`. Bytes that are
+  not UTF-8 become U+FFFD first, as the servlet container decodes them upstream.
 
     * `query` is split on `" AND "` (Java `String#split`: trailing empty parts dropped), and each
       part must match `^([a-zA-Z]++)\\s*(=|>|<|IN)\\s*(.*)$` as Java does (`\\s` is ASCII, `.`
       stops at a line terminator, `$` also matches before one final terminator). The value loses
       every `"`, `'`, `(` and `)` and is split on `,` (the parts are not trimmed). A one-value `IN`
       is `=`. The field goes from camelCase to snake_case. For a field ending in `_time` the first
-      value must be a Java `long` (epoch milliseconds), even when the field is not searchable;
-      later values stay text, which never matches a time. Clauses on fields outside the allow
-      list are dropped.
-    * `freeText` other than empty or `*` matches the summary JSON case-insensitively as
-      `%<text>%`, where `%`, `_` and `*` are wildcards.
+      value must be a Java `long` (epoch milliseconds), even when the field is not searchable.
+      Clauses on fields outside the allow list are dropped.
+    * `freeText` other than empty or `*` matches the summary JSON as `%<text in lower case>%`,
+      where `%`, `_` and `*` are wildcards.
     * each `sort` item is `field:ASC|DESC` (order in any case); anything else is dropped.
 
   `check/2` then reports what upstream only finds when it runs the SQL for a table: a field the
-  table has no column for, a clause with no value (`IN (,)`), or a non-`IN` clause with more than
-  one value (bound parameters overflow). `run/5` evaluates a checked query over rows in memory and
-  `sql/3` gives the PostgreSQL for it; both order by the sort items and then `seq` (`ASC` puts
-  `NULL` first and `DESC` last, as SQLite does), and page as SQLite's `LIMIT ? OFFSET ?` does
-  (`page/3`).
+  table has no column for, a clause with no value (`IN (,)`), a non-`IN` clause with more than
+  one value (bound parameters overflow), or a `LIKE` pattern over SQLite's 50,000 bytes.
+  `run/5` evaluates a checked query over rows in memory and `sql/3` gives the PostgreSQL for it;
+  both order by the sort items and then `seq` (`ASC` puts `NULL` first and `DESC` last, as SQLite
+  does), and page as SQLite's `LIMIT ? OFFSET ?` does (`page/3`).
 
-  Matching follows SQLite: `=` and `IN` compare exactly, `>`/`<` compare text by bytes and times
-  by value, `=` with a `*` is a case-insensitive `LIKE` where `*` and `%` match any run and `_`
-  one character (there is no escape character), and `classifier` asked for `workflow` (in any
-  case) also matches rows without a classifier.
+  Matching follows SQLite's:
+
+    * `=` and `IN` compare exactly and `>`/`<` compare text by bytes. A time column holds epoch
+      milliseconds here and UTC text (`yyyy-MM-dd HH:mm:ss.SSS`) upstream, which only converts
+      the first value: a later `IN` value matches when it is that text exactly.
+    * `=` with a `*` is `lower(column) LIKE lower(value)` with `*` as `%`; the free text is
+      `lower(json_data) LIKE pattern` with the pattern lowered by Java. `%` matches any run, `_`
+      one character, there is no escape character, and SQLite's `lower()` and `LIKE` fold ASCII
+      letters only.
+    * `classifier` asked for `workflow` (Java `equalsIgnoreCase`) also matches rows without one.
 
   Not reproduced (ADR 0027): the `agentHierarchy` sort, which is dropped; non-ASCII digits in a
-  time value, which Java's `Long.parseLong` reads; and SQLite's ASCII-only `lower()`, which here
-  lowers every letter.
+  time value, which Java's `Long.parseLong` reads; and a `LIKE` pattern over the limit fails
+  here even when SQLite's plan would not have reached it.
   """
 
   alias Archon.Domain.SummaryUtil
@@ -65,6 +71,9 @@ defmodule Archon.Search.Query do
   @long_min -9_223_372_036_854_775_808
   @long_max 9_223_372_036_854_775_807
 
+  # SQLITE_MAX_LIKE_PATTERN_LENGTH.
+  @like_pattern_limit 50_000
+
   # Java's \s, possessive as in upstream's pattern; nothing after the operator can backtrack
   # into it, so this accepts the same clauses.
   @clause ~r/\A([a-zA-Z]++)[\t\n\x0B\f\r ]*+(=|>|<|IN)[\t\n\x0B\f\r ]*+/
@@ -72,6 +81,12 @@ defmodule Archon.Search.Query do
   # Java's line terminators, and what `$` accepts after the value.
   @terminators ["\n", "\r", <<0x85::utf8>>, <<0x2028::utf8>>, <<0x2029::utf8>>]
   @final_terminators ["", "\r\n" | @terminators]
+
+  # How upstream writes a time column (SqliteIndexDAO).
+  @utc_text ~r/\A(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}\.\d{3})\z/
+
+  # SQLite's lower() in PostgreSQL, whatever the database's ctype.
+  @ascii_lower "translate(~s, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
 
   defstruct conditions: [], free_text: nil, sort: []
 
@@ -104,8 +119,8 @@ defmodule Archon.Search.Query do
         }
 
   @typedoc """
-  `free_text` is the `LIKE` pattern on the lowered summary JSON, already lowered and wrapped in
-  `%`, with `*` turned into `%`. Conditions are in upstream's order (by SQL fragment).
+  `free_text` is the `LIKE` pattern on the summary JSON, already lowered and wrapped in `%`, with
+  `*` turned into `%`. Conditions are in upstream's order (by SQL fragment).
   """
   @type t :: %__MODULE__{
           conditions: [condition()],
@@ -125,6 +140,8 @@ defmodule Archon.Search.Query do
       `sort` (an SQLite error, wrapped in `NonTransientException`).
     * `{:bind_overflow, placeholders}` - more values than the SQL has parameters, from a non-`IN`
       clause with several values (`ArrayIndexOutOfBoundsException`).
+    * `:pattern_too_complex` - a `LIKE` pattern over 50,000 bytes (an SQLite error, wrapped in
+      `NonTransientException`).
   """
   @type error ::
           {:invalid_clause, String.t()}
@@ -132,6 +149,7 @@ defmodule Archon.Search.Query do
           | :missing_value
           | {:unknown_column, String.t()}
           | {:bind_overflow, pos_integer()}
+          | :pattern_too_complex
 
   @typedoc "An index row: its columns by name, and `seq` (insertion order)."
   @type row :: %{required(:seq) => integer(), optional(column()) => String.t() | integer() | nil}
@@ -142,12 +160,12 @@ defmodule Archon.Search.Query do
   """
   @spec parse(String.t() | nil, String.t() | nil, [String.t()]) :: {:ok, t()} | {:error, error()}
   def parse(query, free_text, sort) when is_list(sort) do
-    with {:ok, conditions} <- parse_conditions(query) do
+    with {:ok, conditions} <- parse_conditions(utf8(query)) do
       {:ok,
        %__MODULE__{
          conditions: conditions,
-         free_text: free_text_pattern(free_text),
-         sort: Enum.flat_map(sort, &sort_item/1)
+         free_text: free_text_pattern(utf8(free_text)),
+         sort: Enum.flat_map(sort, &(&1 |> utf8() |> sort_item()))
        }}
     end
   end
@@ -159,20 +177,24 @@ defmodule Archon.Search.Query do
   @spec sort_list(String.t() | nil) :: [String.t()]
   def sort_list(nil), do: []
 
-  def sort_list(sort) when is_binary(sort),
-    do: if(SummaryUtil.blank?(sort), do: [], else: java_split(sort, "|"))
+  def sort_list(sort) when is_binary(sort) do
+    sort = utf8(sort)
+    if SummaryUtil.blank?(sort), do: [], else: java_split(sort, "|")
+  end
 
   @doc """
-  What upstream finds when it prepares and binds the SQL for `table`, in its order: a column the
-  table lacks (in `query`, then `sort`), then a clause with no value or more values than
-  parameters. A clause `IN (,)` makes SQLite drop the whole `WHERE` before it looks up its
-  columns, so only `sort` columns are checked then.
+  What upstream finds when it prepares, binds and runs the SQL for `table`, in its order: a
+  column the table lacks (in `query`, then `sort`), then a clause with no value or more values
+  than parameters, then a `LIKE` pattern over the limit. A clause `IN (,)` makes SQLite drop the
+  whole `WHERE` before it looks up its columns, so only `sort` columns are checked then.
   """
   @spec check(t(), table()) :: :ok | {:error, error()}
   def check(%__MODULE__{} = query, table) do
     columns = Map.fetch!(@tables, table)
 
-    with :ok <- check_columns(query, columns), do: check_binds(query)
+    with :ok <- check_columns(query, columns),
+         :ok <- check_binds(query),
+         do: check_patterns(query)
   end
 
   @doc """
@@ -222,35 +244,25 @@ defmodule Archon.Search.Query do
   The PostgreSQL for a query on `table`, after `check/2`: `where` (`""` or `"WHERE ..."`), its
   `params` numbered from `$<first>`, and `order_by` (`"ORDER BY ..., seq"`). Column names come
   from the allow list only; every value is a parameter. Text is compared and sorted with
-  `COLLATE "C"` (bytes, as SQLite) and `LIKE` has `ESCAPE ''` (no escape character, as SQLite).
+  `COLLATE "C"` (bytes, as SQLite), `LIKE` has `ESCAPE ''` (no escape character, as SQLite) and
+  folds ASCII letters only. Index text never holds NUL (ADR 0027, decision 2), which PostgreSQL
+  text cannot bind, so a value with NUL is decided here: `=`, `IN` and `LIKE` never match it, and
+  `> "a\\0..."` is `> "a"`, `< "a\\0..."` is `<= "a"`.
   """
   @spec sql(t(), table(), pos_integer()) ::
           {:ok, %{where: String.t(), params: [String.t() | integer()], order_by: String.t()}}
           | {:error, error()}
   def sql(%__MODULE__{} = query, table, first \\ 1) do
     with :ok <- check(query, table) do
+      clauses =
+        Enum.map(query.conditions, &condition_sql/1) ++ free_text_sql(query.free_text)
+
       {fragments, params} =
-        Enum.reduce(query.conditions, {[], []}, fn condition, {fragments, params} ->
-          {fragment, values} = condition_sql(condition, first + length(params))
-          {[fragment | fragments], params ++ values}
+        Enum.map_reduce(clauses, [], fn {template, values}, params ->
+          {template.(placeholders(values, first + length(params))), params ++ values}
         end)
 
-      {fragments, params} =
-        case query.free_text do
-          nil ->
-            {fragments, params}
-
-          pattern ->
-            {["lower(json_data) LIKE $#{first + length(params)} ESCAPE ''" | fragments],
-             params ++ [pattern]}
-        end
-
-      where =
-        case Enum.reverse(fragments) do
-          [] -> ""
-          parts -> "WHERE " <> Enum.join(parts, " AND ")
-        end
-
+      where = if fragments == [], do: "", else: "WHERE " <> Enum.join(fragments, " AND ")
       {:ok, %{where: where, params: params, order_by: order_by_sql(query.sort)}}
     end
   end
@@ -269,13 +281,20 @@ defmodule Archon.Search.Query do
   def describe({:unknown_column, name}),
     do:
       {"NonTransientException",
-       "Cannot prepare statement for query: [SQLITE_ERROR] SQL error or missing database " <>
-         "(no such column: #{name})"}
+       "Cannot prepare statement for query: " <> sqlite_error("no such column: #{name}")}
 
   def describe({:bind_overflow, count}),
     do: {"ArrayIndexOutOfBoundsException", "Index #{count} out of bounds for length #{count}"}
 
+  def describe(:pattern_too_complex),
+    do: {"NonTransientException", sqlite_error("LIKE or GLOB pattern too complex")}
+
+  defp sqlite_error(text), do: "[SQLITE_ERROR] SQL error or missing database (#{text})"
+
   ## Parsing
+
+  defp utf8(nil), do: nil
+  defp utf8(text), do: String.replace_invalid(text, <<0xFFFD::utf8>>)
 
   defp parse_conditions(query) when query in [nil, ""], do: {:ok, []}
 
@@ -290,44 +309,35 @@ defmodule Archon.Search.Query do
     end)
     |> case do
       {:ok, parsed} ->
-        conditions =
-          parsed
-          |> Enum.reverse()
-          |> Enum.sort_by(&fragment/1)
-          |> Enum.flat_map(fn {name, operator, values} ->
-            case Map.fetch(@column_atoms, name) do
-              {:ok, column} -> [%{column: column, operator: operator, values: values}]
-              :error -> []
-            end
-          end)
-
-        {:ok, conditions}
+        {:ok, parsed |> Enum.reverse() |> Enum.sort_by(&fragment/1) |> searchable()}
 
       error ->
         error
     end
   end
 
-  defp parse_condition(clause) do
-    with {:ok, field, operator, raw} <- match_clause(clause) do
-      values = raw |> String.replace(~r/["'()]/, "") |> java_split(",")
-      name = camel_to_snake(field)
-      operator = if operator == :in and length(values) == 1, do: :eq, else: operator
+  defp searchable(parsed) do
+    for {name, operator, values} <- parsed,
+        Map.has_key?(@column_atoms, name),
+        do: %{column: Map.fetch!(@column_atoms, name), operator: operator, values: values}
+  end
 
-      if String.ends_with?(name, "_time") do
-        with {:ok, values} <- time_values(values), do: {:ok, {name, operator, values}}
-      else
-        {:ok, {name, operator, values}}
-      end
+  defp parse_condition(clause) do
+    with {:ok, field, operator, raw} <- match_clause(clause),
+         values = raw |> String.replace(~r/["'()]/, "") |> java_split(","),
+         name = camel_to_snake(field),
+         operator = if(operator == :in and length(values) == 1, do: :eq, else: operator),
+         {:ok, values} <- time_values(name, values) do
+      {:ok, {name, operator, values}}
     end
   end
 
   defp match_clause(clause) do
-    with [{0, length}, field, operator] <- Regex.run(@clause, clause, return: :index),
-         rest = binary_part(clause, length, byte_size(clause) - length),
-         {:ok, value} <- line_value(rest) do
-      {:ok, binary_part(clause, elem(field, 0), elem(field, 1)),
-       operator(binary_part(clause, elem(operator, 0), elem(operator, 1))), value}
+    with [{0, length}, {field_at, field_size}, {op_at, op_size}] <-
+           Regex.run(@clause, clause, return: :index),
+         {:ok, value} <- line_value(binary_part(clause, length, byte_size(clause) - length)) do
+      {:ok, binary_part(clause, field_at, field_size),
+       operator(binary_part(clause, op_at, op_size)), value}
     else
       _no_match -> {:error, {:invalid_clause, clause}}
     end
@@ -351,12 +361,19 @@ defmodule Archon.Search.Query do
   defp operator("<"), do: :lt
   defp operator("IN"), do: :in
 
-  defp time_values([]), do: {:error, :missing_value}
+  defp time_values(name, values) do
+    cond do
+      not String.ends_with?(name, "_time") ->
+        {:ok, values}
 
-  defp time_values([first | rest]) do
-    case java_long(first) do
-      {:ok, millis} -> {:ok, [millis | rest]}
-      :error -> {:error, {:invalid_number, first}}
+      values == [] ->
+        {:error, :missing_value}
+
+      true ->
+        case java_long(hd(values)) do
+          {:ok, millis} -> {:ok, [millis | tl(values)]}
+          :error -> {:error, {:invalid_number, hd(values)}}
+        end
     end
   end
 
@@ -409,30 +426,27 @@ defmodule Archon.Search.Query do
 
   # Upstream's SQL fragment of a clause, by which it orders the clauses (and so their parameters
   # and the first failure).
+  defp fragment({name, :in, values}) do
+    list = "#{name} IN (#{Enum.map_join(values, ",", fn _value -> "?" end)})"
+    if untagged?(name, values), do: "(#{list} OR #{name} IS NULL)", else: list
+  end
+
   defp fragment({name, operator, values}) do
     cond do
-      operator == :in ->
-        list = "#{name} IN (#{Enum.map_join(values, ",", fn _value -> "?" end)})"
-        if untagged?(name, values), do: "(#{list} OR #{name} IS NULL)", else: list
-
-      String.ends_with?(name, "_time") ->
-        "#{name} #{symbol(operator)} ?"
-
-      operator == :eq and match?([value] when is_binary(value), values) and
-          String.contains?(hd(values), "*") ->
-        "lower(#{name}) LIKE lower(?)"
-
-      operator == :eq and untagged?(name, values) ->
-        "(#{name} = ? OR #{name} IS NULL)"
-
-      true ->
-        "#{name} #{symbol(operator)} ?"
+      String.ends_with?(name, "_time") -> "#{name} #{symbol(operator)} ?"
+      operator == :eq and wildcard?(values) -> "lower(#{name}) LIKE lower(?)"
+      operator == :eq and untagged?(name, values) -> "(#{name} = ? OR #{name} IS NULL)"
+      true -> "#{name} #{symbol(operator)} ?"
     end
   end
 
   defp symbol(:eq), do: "="
   defp symbol(:gt), do: ">"
   defp symbol(:lt), do: "<"
+
+  # `=` with one value holding a `*` is upstream's `lower(column) LIKE lower(?)`.
+  defp wildcard?([value]) when is_binary(value), do: String.contains?(value, "*")
+  defp wildcard?(_values), do: false
 
   # `classifier` asked for the untagged token also matches rows indexed without a classifier.
   defp untagged?(name, values) when name in ["classifier", :classifier],
@@ -453,6 +467,20 @@ defmodule Archon.Search.Query do
           String.downcase(String.upcase(x)) == String.downcase(String.upcase(y))
       end)
   end
+
+  # A later time value of an IN: the epoch milliseconds of upstream's UTC column text, or nil
+  # for text no column holds.
+  defp utc_text_millis(text) do
+    with [date, time] <- Regex.run(@utc_text, text, capture: :all_but_first),
+         {:ok, naive} <- NaiveDateTime.from_iso8601(date <> "T" <> time) do
+      naive |> DateTime.from_naive!("Etc/UTC") |> DateTime.to_unix(:millisecond)
+    else
+      _other -> nil
+    end
+  end
+
+  defp time_list([millis | later]),
+    do: Enum.uniq([millis | later |> Enum.map(&utc_text_millis/1) |> Enum.reject(&is_nil/1)])
 
   ## Checking
 
@@ -489,13 +517,28 @@ defmodule Archon.Search.Query do
   defp placeholders(%{operator: :in, values: values}), do: length(values)
   defp placeholders(_condition), do: 1
 
+  defp check_patterns(%__MODULE__{conditions: conditions, free_text: free_text}) do
+    patterns =
+      for %{column: column, operator: :eq, values: [value]} <- conditions,
+          column not in @time_columns and wildcard?([value]),
+          do: value
+
+    if Enum.any?(
+         [free_text | patterns],
+         &(is_binary(&1) and byte_size(&1) > @like_pattern_limit)
+       ),
+       do: {:error, :pattern_too_complex},
+       else: :ok
+  end
+
   ## Memory evaluation
 
-  defp condition_match?(%{column: column, operator: operator, values: [millis | _rest]}, row)
+  defp condition_match?(%{column: column, operator: operator, values: values}, row)
        when column in @time_columns do
-    case Map.get(row, column) do
-      value when is_integer(value) -> compare(operator, value, millis)
-      _null -> false
+    case {Map.get(row, column), operator} do
+      {nil, _operator} -> false
+      {value, :in} -> value in time_list(values)
+      {value, operator} -> compare(operator, value, hd(values))
     end
   end
 
@@ -506,57 +549,48 @@ defmodule Archon.Search.Query do
     end
   end
 
-  defp condition_match?(%{column: column, operator: operator, values: [value]} = condition, row) do
+  defp condition_match?(%{column: column, operator: operator, values: [value]}, row) do
     bound = String.replace(value, "*", "%")
 
-    case {Map.get(row, column), wildcard?(condition)} do
+    case {Map.get(row, column), operator == :eq and wildcard?([value])} do
       {nil, false} -> operator == :eq and untagged?(column, [value])
       {nil, true} -> false
-      {text, true} -> like?(text, String.downcase(bound))
+      {text, true} -> like?(text, String.downcase(bound, :ascii))
       {text, false} -> compare(operator, text, bound)
     end
   end
 
   defp compare(:eq, a, b), do: a == b
-  defp compare(:in, a, b), do: a == b
   defp compare(:gt, a, b), do: a > b
   defp compare(:lt, a, b), do: a < b
 
-  # `=` with one value holding a `*` is upstream's `lower(column) LIKE lower(?)`.
-  defp wildcard?(%{column: column, operator: operator, values: values}),
-    do:
-      operator == :eq and column not in @time_columns and match?([_value], values) and
-        String.contains?(hd(values), "*")
-
-  # `lower(text) LIKE pattern`, with `pattern` already lowered.
+  # `lower(text) LIKE pattern` in SQLite: ASCII letters folded on both sides.
   defp like?(nil, _pattern), do: false
-  defp like?(text, pattern), do: text |> String.downcase() |> like_match?(pattern, 0, 0, nil)
+
+  defp like?(text, pattern),
+    do: like_match?(String.downcase(text, :ascii), String.downcase(pattern, :ascii), 0, 0, nil)
 
   # SQL LIKE without an escape character: `%` matches any run of characters, `_` one character.
   # Backtracks only to the last `%`, so the work is at most text size times pattern size.
   defp like_match?(text, pattern, t, p, star) do
-    cond do
-      p < byte_size(pattern) and :binary.at(pattern, p) == ?% ->
-        like_match?(text, pattern, t, p + 1, {p + 1, t})
-
-      t == byte_size(text) ->
-        rest_is_percent?(pattern, p)
-
-      p < byte_size(pattern) and :binary.at(pattern, p) == ?_ ->
-        like_match?(text, pattern, t + char_size(text, t), p + char_size(pattern, p), star)
-
-      p < byte_size(pattern) and :binary.at(pattern, p) == :binary.at(text, t) ->
-        like_match?(text, pattern, t + 1, p + 1, star)
-
-      star != nil ->
-        {star_p, star_t} = star
-        next = star_t + char_size(text, star_t)
-        like_match?(text, pattern, next, star_p, {star_p, next})
-
-      true ->
-        false
+    case {at(pattern, p), at(text, t)} do
+      {?%, _char} -> like_match?(text, pattern, t, p + 1, {p + 1, t})
+      {_char, nil} -> rest_is_percent?(pattern, p)
+      {?_, _char} -> like_match?(text, pattern, t + char_size(text, t), p + 1, star)
+      {same, same} -> like_match?(text, pattern, t + 1, p + 1, star)
+      _mismatch -> retry(text, pattern, star)
     end
   end
+
+  defp retry(_text, _pattern, nil), do: false
+
+  defp retry(text, pattern, {star_p, star_t}) do
+    next = star_t + char_size(text, star_t)
+    like_match?(text, pattern, next, star_p, {star_p, next})
+  end
+
+  defp at(binary, index) when index < byte_size(binary), do: :binary.at(binary, index)
+  defp at(_binary, _index), do: nil
 
   defp rest_is_percent?(pattern, p),
     do: binary_part(pattern, p, byte_size(pattern) - p) =~ ~r/\A%*\z/
@@ -589,36 +623,71 @@ defmodule Archon.Search.Query do
 
   ## PostgreSQL
 
-  defp condition_sql(%{column: column, operator: operator, values: [millis | _rest]}, at)
-       when column in @time_columns do
-    {"#{column} #{if operator == :in, do: "=", else: symbol(operator)} $#{at}", [millis]}
+  # Each clause is a template taking its parameter placeholders, and its parameters.
+  defp condition_sql(%{column: column, operator: :in, values: values})
+       when column in @time_columns,
+       do: {&"#{column} IN (#{Enum.join(&1, ", ")})", time_list(values)}
+
+  defp condition_sql(%{column: column, operator: operator, values: [millis | _later]})
+       when column in @time_columns,
+       do: {&"#{column} #{symbol(operator)} #{hd(&1)}", [millis]}
+
+  defp condition_sql(%{column: column, operator: :in, values: values}) do
+    bindable = Enum.reject(values, &nul?/1)
+    null = if untagged?(column, values), do: " OR #{column} IS NULL", else: ""
+
+    case bindable do
+      [] -> {fn [] -> parenthesize("FALSE", null) end, []}
+      _some -> {&parenthesize("#{column} IN (#{Enum.join(&1, ", ")})", null), bindable}
+    end
   end
 
-  defp condition_sql(%{column: column, operator: :in, values: values}, at) do
-    list =
-      "#{column} IN (#{values |> Enum.with_index(at) |> Enum.map_join(", ", &"$#{elem(&1, 1)}")})"
-
-    sql = if untagged?(column, values), do: "(#{list} OR #{column} IS NULL)", else: list
-    {sql, values}
-  end
-
-  defp condition_sql(%{column: column, operator: operator, values: [value]} = condition, at) do
+  defp condition_sql(%{column: column, operator: operator, values: [value]}) do
     bound = String.replace(value, "*", "%")
 
     cond do
-      wildcard?(condition) ->
-        {"lower(#{column}) LIKE $#{at} ESCAPE ''", [String.downcase(bound)]}
-
-      operator == :eq and untagged?(column, [value]) ->
-        {"(#{column} = $#{at} OR #{column} IS NULL)", [bound]}
+      operator == :eq and wildcard?([value]) ->
+        like_sql(column, String.downcase(bound, :ascii))
 
       operator == :eq ->
-        {"#{column} = $#{at}", [bound]}
+        null = if untagged?(column, [value]), do: " OR #{column} IS NULL", else: ""
+
+        if nul?(bound),
+          do: {fn [] -> parenthesize("FALSE", null) end, []},
+          else: {&parenthesize("#{column} = #{hd(&1)}", null), [bound]}
 
       true ->
-        {~s(#{column} COLLATE "C" #{symbol(operator)} $#{at}), [bound]}
+        range_sql(column, operator, bound)
     end
   end
+
+  defp parenthesize(sql, ""), do: sql
+  defp parenthesize(sql, null), do: "(#{sql}#{null})"
+
+  # Index text never holds NUL: against a value "p\0...", `>` is `> p` and `<` is `<= p`.
+  defp range_sql(column, operator, bound) do
+    case :binary.split(bound, <<0>>) do
+      [_whole] -> {&~s(#{column} COLLATE "C" #{symbol(operator)} #{hd(&1)}), [bound]}
+      [prefix, _rest] when operator == :gt -> {&~s(#{column} COLLATE "C" > #{hd(&1)}), [prefix]}
+      [prefix, _rest] -> {&~s(#{column} COLLATE "C" <= #{hd(&1)}), [prefix]}
+    end
+  end
+
+  defp free_text_sql(nil), do: []
+  defp free_text_sql(pattern), do: [like_sql(:json_data, String.downcase(pattern, :ascii))]
+
+  defp like_sql(column, pattern) do
+    if nul?(pattern),
+      do: {fn [] -> "FALSE" end, []},
+      else: {&"#{ascii_lower(column)} LIKE #{hd(&1)} ESCAPE ''", [pattern]}
+  end
+
+  defp placeholders(values, at),
+    do: values |> Enum.with_index(at) |> Enum.map(fn {_value, n} -> "$#{n}" end)
+
+  defp ascii_lower(column), do: String.replace(@ascii_lower, "~s", Atom.to_string(column))
+
+  defp nul?(value), do: is_binary(value) and String.contains?(value, <<0>>)
 
   defp order_by_sql(items) do
     items

@@ -163,7 +163,7 @@ archon에 이미 있는 것(`541865c` 기준):
 - **페이징.** `LIMIT size OFFSET start`. upstream SQLite처럼 음수 `size`는 제한 없음, 음수 `start`는 0으로 다룬다(Postgres는 음수를
   오류로 내므로 바꿔 넣는다). `totalHits`는 같은 조건의 개수.
 - **조각 8b에서 정한 것(2026-11-04).** upstream의 실제 `SqliteIndexQueryBuilder`·`Query`와 sqlite-jdbc 3.49.0.0을 JDK 25에서 upstream
-  색인 스키마에 돌린 158개 사례(`test/support/search/query_oracle.ex`)를 정답으로 두고, 메모리 평가(`run/5`)와 Postgres SQL(`sql/3`,
+  색인 스키마에 돌린 168개 사례(`test/support/search/query_oracle.ex`)를 정답으로 두고, 메모리 평가(`run/5`)와 Postgres SQL(`sql/3`,
   `test/archon/search/query_postgres_test.exs`)이 둘 다 같은 개수·행·오류를 낸다(정렬이 없는 사례는 순서를 보지 않는다).
   - API: `parse(query, freeText, sort 목록)`, `sort_list/1`(upstream `Utils.convertStringToList`, `|`로 나눔), `check(query, 표)`,
     `run(query, 표, 행, start, size)`, `sql(query, 표, 첫 매개변수 번호)`(`where`·`params`·`order_by`), `limit_offset/2`, `describe/1`.
@@ -172,10 +172,23 @@ archon에 이미 있는 것(`541865c` 기준):
     `:missing_value`(`IndexOutOfBoundsException`). ② SQL 준비: 표에 없는 열 `{:unknown_column, 이름}`(WHERE를 upstream 절 순서로 본 뒤
     정렬. SQLite는 `IN (,)`처럼 값 없는 `IN`이 있으면 WHERE 전체를 거짓으로 접어 그 열은 보지 않는다). ③ 바인드: 값 없는 절
     `:missing_value`, `=`·`>`·`<`에 값이 여럿이면 매개변수보다 값이 많아 `{:bind_overflow, 자리 수}`(`ArrayIndexOutOfBoundsException`).
-    `describe/1`이 upstream 예외 이름과 문구를 준다. HTTP 상태는 8c·8e가 8a 캡처에 맞춘다.
+    ④ 실행: 50,000바이트를 넘는 `LIKE` 패턴 `:pattern_too_complex`(SQLite `LIKE or GLOB pattern too complex`). SQLite는 그 `LIKE`를
+    어느 행에서라도 평가할 때만 실패하지만(실행 계획에 따름) archon은 늘 실패한다(정해지지 않은 순서와 같은 기준, 메모리 평가 비용의
+    상한도 된다). `describe/1`이 upstream 예외 이름과 문구를 준다. HTTP 상태는 8c·8e가 8a 캡처에 맞춘다.
   - upstream은 절을 SQLite SQL 조각 글자 순으로 정렬한 뒤 매개변수를 묶으므로 archon도 같은 순서로 절을 두고 첫 실패를 고른다.
-  - freeText의 `*`도 upstream처럼 `%`로 바꾼다. 패턴(`%<소문자 글자>%`)은 Elixir에서 만들어 통째로 바인드한다
-    (`lower(json_data) LIKE $n ESCAPE ''`). `=`의 `*` 패턴도 Elixir에서 소문자로 만들어 `lower(열) LIKE $n ESCAPE ''`로 둔다.
+  - freeText의 `*`도 upstream처럼 `%`로 바꾼다. 패턴(`%<소문자 글자>%`)은 Elixir에서 만들어 통째로 바인드한다.
+  - **대소문자는 SQLite와 같게 ASCII만 접는다(위 freeText 항목의 "Postgres `lower()`는 유니코드" 의도적 차이를 이 조각이 없앤다).**
+    upstream은 freeText를 Java `toLowerCase`(유니코드)로, 열은 SQLite `lower()`(ASCII만)로 낮추므로 `ÉTÉ`는 freeText `été`에도
+    `ÉTÉ`에도 맞지 않는다(사례로 확인). archon은 열을 `translate(열, 'A..Z', 'a..z')`로 낮춰 DB 로캘(ctype)과 상관없이 메모리 평가와
+    같게 하고(`translate(...) LIKE $n ESCAPE ''`), `=`의 `*` 패턴은 SQLite `lower(?)`처럼 ASCII만 낮춘다. 8f는 "의도적으로 다른 점"의
+    `lower()` 범위 항목을 지운다.
+  - **시각 `IN`의 둘째부터의 값.** upstream 열은 `yyyy-MM-dd HH:mm:ss.SSS` UTC 글자라, 그 글자 그대로인 뒤 값은 맞는다(위 첫 항목의
+    "맞지 않는 값으로 다룬다"를 바로잡는다, 사례로 확인). archon은 정확히 그 형식이고 날짜로 읽히는 값만 epoch 밀리초로 바꿔
+    `IN` 목록에 넣고, 나머지는 맞지 않는 값이다. 미종료 실행의 `end_time`이 epoch(0)인 것(결정 2)도 `1970-01-01 00:00:00.000`과
+    맞으려면 필요하다.
+  - **입력 바이트.** UTF-8이 아닌 바이트는 upstream 서블릿 컨테이너처럼 U+FFFD로 바꾼 뒤 파싱한다. PostgreSQL text는 NUL을 바인드할
+    수 없고 색인 글자 열에는 NUL이 없으므로(결정 2의 저장 불가 값은 `NULL`) `sql/3`이 NUL 든 값을 미리 정한다: `=`·`IN`·`LIKE`는
+    맞지 않음(`FALSE`, `IN`은 그 값만 뺌), `> "p\0..."`는 `> "p"`, `< "p\0..."`는 `<= "p"`(NUL 없는 글자에서 SQLite와 같은 결과).
   - 글자 열의 `>`·`<`와 정렬은 `COLLATE "C"`(SQLite BINARY처럼 바이트 순)이고 메모리 평가도 바이트 순이다. 시각 열은 epoch 밀리초
     정수로 비교한다(upstream UTC 글자 비교와 1970~9999년에서 같다).
   - 의도적 차이 둘: `agentHierarchy` 정렬 항목은 버린다(결정 1). `Long.parseLong`이 읽는 비ASCII 숫자(예: `١٢`)는 숫자가 아닌 값으로

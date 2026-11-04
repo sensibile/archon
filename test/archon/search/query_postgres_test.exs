@@ -62,22 +62,40 @@ defmodule Archon.Search.QueryPostgresTest do
       end)
   end
 
-  test "LIKE has no escape character and lower() takes every letter" do
+  test "LIKE has no escape character, lower() folds ASCII only and NUL never matches" do
     {:error, :checked} =
       Repo.transaction(fn ->
         load(:workflow_index, [
-          %{seq: 1, workflow_id: "a", json_data: ~S|{"p":"C:\\x"}|},
-          %{seq: 2, workflow_id: "b", json_data: ~S|{"p":"ÉTÉ"}|}
+          %{seq: 1, workflow_id: "a", status: "a", json_data: ~S|{"p":"C:\\x"}|},
+          %{seq: 2, workflow_id: "b", status: "b", json_data: ~S|{"p":"ÉTÉ"}|}
         ])
 
-        assert {:ok, 1, ["a"]} = search(parse!(~S|\x|), :workflow_index, 0, 10)
-        assert {:ok, 1, ["b"]} = search(parse!("été"), :workflow_index, 0, 10)
+        assert {:ok, 1, ["a"]} = search(parse!("", ~S|\x|), :workflow_index, 0, 10)
+        assert {:ok, 0, []} = search(parse!("", "été"), :workflow_index, 0, 10)
+        assert {:ok, 0, []} = search(parse!("", "ÉTÉ"), :workflow_index, 0, 10)
+        assert {:ok, 1, ["b"]} = search(parse!("jsonData=*ÉTÉ*", "*"), :workflow_index, 0, 10)
+        assert {:ok, 0, []} = search(parse!("status=a\0", "x\0"), :workflow_index, 0, 10)
+        assert {:ok, 1, ["b"]} = search(parse!("status>a\0", "*"), :workflow_index, 0, 10)
+        assert {:ok, 1, ["a"]} = search(parse!("status<a\0", "*"), :workflow_index, 0, 10)
+
+        assert {:ok, 1, ["a"]} =
+                 search(parse!(<<"status IN (a,", 0xFF, ")">>, "*"), :workflow_index, 0, 10)
+
+        # The same rows in memory.
+        rows = [%{seq: 1, status: "a"}, %{seq: 2, status: "b"}]
+
+        assert {:ok, 1, [%{seq: 2}]} =
+                 Query.run(parse!("status>a\0", "*"), :workflow_index, rows, 0, 9)
+
+        assert {:ok, 1, [%{seq: 1}]} =
+                 Query.run(parse!("status<a\0", "*"), :workflow_index, rows, 0, 9)
+
         Repo.rollback(:checked)
       end)
   end
 
-  defp parse!(free_text) do
-    {:ok, query} = Query.parse("", free_text, [])
+  defp parse!(query, free_text) do
+    {:ok, query} = Query.parse(query, free_text, [])
     query
   end
 

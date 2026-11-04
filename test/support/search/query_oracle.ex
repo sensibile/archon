@@ -22,7 +22,7 @@ defmodule Archon.Search.QueryOracle do
   @doc "The `workflow_index` rows, in insertion order (`seq`)."
   def workflow_rows do
     [
-      wf(
+      wf([
         "w1",
         "Order-1",
         "p8_alpha",
@@ -33,8 +33,8 @@ defmodule Archon.Search.QueryOracle do
         "",
         "workflow",
         0
-      ),
-      wf(
+      ]),
+      wf([
         "w2",
         "order-2",
         "p8_beta",
@@ -45,10 +45,10 @@ defmodule Archon.Search.QueryOracle do
         "w1",
         "agent",
         3000
-      ),
-      wf("w3", nil, "P8_ALPHA", 3000, "FAILED", ~S|{"name":"ÉTÉ_x"}|, 3500, "", nil, 4000),
-      wf("w4", "a,b", "p8_gamma", 4000, "RUNNING", ~S|{"k":"50%"}|, 4500, "", "custom", 0),
-      wf(
+      ]),
+      wf(["w3", nil, "P8_ALPHA", 3000, "FAILED", ~S|{"name":"ÉTÉ_x"}|, 3500, "", nil, 4000]),
+      wf(["w4", "a,b", "p8_gamma", 4000, "RUNNING", ~S|{"k":"50%"}|, 4500, "", "custom", 0]),
+      wf([
         "w5",
         "Order-1",
         "p8_alpha",
@@ -59,7 +59,7 @@ defmodule Archon.Search.QueryOracle do
         "w2",
         "workflow",
         6000
-      )
+      ])
     ]
     |> Enum.with_index(1)
     |> Enum.map(fn {row, seq} -> Map.put(row, :seq, seq) end)
@@ -68,7 +68,7 @@ defmodule Archon.Search.QueryOracle do
   @doc "The `task_index` rows, in insertion order (`seq`)."
   def task_rows do
     [
-      task(
+      task([
         "t1",
         "SIMPLE",
         "p8_task",
@@ -78,8 +78,8 @@ defmodule Archon.Search.QueryOracle do
         "p8_alpha",
         ~S|{"taskId":"t1"}|,
         0
-      ),
-      task(
+      ]),
+      task([
         "t2",
         "SWITCH",
         "SWITCH",
@@ -89,8 +89,8 @@ defmodule Archon.Search.QueryOracle do
         "p8_beta",
         ~S|{"taskId":"t2","x":"Hello"}|,
         2050
-      ),
-      task(
+      ]),
+      task([
         "t3",
         "HTTP",
         "p8_http",
@@ -100,7 +100,7 @@ defmodule Archon.Search.QueryOracle do
         "p8_alpha",
         ~S|{"taskId":"t3","e":"_"}|,
         3050
-      )
+      ])
     ]
     |> Enum.with_index(1)
     |> Enum.map(fn {row, seq} -> Map.put(row, :seq, seq) end)
@@ -363,11 +363,22 @@ defmodule Archon.Search.QueryOracle do
         "ArrayIndexOutOfBoundsException"}},
       {"w", "status IN (RUNNING,COMPLETED) AND workflowType=p8_alpha", "*", 0, 100, "",
        {:ok, 1, ["w1"]}},
-      {"w", "jsonData>{\"q", "*", 0, 100, "", {:ok, 0, []}}
+      {"w", "jsonData>{\"q", "*", 0, 100, "", {:ok, 0, []}},
+      {"w", "startTime IN (0,1970-01-01 00:00:01.000)", "*", 0, 100, "", {:ok, 1, ["w1"]}},
+      {"w", "startTime IN (2000,1970-01-01 00:00:01.000,1970-01-01 00:00:03.000)", "*", 0, 100,
+       "", {:ok, 3, ["w1", "w2", "w3"]}},
+      {"w", "startTime IN (2000,1970-01-01 00:00:01)", "*", 0, 100, "", {:ok, 1, ["w2"]}},
+      {"w", "startTime IN (2000, 1970-01-01 00:00:01.000)", "*", 0, 100, "", {:ok, 1, ["w2"]}},
+      {"w", "startTime IN (2000,1970-1-01 00:00:01.000)", "*", 0, 100, "", {:ok, 1, ["w2"]}},
+      {"w", "endTime IN (5,1970-01-01 00:00:00.000)", "*", 0, 100, "", {:ok, 2, ["w1", "w4"]}},
+      {"w", "workflowType=P8_ALPHA*", "*", 0, 100, "", {:ok, 3, ["w1", "w3", "w5"]}},
+      {"w", "", "ÉTÉ", 0, 100, "", {:ok, 0, []}},
+      {"w", "", "été", 0, 100, "", {:ok, 0, []}},
+      {"w", "", "étÉ_X", 0, 100, "", {:ok, 0, []}}
     ]
   end
 
-  defp wf(id, correlation, type, start, status, json, update, parent, classifier, finish) do
+  defp wf([id, correlation, type, start, status, json, update, parent, classifier, finish]) do
     %{
       workflow_id: id,
       correlation_id: correlation,
@@ -382,7 +393,7 @@ defmodule Archon.Search.QueryOracle do
     }
   end
 
-  defp task(id, type, def_name, status, start, update, workflow_type, json, finish) do
+  defp task([id, type, def_name, status, start, update, workflow_type, json, finish]) do
     %{
       task_id: id,
       task_type: type,

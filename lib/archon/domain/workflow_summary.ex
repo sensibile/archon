@@ -85,12 +85,7 @@ defmodule Archon.Domain.WorkflowSummary do
   @doc "Upstream `new WorkflowSummary(workflow)`."
   @spec new(Workflow.t()) :: t()
   def new(%Workflow{} = workflow) do
-    {type, version} =
-      case workflow.workflow_definition do
-        %WorkflowDef{name: name, version: version} -> {name, version}
-        nil -> {nil, 0}
-      end
-
+    {type, version} = name_and_version(workflow.workflow_definition)
     ended? = workflow.end_time > 0
 
     %__MODULE__{
@@ -104,15 +99,12 @@ defmodule Archon.Domain.WorkflowSummary do
       end_time: if(ended?, do: SummaryUtil.format_time(workflow.end_time)),
       update_time: SummaryUtil.format_time(workflow.update_time),
       status: workflow.status,
-      input: io(workflow.input),
-      output: io(workflow.output),
+      input: SummaryUtil.serialize_input_output(workflow.input),
+      output: SummaryUtil.serialize_input_output(workflow.output),
       reason_for_incompletion: workflow.reason_for_incompletion,
       execution_time: if(ended?, do: workflow.end_time - workflow.create_time, else: 0),
       event: workflow.event,
-      failed_reference_task_names:
-        (workflow.failed_reference_task_names || [])
-        |> Enum.sort()
-        |> Enum.map_join(",", &(&1 || "null")),
+      failed_reference_task_names: joined(workflow.failed_reference_task_names),
       failed_task_names: Enum.sort(workflow.failed_task_names || []),
       external_input_payload_storage_path: present(workflow.external_input_payload_storage_path),
       external_output_payload_storage_path:
@@ -185,8 +177,11 @@ defmodule Archon.Domain.WorkflowSummary do
       else: "workflow"
   end
 
-  defp io(nil), do: nil
-  defp io(map), do: SummaryUtil.serialize_input_output(map)
+  defp name_and_version(%WorkflowDef{name: name, version: version}), do: {name, version}
+  defp name_and_version(nil), do: {nil, 0}
+
+  # Collectors.joining(",") over the set, with a null element as "null".
+  defp joined(names), do: (names || []) |> Enum.sort() |> Enum.map_join(",", &(&1 || "null"))
 
   # StringUtils.isNotBlank
   defp present(nil), do: nil

@@ -13,6 +13,11 @@ defmodule Archon.Search.QueryTest do
 
   alias Archon.Search.{Query, QueryOracle}
 
+  # SQLite's ASCII-only lower() in PostgreSQL.
+  @lower_workflow_type "translate(workflow_type, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
+  @lower_correlation_id "translate(correlation_id, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
+  @lower_json_data "translate(json_data, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
+
   defp parse!(query, free_text \\ "*", sort \\ []) do
     {:ok, parsed} = Query.parse(query, free_text, sort)
     parsed
@@ -34,12 +39,12 @@ defmodule Archon.Search.QueryTest do
     end
 
     test "shouldGenerateQueryWithWildcardPrefix" do
-      assert %{where: "WHERE lower(workflow_type) LIKE $1 ESCAPE ''", params: ["abc%"]} =
+      assert %{where: "WHERE #{@lower_workflow_type} LIKE $1 ESCAPE ''", params: ["abc%"]} =
                sql!("workflowType=abc*", "")
     end
 
     test "shouldGenerateQueryWithWildcardContains" do
-      assert %{where: "WHERE lower(correlation_id) LIKE $1 ESCAPE ''", params: ["%order%"]} =
+      assert %{where: "WHERE #{@lower_correlation_id} LIKE $1 ESCAPE ''", params: ["%order%"]} =
                sql!(~S|correlationId="*order*"|, "")
     end
 
@@ -184,9 +189,9 @@ defmodule Archon.Search.QueryTest do
              ]
     end
 
-    test "takes bytes that are not UTF-8" do
+    test "takes bytes that are not UTF-8 as U+FFFD" do
       assert {:ok, query} = Query.parse(<<"status=", 0xFF>>, <<0xFE>>, [<<0xFF, ":ASC">>])
-      assert query.free_text == <<?%, 0xFE, ?%>>
+      assert query.free_text == "%\uFFFD%"
       refute Query.matches?(query, %{status: "x", json_data: "y", seq: 1})
     end
   end
@@ -241,11 +246,49 @@ defmodule Archon.Search.QueryTest do
       assert Enum.map(page, & &1.seq) == [1, 3]
     end
 
-    test "matches LIKE wildcards by characters and lowers every letter" do
-      rows = [%{seq: 1, json_data: ~S|{"name":"ÉTÉ"}|}]
-      assert {:ok, 1, _page} = Query.run(parse!("", "été"), :workflow_index, rows, 0, 10)
+    test "matches LIKE wildcards by characters and folds ASCII letters only, as SQLite" do
+      rows = [%{seq: 1, json_data: ~S|{"name":"ÉTÉ","k":"Été"}|}]
+      assert {:ok, 0, []} = Query.run(parse!("", "été"), :workflow_index, rows, 0, 10)
+      # Java lowers the free text, SQLite only the ASCII letters of the JSON.
+      assert {:ok, 0, []} = Query.run(parse!("", "ÉTÉ"), :workflow_index, rows, 0, 10)
+
+      assert {:ok, 1, _page} =
+               Query.run(parse!("jsonData=*ÉTÉ*", "*"), :workflow_index, rows, 0, 9)
+
       assert {:ok, 1, _page} = Query.run(parse!("", ~S|"_t_"|), :workflow_index, rows, 0, 10)
       assert {:ok, 0, []} = Query.run(parse!("", ~S|"__t_"|), :workflow_index, rows, 0, 10)
+    end
+
+    test "matches a later time value of an IN given as upstream's UTC column text" do
+      rows = [%{seq: 1, start_time: 1000}, %{seq: 2, start_time: 2000}]
+      in_list = fn values -> parse!("startTime IN (#{values})") end
+
+      assert {:ok, 2, _page} =
+               Query.run(in_list.("2000,1970-01-01 00:00:01.000"), :workflow_index, rows, 0, 9)
+
+      for text <- ["1970-01-01 00:00:01", "1970-02-30 00:00:01.000", "+1970-01-01 00:00:01.000"] do
+        assert {:ok, 1, _page} = Query.run(in_list.("2000,#{text}"), :workflow_index, rows, 0, 9)
+      end
+    end
+
+    test "fails a LIKE pattern over 50,000 bytes, as SQLite does" do
+      # Upstream's builder on SQLite: "%" <> 49,998 "a" <> "%" runs, one more byte fails, and
+      # "é" counts two bytes.
+      rows = [%{seq: 1, json_data: "{}", workflow_type: "x"}]
+      run = fn query, free -> Query.run(parse!(query, free), :workflow_index, rows, 0, 9) end
+
+      assert {:ok, 0, []} = run.("", String.duplicate("a", 49_998))
+      assert {:error, :pattern_too_complex = error} = run.("", String.duplicate("a", 49_999))
+      assert {:ok, 0, []} = run.("", String.duplicate("é", 24_999))
+      assert {:error, :pattern_too_complex} = run.("", String.duplicate("é", 24_999) <> "a")
+      assert {:ok, 0, []} = run.("workflowType=*" <> String.duplicate("a", 49_999), "*")
+
+      assert {:error, :pattern_too_complex} =
+               run.("workflowType=*" <> String.duplicate("a", 50_000), "*")
+
+      assert Query.describe(error) ==
+               {"NonTransientException",
+                "[SQLITE_ERROR] SQL error or missing database (LIKE or GLOB pattern too complex)"}
     end
   end
 
@@ -260,14 +303,37 @@ defmodule Archon.Search.QueryTest do
     test "numbers parameters from the given index and binds the free text last" do
       assert {:ok,
               %{
-                where: ~s{WHERE status COLLATE "C" > $3 AND lower(json_data) LIKE $4 ESCAPE ''},
+                where:
+                  ~s{WHERE status COLLATE "C" > $3 AND #{@lower_json_data} LIKE $4 ESCAPE ''},
                 params: ["F%", "%x%"],
                 order_by: ~s(ORDER BY workflow_type COLLATE "C" ASC NULLS FIRST, seq)
               }} = Query.sql(parse!("status>F*", "X", ["workflowType:asc"]), :workflow_index, 3)
     end
 
-    test "binds only the first time value of an IN" do
-      assert %{where: "WHERE start_time = $1", params: [5]} = sql!("startTime IN (5,6)", "")
+    test "binds the time values of an IN that can match" do
+      assert %{where: "WHERE start_time IN ($1)", params: [5]} = sql!("startTime IN (5,6)", "")
+
+      assert %{where: "WHERE start_time IN ($1, $2)", params: [5, 1000]} =
+               sql!("startTime IN (5,1970-01-01 00:00:01.000,6)", "")
+    end
+
+    test "decides values with NUL, which PostgreSQL text cannot bind" do
+      assert %{where: "WHERE FALSE AND FALSE", params: []} = sql!("status=a\0b", "x\0")
+
+      assert %{
+               where: "WHERE (classifier IN ($1) OR classifier IS NULL) AND FALSE",
+               params: ["WORKFLOW"]
+             } = sql!("classifier IN (a\0,WORKFLOW) AND status IN (a\0,b\0)", "")
+
+      assert %{where: "WHERE status IN ($1)", params: ["b"]} = sql!("status IN (a\0,b)", "")
+      assert %{where: ~s{WHERE status COLLATE "C" > $1}, params: ["a"]} = sql!("status>a\0b", "")
+      assert %{where: ~s{WHERE status COLLATE "C" <= $1}, params: ["a"]} = sql!("status<a\0b", "")
+      assert %{where: "WHERE FALSE", params: []} = sql!("status=a\0*", "")
+    end
+
+    test "turns bytes that are not UTF-8 into U+FFFD" do
+      assert Query.sort_list(<<"status:ASC|", 0xFF, 0xFE>>) == ["status:ASC", "\uFFFD\uFFFD"]
+      assert %{params: ["a\uFFFD"]} = sql!(<<"status=a", 0xFF>>, "")
     end
 
     test "fails as check/2 does" do

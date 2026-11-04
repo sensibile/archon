@@ -18,6 +18,7 @@ defmodule Archon.Domain.SummaryUtil do
   """
 
   alias Archon.Decider.Parameters
+  alias Archon.Domain.Codec
 
   # 1582-10-15T00:00:00Z: GregorianCalendar's default cutover. Earlier instants are Julian dates.
   @gregorian_cutover_ms -12_219_292_800_000
@@ -28,7 +29,7 @@ defmodule Archon.Domain.SummaryUtil do
   (`summary-input-output-json-serialization.enabled=false`): Java `Map#toString`. Keys are in
   sorted order (`Archon.Decider.Parameters.java_string/1`); upstream keeps the input order.
   """
-  @spec serialize_input_output(map()) :: String.t()
+  @spec serialize_input_output(Codec.json_object()) :: String.t()
   def serialize_input_output(map) when is_map(map), do: Parameters.java_string(map)
 
   @doc """

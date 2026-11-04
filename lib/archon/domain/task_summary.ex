@@ -91,8 +91,8 @@ defmodule Archon.Domain.TaskSummary do
       reason_for_incompletion: Task.truncate_reason(task.reason_for_incompletion),
       queue_wait_time: Task.queue_wait_time(task, now_ms),
       domain: task.domain,
-      input: io(task.input_data),
-      output: io(task.output_data),
+      input: SummaryUtil.serialize_input_output(task.input_data),
+      output: SummaryUtil.serialize_input_output(task.output_data),
       execution_time: if(task.end_time > 0, do: task.end_time - task.start_time, else: 0),
       external_input_payload_storage_path: present(task.external_input_payload_storage_path),
       external_output_payload_storage_path: present(task.external_output_payload_storage_path)
@@ -131,9 +131,6 @@ defmodule Archon.Domain.TaskSummary do
     |> Jason.OrderedObject.new()
     |> Jason.encode!()
   end
-
-  defp io(nil), do: nil
-  defp io(map), do: SummaryUtil.serialize_input_output(map)
 
   # StringUtils.isNotBlank
   defp present(nil), do: nil
