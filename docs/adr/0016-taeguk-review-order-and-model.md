@@ -8,6 +8,8 @@
   effort". ADR 0011의 나머지 결정은 그대로 유효하다.
 - 비고(2026-11-04): 태극 `7d0a7a8` 재설치로 `check_worker_scope.py`가 archon `.taeguk/tools/`에 들어왔다. 결정 5의
   "archon에 없으므로 쓰지 않는다"는 "범위 파일이 없어 아직 쓰지 않는다"로 보완됐다([ADR 0028](0028-taeguk-ver005-convergence-and-tools.md) 결정 4).
+- 비고(2026-11-04): 결정 5의 Scope check 도구는 [ADR 0029](0029-taeguk-worker-scope-and-validation-suites.md)가
+  `.taeguk/tools/check_worker_scope.py`와 `.taeguk/worker-scope.toml`로 대체했다.
 
 ## 맥락
 

@@ -1,0 +1,74 @@
+# archon validation suites for the Taeguk `validation_health.py run --suites .taeguk/validation-suites.toml`
+# (docs/operations.md "검증 건강도", ADR 0029). The scheduled validation-health run executes these
+# commands with this Mac's environment, so the file sits under the worker-protected .taeguk/.
+# Sources: AGENTS.md "검증" and .github/workflows/ci.yml; MIX_ENV=test as in CI.
+# {secret} is a throwaway token the runner redacts from its output.
+
+[[suite]]
+name = "mix-deps"
+run = ["mix", "deps.get"]
+env = { MIX_ENV = "test" }
+
+[[suite]]
+name = "deps-unused"
+run = ["mix", "deps.unlock", "--check-unused"]
+after = ["mix-deps"]
+env = { MIX_ENV = "test" }
+
+[[suite]]
+name = "format"
+run = ["mix", "format", "--check-formatted"]
+after = ["mix-deps"]
+env = { MIX_ENV = "test" }
+
+[[suite]]
+name = "compile"
+run = ["mix", "compile", "--warnings-as-errors"]
+after = ["mix-deps"]
+env = { MIX_ENV = "test" }
+
+# Each Postgres suite gets its own disposable container (scripts/with_test_postgres.sh).
+# The runner inherits its environment, so the first suite pins the default memory backend.
+[[suite]]
+name = "test"
+run = ["bash", "scripts/with_test_postgres.sh", "mix", "test"]
+after = ["mix-deps"]
+counts = "exunit"
+env = { MIX_ENV = "test", ARCHON_TEST_PG_PASSWORD = "{secret}", ARCHON_BACKEND = "memory" }
+
+[[suite]]
+name = "test-postgres-backend"
+run = ["bash", "scripts/with_test_postgres.sh", "mix", "test"]
+after = ["mix-deps"]
+counts = "exunit"
+env = { MIX_ENV = "test", ARCHON_TEST_PG_PASSWORD = "{secret}", ARCHON_BACKEND = "postgres" }
+
+[[suite]]
+name = "credo"
+run = ["mix", "credo", "--strict"]
+after = ["mix-deps"]
+env = { MIX_ENV = "test" }
+
+[[suite]]
+name = "dialyzer"
+run = ["mix", "dialyzer"]
+after = ["mix-deps"]
+env = { MIX_ENV = "test" }
+
+[[suite]]
+name = "hex-audit"
+run = ["mix", "hex.audit"]
+after = ["mix-deps"]
+env = { MIX_ENV = "test" }
+
+[[suite]]
+name = "deps-audit"
+run = ["mix", "deps.audit"]
+after = ["mix-deps"]
+env = { MIX_ENV = "test" }
+
+# The validator needs PyYAML; the run sets VALIDATOR_PYTHON to the main checkout's
+# .taeguk/validation-health/venv interpreter.
+[[suite]]
+name = "skill-validator"
+run = 'status=0; for skill in .claude/skills/taeguk-*/ .agents/skills/taeguk-*/; do "${VALIDATOR_PYTHON:-python3}" "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" "$skill" || status=1; done; exit $status'
