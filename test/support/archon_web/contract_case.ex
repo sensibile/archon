@@ -18,10 +18,9 @@ defmodule ArchonWeb.ContractCase do
     * `{:poll_until, name}` - repeat the request until it answers 200 (a task arrived), then
       compare the last answer.
     * `{:batch_poll_until, name}` - repeat until the answer is a non-empty list.
-    * `{:wait_status, name, status}` or `{:wait_status, name, status, opts}` - wait until the
-      workflow whose ID fixture `name` answered (a start's text body) reaches `status`. It reads
-      `Archon.Runtime` directly, as the script's wait is not a fixture. The only option is
-      `requires:` (below).
+    * `{:wait_status, name, status}` - wait until the workflow whose ID fixture `name` answered
+      (a start's text body) reaches `status`. It reads `Archon.Runtime` directly, as the script's
+      wait is not a fixture.
 
   A fixture request body is sent as JSON, except a string, which is sent as the raw text it holds
   (the capture script stores a body that is not a JSON object, array, number or boolean as a
@@ -66,15 +65,6 @@ defmodule ArchonWeb.ContractCase do
   The `HTTP` task fixtures call `Archon.HttpStub`, which the capture ran at `captured_http_stub/0`.
   A replay started with `new_state(http_stub: url)` puts `url` (its own stub) in place of that
   address in the requests it sends and the bodies it expects.
-
-  ## Phase 8 actions not implemented yet
-
-  ADR 0027 (decision 7) captured the fixtures of every Phase 8 route before the slices implement
-  them, as ADR 0025 (decision 7) did for Phase 6. A step whose request reaches an action its
-  controller lists in `unimplemented/0` is skipped (the action answers the 404 of a path without
-  a handler meanwhile). A step that only holds after such an action ran names those actions with
-  `requires: [{controller, action}]` and is skipped while any of them is in its controller's list.
-  A slice empties its controller's list and the steps run; slice 8f removes the mechanism.
 
   `steps/2` cuts a part of the scenario. Run them with `replay/2`, threading the state from one
   call to the next.
@@ -121,7 +111,6 @@ defmodule ArchonWeb.ContractCase do
   @attempt_ms 25
 
   @type condition :: :present | {:length, non_neg_integer()} | term()
-  @type action :: {module(), atom()}
   @type exchange_opts :: [
           expect:
             :no_route
@@ -130,8 +119,7 @@ defmodule ArchonWeb.ContractCase do
           ignore: [[String.t() | non_neg_integer()]],
           only: :expected_names | :bound_ids,
           unordered: boolean(),
-          until: [{[String.t() | non_neg_integer()], condition()}] | :settled,
-          requires: [action()]
+          until: [{[String.t() | non_neg_integer()], condition()}] | :settled
         ]
   @type step ::
           {:exchange, String.t()}
@@ -139,7 +127,6 @@ defmodule ArchonWeb.ContractCase do
           | {:poll_until, String.t()}
           | {:batch_poll_until, String.t()}
           | {:wait_status, String.t(), String.t()}
-          | {:wait_status, String.t(), String.t(), [requires: [action()]]}
 
   @type state :: %{
           :ids => %{String.t() => String.t()},
@@ -1105,47 +1092,11 @@ defmodule ArchonWeb.ContractCase do
     :ok
   end
 
-  @doc """
-  Replays `steps`, asserting every response; returns the ID mapping for the next steps. A step
-  `skip?/1` is true for is left out.
-  """
+  @doc "Replays `steps`, asserting every response; returns the ID mapping for the next steps."
   @spec replay([step()], state()) :: state()
   def replay(steps, state \\ new_state()) do
-    Enum.reduce(steps, state, fn step, state ->
-      if skip?(step), do: state, else: run(step, state)
-    end)
+    Enum.reduce(steps, state, &run/2)
   end
-
-  @doc """
-  Whether `step` waits for a Phase 8 action not implemented yet: its request reaches one, or one
-  of its `requires:` is one (see the moduledoc).
-  """
-  @spec skip?(step()) :: boolean()
-  def skip?({:wait_status, _name, _status}), do: false
-
-  def skip?({:wait_status, _name, _status, opts}),
-    do: Enum.any?(opts[:requires] || [], &unimplemented?/1)
-
-  def skip?({kind, name}), do: skip?({kind, name, []})
-
-  def skip?({_kind, name, opts}) do
-    Enum.any?(opts[:requires] || [], &unimplemented?/1) or
-      unimplemented?(route(Contract.fixture(name)["request"]))
-  end
-
-  defp route(%{"method" => method, "path" => path}) do
-    case Phoenix.Router.route_info(ArchonWeb.Router, method, URI.parse(path).path, "localhost") do
-      %{plug: controller, plug_opts: action} when is_atom(action) -> {controller, action}
-      :error -> nil
-    end
-  end
-
-  defp unimplemented?({controller, action}) do
-    Code.ensure_loaded?(controller) and function_exported?(controller, :unimplemented, 0) and
-      action in controller.unimplemented()
-  end
-
-  defp unimplemented?(nil), do: false
 
   defp run({:exchange, name}, state), do: run({:exchange, name, []}, state)
 
@@ -1170,9 +1121,6 @@ defmodule ArchonWeb.ContractCase do
 
   defp run({:batch_poll_until, name}, state),
     do: repeat(name, state, fn actual -> match?([_ | _], actual.body) end, [])
-
-  defp run({:wait_status, name, status, _opts}, state),
-    do: run({:wait_status, name, status}, state)
 
   defp run({:wait_status, name, status}, state) do
     %{"response" => %{"body" => captured}} = Contract.fixture(name)

@@ -182,8 +182,9 @@ Phase 6 단계는 조각 6a~6g가 구현하는 동안 미구현 액션으로 가
 
 8a가 다시 캡처한 기존 520개는 `normalize/1` 기준으로 알려진 값(bulk 오류 맵의 키, 람다 클래스 이름,
 `metadata_register_taskdefs_coerced`의 위반 순서, JOIN `pollCount`, stub `date` 헤더, `workflow_correlated_paused_closed`의 순서)만
-달랐다. 같은 시나리오를 두 번 캡처해 `p8_*`도 `normalize/1` 기준으로 같은 것을 확인했다(첫 캡처에서 이름이 겹친 `p8_remove_delete_get`은 지운 뒤의 GET을 `_removed`로 나눴다). Phase 8 단계는 조각 8d·8e가 구현하는
-동안 미구현 액션으로 가는 단계를 건너뛴다(컨트롤러의 `unimplemented/0`, 단계 옵션 `requires:`). 8f가 그 장치를 없앤다.
+달랐다. 같은 시나리오를 두 번 캡처해 `p8_*`도 `normalize/1` 기준으로 같은 것을 확인했다(첫 캡처에서 이름이 겹친 `p8_remove_delete_get`은 지운 뒤의 GET을 `_removed`로 나눴다). 조각 8d·8e가 구현하는
+동안 미구현 액션으로 가는 단계를 건너뛰던 장치(컨트롤러의 `unimplemented/0`, 단계 옵션 `requires:`)는 8f가 없앴다. 지금은 Phase 8
+단계도 모두 재생된다.
 
 Archon이 일부러 다르게 답하는 픽스처(Later 경로와 405는 404, Jackson 문구)는 재생 도우미
 `test/support/archon_web/contract_case.ex`의 시나리오에 단계 옵션으로 적혀 있다.

@@ -5,9 +5,9 @@
 A Conductor-compatible workflow orchestration engine in Elixir, running each workflow as a
 supervised OTP process with durable state and API-level compatibility with existing workers and SDKs.
 
-> Status: early development. The REST routes listed below (19 MVP routes and 33 workflow operations
-> routes) and the task types listed below run on an in-memory or PostgreSQL backend; everything else
-> is not implemented yet.
+> Status: early development. The REST routes listed below (19 MVP routes, 33 workflow operations
+> routes and 9 search and task log routes) and the task types listed below run on an in-memory or
+> PostgreSQL backend; everything else is not implemented yet.
 
 ## Goals
 
@@ -64,7 +64,19 @@ Phase 7은 MVP 밖 시스템 태스크 타입 12개를 열었다([ADR 0026](docs
 | 비동기 | `START_WORKFLOW`, `HTTP` |
 | Later | `EVENT`, `KAFKA_PUBLISH`, `PULL_WORKFLOW_MESSAGES` 등. 지금처럼 이름이 같은 태스크 정의의 워커 태스크로 다룬다 |
 
-upstream과 의도적으로 다른 점(전체 목록은 ADR 0023, ADR 0025, ADR 0026의 "upstream과 의도적으로 다른 점"):
+Phase 8은 검색·색인과 task 실행 로그 경로 9개를 더했다([ADR 0027](docs/adr/0027-phase8-search-and-task-logs.md)). upstream 기본
+서버(SQLite 색인)처럼 워크플로우·태스크 요약을 별도 색인 표에 동기로 쓰고(Archon은 워크플로우 커밋과 같은 트랜잭션), 질의 문법(`AND`로 이은
+`=`·`IN`·`>`·`<` 절, `*` 와일드카드), `freeText`(요약 JSON의 대소문자 무시 부분 문자열), `sort`, 페이징은 그 서버와 같다. 기존
+데이터는 릴리스의 마이그레이션 단계가 한 번 채운다([운영 문서](docs/operations.md)).
+
+| 영역 | 경로 |
+|---|---|
+| 워크플로우 검색 | `GET /api/workflow/search`, `.../search-v2`, `.../search-by-tasks`, `.../search-by-tasks-v2` |
+| 태스크 검색 | `GET /api/tasks/search`, `.../search-v2` |
+| task 로그 | `POST /api/tasks/{taskId}/log`, `GET /api/tasks/{taskId}/log` |
+| bulk | `POST /api/workflow/bulk/search` |
+
+upstream과 의도적으로 다른 점(전체 목록은 ADR 0023, ADR 0025, ADR 0026, ADR 0027의 "upstream과 의도적으로 다른 점"):
 
 - 구현하지 않은 경로는 Later 경로를 포함해 모두 upstream이 없는 경로에 주는 404 body로 답한다. 있는 경로에 다른 메서드로
   보내도 upstream의 405가 아니라 404이고, `OPTIONS`도 404다.
@@ -80,7 +92,7 @@ upstream과 의도적으로 다른 점(전체 목록은 ADR 0023, ADR 0025, ADR 
 - `resumeSubworkflowTasks` retry가 실행 중인 자식에 닿으면 404다(upstream은 그 자식을 재시도한다). skiptask는 쿼리로
   `taskInput`·`taskOutput`을 채우는 Spring 바인딩을 옮기지 않는다. remove는 보관본을 남기지 않는다(upstream 기본 서버와 같은 응답).
 - correlated, `running/{name}`, `latest-versions` 목록은 정해진 순서다. `validate`는 Archon이 거절하는 스키마 정의를 등록 전에
-  400으로 알려 준다. bulk의 소수 ID는 부동소수 글자로 바뀐다. task 실행 로그(`/api/tasks/{taskId}/log`)는 Later다.
+  400으로 알려 준다. bulk의 소수 ID는 부동소수 글자로 바뀐다.
 
 Phase 7 태스크 타입(ADR 0026):
 
@@ -107,6 +119,22 @@ Phase 7 태스크 타입(ADR 0026):
   (푼 body와 리다이렉트한 응답 포함)를 넘으면 `FAILED`다. 빈도 한도(`rateLimitPerFrequency`)는 적용하지 않는다. rerun이 다시
   예약하는 HTTP의 `pollCount`는 0이다. HttpClient의 쿠키 저장소와 `User-Agent`는 재현하지 않는다.
 
+Phase 8 검색과 task 로그(ADR 0027):
+
+- 검색 결과는 늘 정해진 순서다(`sort` 뒤 처음 색인한 순서). upstream SQLite는 정렬이 없거나 동점이면 실행 계획 순서다.
+- 요약의 `input`·`output`, `taskToDomain`, `failedTaskNames`·`failedReferenceTaskNames`는 키·이름의 정렬 순이다(upstream은 입력
+  순서와 `HashSet` 순서). 정의 없는 워크플로우의 요약은 `version` 0이다(upstream은 NPE). `classifier=agent`의 `agentHierarchy`
+  정렬은 없다.
+- 시각 열은 epoch 밀리초로 비교한다. 1~9999년 밖 경계값은 모든 행보다 앞선 값으로 다루고, 기원전 1970년과 그 이전 경계(기년
+  글자가 실제 행 사이에 낌)의 upstream 글자 비교는 재현하지 않는다. 다른 문자 체계의 숫자는 숫자가 아닌 값이다. 50,000바이트를 넘는 `LIKE` 패턴은 늘 500이다.
+- `archiveWorkflow=false`의 색인·로그 삭제는 비동기가 아니라 같은 트랜잭션이다. 배포 전부터 있던 태스크는 백필에서 모두 색인한다.
+  비동기 색인과 요약 JSON 직렬화 설정은 없다.
+- 검색의 다시 읽기(`-v2`, by-tasks)에서 저장소 오류가 나면 결과에서 빼지 않고 500이다.
+- `TaskResult.logs`의 `null` 원소는 버리고(upstream은 500), 로그 글의 잘못된 UTF-8과 NUL은 U+FFFD로 저장한다. POST 로그 body는
+  `ISO-8859-1`·`US-ASCII`·`UTF-16` 계열 밖의 charset을 UTF-8로 읽는다. 브라우저가 교차 출처로 표시한 POST 로그는 403이다.
+- 자식 태스크 rerun이 위의 워크플로우로 이어질 때 입력·상관 ID만 받는 위 워크플로우 단계는 `reran.` 로그를 쓰지 않고, outbox가 되살림을 다시 전달하면 자식 로그가 한 번 더
+  쌓일 수 있다.
+
 **인증 없음.** upstream OSS처럼 MVP REST에는 인증·인가가 없다([ADR 0024](docs/adr/0024-worker-input-trust-and-auth.md) 결정 4).
 기본으로 `127.0.0.1:8080`에서 듣고, `ARCHON_HTTP_IP`와 `PORT`로 다른 주소를 연다. 다른 인터페이스에서 듣는 것은 배포의
 결정이다. 서버를 사설 네트워크나 인증 프록시 뒤에 둔다.
@@ -120,12 +148,25 @@ Phase 7 태스크 타입(ADR 0026):
 필요하면 `config :archon, Archon.Runtime.HttpTask, max_response_bytes:`로 낮춘다. 포트를 외부에 열면 인증하는 역프록시 뒤에 두고,
 서버가 나가는 요청도 망(방화벽, egress 정책)에서 제한한다.
 
+**검색과 task 로그의 열린 접근(Phase 8).** 인증이 없으므로 upstream처럼 REST 포트에 닿는 클라이언트는 다음을 할 수 있다
+([ADR 0027](docs/adr/0027-phase8-search-and-task-logs.md) "upstream과 의도적으로 다른 점", 2026-11-04 BOSS 결정으로 upstream 그대로 둔다).
+
+- 임의 태스크 ID에 `POST /api/tasks/{taskId}/log`로 요청마다 8 MB까지 로그를 끝없이 쌓는다(태스크가 있는지 보지 않는다).
+- ID를 몰라도 검색을 넘겨 가며 모든 워크플로우·태스크 요약(입력·출력 포함)을 읽는다. `archiveWorkflow=false`로 지운
+  워크플로우라도 DO_WHILE `keepLastN`이 먼저 지운 태스크의 색인 행은 남아 검색으로 계속 읽힌다.
+- 음수 `size`(모든 검색)나 큰 `size`(태스크·by-tasks 검색은 상한 없음)로 한 요청이 모든 행을 읽게 하고, `-v2`·by-tasks는 결과마다
+  저장소를 다시 읽는다.
+
+포트를 외부에 열면 인증하는 역프록시 뒤에 두고, 역프록시에서 요청 body 크기와 요청 빈도를 제한한다. 빈도 제한만으로는 검색 한
+번의 비용이 막히지 않으므로 검색 경로의 `size` 쿼리(음수와 큰 값)도 역프록시에서 거른다(응답 시간 상한은 프록시 연결만 풀고
+서버 쪽 검색은 끝까지 돈다).
+
 ```bash
 mix run --no-halt                      # 127.0.0.1:8080, 메모리 백엔드
 ARCHON_HTTP_IP=0.0.0.0 PORT=8081 mix run --no-halt
 ```
 
-아직 구현하지 않은 것(Later): 검색과 `bulk/search`, task 실행 로그, 이벤트와 `EVENT`·`KAFKA_PUBLISH`·`PULL_WORKFLOW_MESSAGES`
+아직 구현하지 않은 것(Later): 이벤트와 `EVENT`·`KAFKA_PUBLISH`·`PULL_WORKFLOW_MESSAGES`
 태스크, 외부 payload 저장소, 큐 관리·admin 경로,
 JSON 스키마 검증과 `/api/schema`, 인증, 여러 노드 실행. upstream 내부 구조(sweeper, Java 설정)에 기대는 경로는
 Unsupported다. ADR 0001을 본다.

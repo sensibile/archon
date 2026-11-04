@@ -44,11 +44,6 @@ defmodule ArchonWeb.WorkflowBulkController do
 
   use ArchonWeb, :controller
 
-  # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
-  Module.register_attribute(__MODULE__, :unimplemented, persist: true)
-
-  @unimplemented []
-
   alias Archon.Domain.{BulkResponse, Codec, WorkflowModelJson}
   alias Archon.Runtime
   alias Archon.Runtime.Lifecycle
@@ -68,10 +63,6 @@ defmodule ArchonWeb.WorkflowBulkController do
                     "<com.netflix.conductor.model.WorkflowModel> " <>
                     "com.netflix.conductor.rest.controllers.WorkflowBulkResource."
   @ids_type "java.util.List<java.lang.String>"
-
-  @doc "The actions not implemented yet."
-  @spec unimplemented() :: [atom()]
-  def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
 
   @doc """
   `POST /api/workflow/bulk/search` (`searchWorkflow`, `includeTasks` true): each ID's workflow,

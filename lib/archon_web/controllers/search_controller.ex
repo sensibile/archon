@@ -38,18 +38,9 @@ defmodule ArchonWeb.SearchController do
   alias Archon.Runtime
   alias Archon.Search.Query
 
-  # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
-  Module.register_attribute(__MODULE__, :unimplemented, persist: true)
-
-  @unimplemented []
-
   # WorkflowService#searchWorkflows / #searchWorkflowsV2: @Max(5_000) on size.
   @max_size 5000
   @max_size_message "Cannot return more than #{@max_size} workflows. Please use pagination."
-
-  @doc "The actions not implemented yet."
-  @spec unimplemented() :: [atom()]
-  def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
 
   @doc """
   `GET /api/workflow/search` (`search`: `start`, `size`, `sort`, `freeText`, `query`,

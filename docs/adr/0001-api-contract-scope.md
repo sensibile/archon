@@ -7,7 +7,7 @@
   2026-11-02 조각 6h가 구현을 마친 그 33개의 분류를 Later에서 "Phase 6"으로 바꿨다(MVP처럼 구현됨, 결과 절).
 - 비고: 2026-11-02 [ADR 0026](0026-phase7-system-task-types.md)(Phase 7, 시스템 태스크 타입)은 새 경로를 열지 않아 이 분류를 바꾸지 않는다.
 - 비고: 2026-11-04 [ADR 0027](0027-phase8-search-and-task-logs.md)이 Phase 8에서 열 Later 경로 9개(검색 6, task 로그 2, bulk/search)의 비고에 "Phase 8"을 적었다.
-  분류는 구현이 끝날 때 바꾼다.
+  분류는 구현이 끝날 때 바꾼다. 2026-11-04 조각 8f가 구현을 마친 그 9개의 분류를 Later에서 "Phase 8"로 바꿨다.
 
 ## 맥락
 
@@ -29,9 +29,12 @@ Archon은 기존 Conductor 워커·SDK·UI가 그대로 붙는 REST/JSON 호환 
   Archon 설계에 대응하는 동작이 없다. 구현하지 않으며, 필요해지면 새 ADR로 다시 판단한다.
 - **Phase 6**(2026-11-02 비고): Later 중 [ADR 0025](0025-phase6-workflow-operations-rest.md)가 구현한 경로. MVP처럼 골든 픽스처로
   응답 형태를 고정했다.
+- **Phase 8**(2026-11-04 비고): Later 중 [ADR 0027](0027-phase8-search-and-task-logs.md)이 구현한 경로(검색·색인과 task 실행 로그).
+  MVP처럼 골든 픽스처로 응답 형태를 고정했다.
 
 집계(경로 기준): MVP 19, Later 69, Unsupported 4. (비고: 2026-11-02 Phase 6이 Later 33개를 구현해 지금은 MVP 19,
-Phase 6 33, Later 36, Unsupported 4다. "Phase 6" 분류는 MVP처럼 구현되어 골든 픽스처로 응답을 고정한 경로다.) MVP 19개 중 `/api/health`는 `/health`의 별칭이라
+Phase 6 33, Later 36, Unsupported 4다. "Phase 6" 분류는 MVP처럼 구현되어 골든 픽스처로 응답을 고정한 경로다. 2026-11-04
+Phase 8이 Later 9개를 구현해 지금은 MVP 19, Phase 6 33, Phase 8 9, Later 27, Unsupported 4다.) MVP 19개 중 `/api/health`는 `/health`의 별칭이라
 메서드로는 18개다.
 
 ### 분류 원칙
@@ -148,8 +151,8 @@ Phase 6 33, Later 36, Unsupported 4다. "Phase 6" 분류는 MVP처럼 구현되�
 | Phase 6 | `POST` | `/api/tasks/{workflowId}/{taskRefName}/{status}/sync` | `updateTaskSync` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | Phase 6 | `POST` | `/api/tasks/{workflowId}/{status}/signal` | `signalWorkflowTaskAsync` | signal 계열. Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | Phase 6 | `POST` | `/api/tasks/{workflowId}/{status}/signal/sync` | `signalWorkflowTaskSync` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
-| Later | `POST` | `/api/tasks/{taskId}/log` | `log` | task 실행 로그. Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
-| Later | `GET` | `/api/tasks/{taskId}/log` | `getTaskLogs` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
+| Phase 8 | `POST` | `/api/tasks/{taskId}/log` | `log` | task 실행 로그. Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
+| Phase 8 | `GET` | `/api/tasks/{taskId}/log` | `getTaskLogs` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
 | MVP | `GET` | `/api/tasks/{taskId}` | `getTask` | task 단건 조회 |
 | Later | `GET` | `/api/tasks/queue/sizes` | `size` | upstream에서도 deprecated |
 | Later | `GET` | `/api/tasks/queue/size` | `taskDepth` |  |
@@ -158,8 +161,8 @@ Phase 6 33, Later 36, Unsupported 4다. "Phase 6" 분류는 MVP처럼 구현되�
 | Later | `GET` | `/api/tasks/queue/polldata` | `getPollData` |  |
 | Later | `GET` | `/api/tasks/queue/polldata/all` | `getAllPollData` |  |
 | Later | `POST` | `/api/tasks/queue/requeue/{taskType}` | `requeuePendingTask` |  |
-| Later | `GET` | `/api/tasks/search` | `search` | 인덱싱 백엔드 필요. Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
-| Later | `GET` | `/api/tasks/search-v2` | `searchV2` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
+| Phase 8 | `GET` | `/api/tasks/search` | `search` | 인덱싱 백엔드 필요. Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
+| Phase 8 | `GET` | `/api/tasks/search-v2` | `searchV2` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
 | Later | `GET` | `/api/tasks/externalstoragelocation` | `getExternalStorageLocation` | 외부 payload 저장소 |
 | Later | `GET` | `/api/tasks/external-storage-location` | `getExternalStorageLocation` |  |
 
@@ -174,7 +177,7 @@ Phase 6 33, Later 36, Unsupported 4다. "Phase 6" 분류는 MVP처럼 구현되�
 | Phase 6 | `POST` | `/api/workflow/bulk/terminate` | `terminate` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | Phase 6 | `DELETE` | `/api/workflow/bulk/remove` | `deleteWorkflow` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | Phase 6 | `DELETE` | `/api/workflow/bulk/terminate-remove` | `terminateRemove` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
-| Later | `POST` | `/api/workflow/bulk/search` | `searchWorkflow` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
+| Phase 8 | `POST` | `/api/workflow/bulk/search` | `searchWorkflow` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
 
 ### WorkflowMessageQueueResource
 
@@ -206,10 +209,10 @@ Phase 6 33, Later 36, Unsupported 4다. "Phase 6" 분류는 MVP처럼 구현되�
 | Phase 6 | `POST` | `/api/workflow/{workflowId}/resetcallbacks` | `resetWorkflow` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
 | MVP | `DELETE` | `/api/workflow/{workflowId}` | `terminate` | terminate(`reason` 쿼리) |
 | Phase 6 | `DELETE` | `/api/workflow/{workflowId}/terminate-remove` | `terminateRemove` | Phase 6([ADR 0025](0025-phase6-workflow-operations-rest.md)) |
-| Later | `GET` | `/api/workflow/search` | `search` | 인덱싱 백엔드 필요. Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
-| Later | `GET` | `/api/workflow/search-v2` | `searchV2` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
-| Later | `GET` | `/api/workflow/search-by-tasks` | `searchWorkflowsByTasks` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
-| Later | `GET` | `/api/workflow/search-by-tasks-v2` | `searchWorkflowsByTasksV2` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
+| Phase 8 | `GET` | `/api/workflow/search` | `search` | 인덱싱 백엔드 필요. Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
+| Phase 8 | `GET` | `/api/workflow/search-v2` | `searchV2` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
+| Phase 8 | `GET` | `/api/workflow/search-by-tasks` | `searchWorkflowsByTasks` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
+| Phase 8 | `GET` | `/api/workflow/search-by-tasks-v2` | `searchWorkflowsByTasksV2` | Phase 8([ADR 0027](0027-phase8-search-and-task-logs.md)) |
 | Later | `GET` | `/api/workflow/externalstoragelocation` | `getExternalStorageLocation` | 외부 payload 저장소 |
 | Later | `GET` | `/api/workflow/external-storage-location` | `getExternalStorageLocation` |  |
 | Later | `POST` | `/api/workflow/test` | `testWorkflow` | mock 데이터 테스트 실행 |

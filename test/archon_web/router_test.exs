@@ -288,16 +288,4 @@ defmodule ArchonWeb.RouterTest do
 
     replay(Enum.filter(scenario(), &(elem(&1, 1) in names)))
   end
-
-  # A slice that implements an action and forgets its list would skip its fixtures silently.
-  test "every action listed as not implemented still answers the 404 of a path without a handler" do
-    for controller <- [SearchController, TaskLogController, WorkflowBulkController],
-        action <- controller.unimplemented() do
-      conn = apply(controller, action, [build_conn(:get, "/api/archon/x"), %{}])
-
-      assert {conn.status, JSON.decode!(conn.resp_body)["message"]} ==
-               {404, "No static resource api/archon/x."},
-             "#{inspect(controller)}.#{action}"
-    end
-  end
 end
