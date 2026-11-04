@@ -125,9 +125,8 @@ Phase 8 검색과 task 로그(ADR 0027):
 - 요약의 `input`·`output`, `taskToDomain`, `failedTaskNames`·`failedReferenceTaskNames`는 키·이름의 정렬 순이다(upstream은 입력
   순서와 `HashSet` 순서). 정의 없는 워크플로우의 요약은 `version` 0이다(upstream은 NPE). `classifier=agent`의 `agentHierarchy`
   정렬은 없다.
-- 시각 열은 epoch 밀리초로 비교한다. 1~9999년 밖 경계값은 모든 행보다 앞선 값으로 다루고, 기원전·1970년 이전 경계의 upstream
-  글자 비교는 재현하지 않는다. 다른 문자 체계의
-  숫자는 숫자가 아닌 값이다. 50,000바이트를 넘는 `LIKE` 패턴은 늘 500이다.
+- 시각 열은 epoch 밀리초로 비교한다. 1~9999년 밖 경계값은 모든 행보다 앞선 값으로 다루고, 기원전 1970년과 그 이전 경계(기년
+  글자가 실제 행 사이에 낌)의 upstream 글자 비교는 재현하지 않는다. 다른 문자 체계의 숫자는 숫자가 아닌 값이다. 50,000바이트를 넘는 `LIKE` 패턴은 늘 500이다.
 - `archiveWorkflow=false`의 색인·로그 삭제는 비동기가 아니라 같은 트랜잭션이다. 배포 전부터 있던 태스크는 백필에서 모두 색인한다.
   비동기 색인과 요약 JSON 직렬화 설정은 없다.
 - 검색의 다시 읽기(`-v2`, by-tasks)에서 저장소 오류가 나면 결과에서 빼지 않고 500이다.

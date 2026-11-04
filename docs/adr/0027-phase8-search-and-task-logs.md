@@ -391,7 +391,7 @@ archon에 이미 있는 것(`541865c` 기준):
 - **조각 8a에서 정한 것(2026-11-04).**
   - 액션 이름: `ArchonWeb.SearchController`의 `search_workflows`, `search_workflows_v2`, `search_workflows_by_tasks`,
     `search_workflows_by_tasks_v2`, `search_tasks`, `search_tasks_v2`(8e), `ArchonWeb.TaskLogController`의 `log`(POST)·`get_logs`(GET)(8d),
-    `ArchonWeb.WorkflowBulkController`의 `search`(8e). 각 컨트롤러의 `unimplemented/0`에 있다.
+    `ArchonWeb.WorkflowBulkController`의 `search`(8e). 각 컨트롤러의 `unimplemented/0`에 있었다(8f가 없앰, 결정 8 끝).
   - 기존 `route_later_*` 넷은 걸러진 새 시나리오가 같은 경로를 다루므로 지웠다(바꾸지 않음).
   - 픽스처 요청에 `content_type`을 더했다. JSON이 아닌 `Content-Type`으로 보낸 요청(`text/plain` 로그 POST)에만 있고, 재생은 그
     값으로 보낸다. 없으면 지금처럼 `application/json`이다.
@@ -487,7 +487,7 @@ ADR 0023·0025·0026의 목록에 더해 다음이 생긴다.
 - **시각 값의 비ASCII 숫자**(결정 4, 조각 8b): `startTime>١٢`처럼 Java `Long.parseLong`이 읽는 다른 문자 체계의 숫자를 archon은
   숫자가 아닌 값(`NumberFormatException`과 같은 오류)으로 다룬다.
 - **시각 비교의 경계**(결정 4, 조각 8b): 시각 열은 epoch 밀리초로 비교한다. 1~9999년 밖의 경계값은 모든 행보다 앞서는 값으로
-  다루고, 기원전·1970년 이전 경계의 기년 글자가 행 사이에 끼는 upstream 글자 비교는 재현하지 않는다.
+  다루고, 기원전 1970년과 그 이전 경계의 기년 글자가 행 사이에 끼는 upstream 글자 비교는 재현하지 않는다.
 - **`LIKE` 패턴 상한**(결정 4, 조각 8b): 50,000바이트를 넘는 패턴은 실행 계획과 상관없이 늘 500이다. SQLite는 그 `LIKE`를 평가할
   때만 실패한다.
 - **정의 없는 요약**(결정 3, 조각 8b): upstream은 NPE지만 archon은 `workflowType`을 빼고 `version` 0으로 만든다. `taskToDomain`
