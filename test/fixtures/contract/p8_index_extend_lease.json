@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks",
+    "body": {
+      "workflowInstanceId": "99ac26d4-73a8-4e9a-bedc-c82e2891c3c0",
+      "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+      "status": "IN_PROGRESS",
+      "workerId": "archon-contract",
+      "extendLease": true,
+      "outputData": {
+        "lease": "p8lease"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "471ce9a7-8cad-4dd2-a82c-5edb3f176035"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/bulk/search",
+    "body": []
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Validation failed, check below errors for detail.",
+      "retryable": false,
+      "validationErrors": [
+        {
+          "path": "searchWorkflow.arg0",
+          "message": "WorkflowIds list cannot be null."
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/471ce9a7-8cad-4dd2-a82c-5edb3f176035/log",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": [
+      {
+        "log": "p8 log 1",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1700000000001
+      },
+      {
+        "log": "p8 log 2",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1700000000002
+      },
+      {
+        "log": "p8 log 3",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1700000000003
+      },
+      {
+        "log": "p8 log 4",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1700000000004
+      },
+      {
+        "log": "p8 log 5",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1700000000005
+      },
+      {
+        "log": "p8 log 6",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1700000000006
+      },
+      {
+        "log": "p8 log 7",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1700000000007
+      },
+      {
+        "log": "p8 log 8",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1700000000008
+      },
+      {
+        "log": "p8 log 9",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1700000000009
+      },
+      {
+        "log": "p8 log 10",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1700000000010
+      },
+      {
+        "log": "p8 plain log",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1793751746878
+      },
+      {
+        "log": "\"p8 json log\"",
+        "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+        "createdTime": 1793751746920
+      }
+    ]
+  }
+}

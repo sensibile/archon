@@ -3,8 +3,8 @@
     "method": "POST",
     "path": "/api/workflow/bulk/restart?useLatestDefinitions=true",
     "body": [
-      "4db676bb-c38e-471f-8cd8-c5e01bfb49f2",
-      "6cad0f39-bd39-49a5-81fa-f1c969e2de54",
+      "bce16b00-ec53-4261-939d-810cb173fa8e",
+      "808cc1e7-ead6-455f-8aab-c05d833f50ee",
       "00000000-0000-0000-0000-000000000000"
     ]
   },
@@ -13,11 +13,11 @@
     "content_type": "application/json",
     "body": {
       "bulkErrorResults": {
-        "6cad0f39-bd39-49a5-81fa-f1c969e2de54": "Workflow: archon_ops.2/6cad0f39-bd39-49a5-81fa-f1c969e2de54.PAUSED is not in terminal state, unable to restart.",
+        "808cc1e7-ead6-455f-8aab-c05d833f50ee": "Workflow: archon_ops.2/808cc1e7-ead6-455f-8aab-c05d833f50ee.PAUSED is not in terminal state, unable to restart.",
         "00000000-0000-0000-0000-000000000000": "No such workflow found by id: 00000000-0000-0000-0000-000000000000"
       },
       "bulkSuccessfulResults": [
-        "4db676bb-c38e-471f-8cd8-c5e01bfb49f2"
+        "bce16b00-ec53-4261-939d-810cb173fa8e"
       ]
     }
   }

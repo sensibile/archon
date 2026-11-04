@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search-by-tasks?query=workflowType%3Darchon_p8_skip",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 1,
+      "results": [
+        {
+          "workflowType": "archon_p8_skip",
+          "version": 1,
+          "workflowId": "61eb66b1-612b-4365-bfe5-6c97c62cabec",
+          "correlationId": "p8-skip",
+          "startTime": "2026-11-04T00:22:27.858Z",
+          "updateTime": "2026-11-04T00:22:28.078Z",
+          "endTime": "2026-11-04T00:22:28.078Z",
+          "status": "COMPLETED",
+          "input": "{}",
+          "output": "{}",
+          "executionTime": 220,
+          "failedReferenceTaskNames": "",
+          "priority": 0,
+          "failedTaskNames": [],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "workflow",
+          "inputSize": 2,
+          "outputSize": 2
+        }
+      ]
+    }
+  }
+}

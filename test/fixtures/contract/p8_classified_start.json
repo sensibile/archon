@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p8_classified?correlationId=p8-classified",
+    "body": {}
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "03b0d04f-84bf-4f49-9e13-4e38464811ed"
+  }
+}

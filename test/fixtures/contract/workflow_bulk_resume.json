@@ -3,8 +3,8 @@
     "method": "PUT",
     "path": "/api/workflow/bulk/resume",
     "body": [
-      "bf7e7a65-cf29-4533-88b2-bb4e17e1ebee",
-      "4db676bb-c38e-471f-8cd8-c5e01bfb49f2"
+      "7d2ead58-4af4-4e7f-9b88-91a6eb9748c1",
+      "bce16b00-ec53-4261-939d-810cb173fa8e"
     ]
   },
   "response": {
@@ -12,10 +12,10 @@
     "content_type": "application/json",
     "body": {
       "bulkErrorResults": {
-        "4db676bb-c38e-471f-8cd8-c5e01bfb49f2": "The workflow 4db676bb-c38e-471f-8cd8-c5e01bfb49f2 is not PAUSED so cannot resume. Current status is COMPLETED"
+        "bce16b00-ec53-4261-939d-810cb173fa8e": "The workflow bce16b00-ec53-4261-939d-810cb173fa8e is not PAUSED so cannot resume. Current status is COMPLETED"
       },
       "bulkSuccessfulResults": [
-        "bf7e7a65-cf29-4533-88b2-bb4e17e1ebee"
+        "7d2ead58-4af4-4e7f-9b88-91a6eb9748c1"
       ]
     }
   }

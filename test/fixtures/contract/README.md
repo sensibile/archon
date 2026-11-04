@@ -28,6 +28,8 @@ HTTP 태스크 픽스처는 고정 응답 stub([`test/support/http_stub.ex`](../
 ```
 
 - 요청 body가 없으면 `null`, JSON이 아니면 보낸 문자열 그대로.
+- 요청 `content_type`은 JSON이 아닌 `Content-Type`으로 보낸 요청에만 있다(Phase 8 task 로그 `text/plain` POST). 없으면
+  `application/json`으로 보냈고, 재생도 그 값으로 보낸다.
 - 응답 body는 `application/json`이면 파싱한 값, 그 밖(`text/plain`)이면 문자열, 비어 있으면 `null`.
 - `content_type`은 응답 `Content-Type` 헤더 그대로이며 헤더가 없으면 `null`.
 
@@ -105,7 +107,7 @@ GET이 답한 태스크 ID로 갱신한다. 상태를 바꾸지 않는 오류를
 | `workflow_tasks*` | `{id}/tasks`의 `status` 거르기(값 하나의 쉼표는 나누고, 반복한 값은 나누지 않는다), 페이징, 음수 `count` 400·음수 `start` 500·끝을 넘은 `start` |
 | `workflow_correlated*`, `workflow_running*` | correlated 두 경로(`includeClosed`, `includeTasks`, 목록 body), `running/{name}`의 버전 무시와 넓은 고정 시간 구간(`startTime=1&endTime=4102444800000`), `PAUSED` 포함·제외 |
 | `task_ref_update*`, `task_signal*` | ref 갱신과 signal: 대상 없음(비동기 200, sync 404), 없는 워크플로우, 상태 변환 실패, DO_WHILE 반복 ref, WAIT 다섯 개를 따라 네 전략, 시간 초과, 자식의 WAIT |
-| `route_unsupported_workflow_decide`, `route_later_{tasks_requeue,workflow_bulk_search,task_log}` | 새 매개변수 경로와 모양이 같은 Later·Unsupported 경로의 upstream 응답 |
+| `route_unsupported_workflow_decide`, `route_later_tasks_requeue` | 새 매개변수 경로와 모양이 같은 Later·Unsupported 경로의 upstream 응답 |
 | `workflow_execute*` | 동기 실행의 네 전략, 버전 0, 끝난 워크플로우의 `BLOCKING_TASK`(500), `waitUntilTaskRef`, 시간 초과의 `TARGET_WORKFLOW`·`BLOCKING_TASK`, 인라인 정의 |
 | `workflow_*pause*`, `*resume*`, `*skip*`, `*callback*`, `*retry*`, `*restart*` | 생명주기 흐름과 그 뒤의 GET. skiptask는 correlationId와 우선순위 7인 워크플로우, resetcallbacks는 `callbackAfterSeconds` 3600으로 미룬 태스크 |
 | `*rerun*`, `workflow_get_{parent,top,mid,child}*` | rerun의 세 경우(이 워크플로우의 태스크, 처음부터, 자기 SUB_WORKFLOW, 자식의 태스크)와 재시도된 SUB_WORKFLOW의 첫 자식 안 태스크 rerun(최상위·중간·자식). upstream에서는 중간이 다시 결정해 두 번째 시도의 `FAILED`로 실패하고 첫 자식을 종료하며, 최상위는 `RUNNING`으로 남는다 |
@@ -158,6 +160,31 @@ Phase 6 단계는 조각 6a~6g가 구현하는 동안 미구현 액션으로 가
 520개가 `normalize/1` 기준으로 알려진 값(bulk 오류 맵의 키, 람다 클래스 이름, `metadata_register_taskdefs_coerced`의 위반 순서, JOIN
 `pollCount`, stub `date` 헤더)만 다른 것을 확인하고 새 4개만 넣었다.
 
+아래는 Phase 8(검색·색인과 task 로그, [ADR 0027](../../../docs/adr/0027-phase8-search-and-task-logs.md) 결정 7)의 첫 조각
+8a가 더한 것이다(171개, 모두 691개). 이름은 모두 `p8_*`, 정의 이름은 `archon_p8_*`다. 색인에는 캡처의 모든 워크플로우가
+있으므로 질의는 이 절의 정의 이름이나 상관 ID로 거르고, 목록은 결과 사이에서 유일한 키(`correlationId`, `status`, `taskType`,
+`workflowType`)로 정렬하거나 결과가 하나다. 그전까지 404로 기대하던 Later 픽스처 넷(`route_later_workflow_search`,
+`route_later_tasks_search`, `route_later_workflow_bulk_search`, `route_later_task_log`)은 걸러지지 않은 캡처 DB 전체의 결과라 지웠다.
+캡처에서 ADR과 다르게 확인한 upstream 응답은 ADR 0027 결정 7 끝에 있다.
+
+| 접두사 | 내용 |
+|---|---|
+| `p8_register_taskdefs` | 워커 태스크 정의 다섯과 SUB_WORKFLOW용 `archon_p8_sub`(모두 재시도 0) |
+| `p8_search_{register,start,get,update}_*`, `p8_classified_*` | 완료·실패·상관 ID 없이 실행 중인 `archon_p8_search` 셋(첫 입력은 요약의 Java 표기와 freeText용 글자), metadata `classifier`가 `p8cls`인 정의 |
+| `p8_search_*` | workflow `search`: 정렬 ASC(NULL 먼저)·DESC(NULL 나중)·여러 항목·버려지는 항목·표에 없는 열(500), 페이징과 음수·끝 넘음·0, `size` 5001(400)과 숫자 아님(500), freeText 부분 문자열·대소문자·`%`·`_`·역슬래시 하나와 둘·`*`·빈 값·Java 표기, 질의 `=`·`IN`(여럿·하나·공백)·시각 `>`·`<`·숫자 아님(500)·시각 `IN`·`*`·`jsonData`·모르는 필드·잘못된 절(400)·표에 없는 필드(500)·따옴표, `classifier`, `search-v2`, `search-by-tasks`(`-v2`) |
+| `p8_tasks_search*` | 태스크 `search`·`-v2`: 갱신된 태스크만 색인, freeText, 페이징, 표에 없는 필드·정렬(500), 잘못된 절, 숫자 아닌 시각, 음수 `size`, 5001(태스크는 제한 없음) |
+| `p8_index_*`, `p8_log_*` | 색인 시점(예약만 된 워커 태스크는 없음, 폴링 뒤 있음, `extendLease`는 반영 안 됨, 갱신 뒤 반영), `TaskResult.logs` 11개(앞 10개), `POST` 로그(`text/plain`, JSON 문자열은 따옴표째, 빈 body 500), 없는 태스크의 `POST`·`GET`, 로그 없는 `GET` 204 |
+| `p8_sys_*` | 첫 태스크 SET_VARIABLE, SWITCH, FORK의 색인(JOIN은 upstream 시스템 태스크 작업자 시점이라 질의에서 뺐다), 한 워크플로우의 두 태스크를 `search-by-tasks`가 한 번만 돌려주는 것 |
+| `p8_skip_*` | skiptask가 만든 `SKIPPED` 태스크는 색인되지 않음 |
+| `p8_remove_*` | remove `archiveWorkflow=true`(색인 행이 남아 `search`·태스크 `search`는 돌려주고 `-v2`·`search-by-tasks`는 0)와 `false`(비동기로 워크플로우·태스크 행과 로그를 지움) |
+| `p8_parent_*`, `p8_child_*`, `p8_search_{family,top_level*,parent_id}` | 자식의 retry·restart·rerun이 부모 SUB_WORKFLOW 태스크에 남기는 로그(rerun은 두 번), `topLevelOnly`, `parentWorkflowId` |
+| `p8_bulk_search_*` | bulk/search 빈 목록·1001개 400, 섞인 결과, `includeTasks=false`, `null` body 500(`WorkflowModel` 모양) |
+
+8a가 다시 캡처한 기존 520개는 `normalize/1` 기준으로 알려진 값(bulk 오류 맵의 키, 람다 클래스 이름,
+`metadata_register_taskdefs_coerced`의 위반 순서, JOIN `pollCount`, stub `date` 헤더, `workflow_correlated_paused_closed`의 순서)만
+달랐다. 같은 시나리오를 두 번 캡처해 `p8_*`도 `normalize/1` 기준으로 같은 것을 확인했다(첫 캡처에서 이름이 겹친 `p8_remove_delete_get`은 지운 뒤의 GET을 `_removed`로 나눴다). Phase 8 단계는 조각 8d·8e가 구현하는
+동안 미구현 액션으로 가는 단계를 건너뛴다(컨트롤러의 `unimplemented/0`, 단계 옵션 `requires:`). 8f가 그 장치를 없앤다.
+
 Archon이 일부러 다르게 답하는 픽스처(Later 경로와 405는 404, Jackson 문구)는 재생 도우미
 `test/support/archon_web/contract_case.ex`의 시나리오에 단계 옵션으로 적혀 있다.
 
@@ -168,8 +195,9 @@ Archon이 일부러 다르게 답하는 픽스처(Later 경로와 405는 404, Ja
 | 종류 | 필드 |
 |---|---|
 | 생성 ID(UUID) | `workflowId`, `workflowInstanceId`, `taskId`, 요청 `path`의 ID, `text/plain` 응답 body(시작한 workflow ID, 갱신한 task ID) |
-| 시각(epoch ms) | `createTime`, `updateTime`, `startTime`, `endTime`, `scheduledTime`, `lastRetriedTime` |
-| 시각에서 나온 값 | `queueWaitTime` |
+| 시각(epoch ms) | `createTime`, `updateTime`, `startTime`, `endTime`, `scheduledTime`, `lastRetriedTime`, task 로그 `createdTime`, `WorkflowModel`·`TaskModel`의 `updatedTime`·`firstScheduledTime` |
+| 시각 글자(GMT) | 검색 요약의 `startTime`, `updateTime`, `endTime`, `scheduledTime`. 재생은 0의 글자 `1970-01-01T00:00:00.000Z`는 그대로 비교한다 |
+| 시각에서 나온 값 | `queueWaitTime`, `executionTime` |
 | 캡처 환경 | HTTP 태스크의 `workerId`(서버 호스트 이름, 가려서 저장), stub 응답 헤더 `date` |
 
 픽스처에는 캡처한 값을 그대로 둔다. 숫자 타임스탬프를 문자열 placeholder로 바꾸면 스키마 검사가

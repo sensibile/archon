@@ -1,0 +1,52 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/search?query=workflowType%3Darchon_p8_search&sort=status%3AASC&size=-1",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 2,
+      "results": [
+        {
+          "workflowId": "3833b46b-4772-49f5-9955-1c9a6383565d",
+          "workflowType": "archon_p8_search",
+          "correlationId": "p8-search-1",
+          "scheduledTime": "2026-11-04T00:22:22.533Z",
+          "startTime": "1970-01-01T00:00:00.000Z",
+          "updateTime": "2026-11-04T00:22:22.807Z",
+          "endTime": "2026-11-04T00:22:22.807Z",
+          "status": "COMPLETED",
+          "executionTime": 1793751742807,
+          "queueWaitTime": 0,
+          "taskDefName": "archon_p8_worker",
+          "taskType": "archon_p8_worker",
+          "input": "{x=p8-x}",
+          "output": "{done=true, z=[1]}",
+          "taskId": "9a44afe5-b54c-4c4d-8cf2-441f792a385f",
+          "workflowPriority": 0
+        },
+        {
+          "workflowId": "6a53c0be-19b2-49eb-a465-141f48695ea1",
+          "workflowType": "archon_p8_search",
+          "correlationId": "p8-search-2",
+          "scheduledTime": "2026-11-04T00:22:22.647Z",
+          "startTime": "1970-01-01T00:00:00.000Z",
+          "updateTime": "2026-11-04T00:22:22.913Z",
+          "endTime": "2026-11-04T00:22:22.913Z",
+          "status": "FAILED",
+          "executionTime": 1793751742913,
+          "queueWaitTime": 0,
+          "taskDefName": "archon_p8_worker",
+          "taskType": "archon_p8_worker",
+          "input": "{x=2}",
+          "output": "{reason=p8}",
+          "taskId": "fc10ecc3-8062-449b-ab0b-881806e74363",
+          "workflowPriority": 0
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_p8_sys",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_p8_set",
+          "taskReferenceName": "set_ref",
+          "type": "SET_VARIABLE",
+          "inputParameters": {
+            "v": "p8"
+          }
+        },
+        {
+          "name": "archon_p8_switch",
+          "taskReferenceName": "switch_ref",
+          "type": "SWITCH",
+          "evaluatorType": "value-param",
+          "expression": "kind",
+          "inputParameters": {
+            "kind": "${workflow.input.kind}"
+          },
+          "decisionCases": {
+            "a": [
+              {
+                "name": "archon_p8_case",
+                "taskReferenceName": "case_ref",
+                "type": "SIMPLE"
+              }
+            ]
+          }
+        },
+        {
+          "name": "archon_p8_fork",
+          "taskReferenceName": "fork_ref",
+          "type": "FORK_JOIN",
+          "forkTasks": [
+            [
+              {
+                "name": "archon_p8_fork_a",
+                "taskReferenceName": "fork_a_ref",
+                "type": "SIMPLE"
+              }
+            ],
+            [
+              {
+                "name": "archon_p8_fork_b",
+                "taskReferenceName": "fork_b_ref",
+                "type": "SIMPLE"
+              }
+            ]
+          ]
+        },
+        {
+          "name": "archon_p8_join",
+          "taskReferenceName": "join_ref",
+          "type": "JOIN",
+          "joinOn": [
+            "fork_a_ref",
+            "fork_b_ref"
+          ]
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

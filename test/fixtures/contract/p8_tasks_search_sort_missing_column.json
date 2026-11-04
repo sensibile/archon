@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/search?query=workflowType%3Darchon_p8_search&sort=correlationId%3AASC",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Cannot prepare statement for query: [SQLITE_ERROR] SQL error or missing database (no such column: correlation_id)",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

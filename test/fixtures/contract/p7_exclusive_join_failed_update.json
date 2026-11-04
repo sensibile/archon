@@ -3,8 +3,8 @@
     "method": "POST",
     "path": "/api/tasks",
     "body": {
-      "workflowInstanceId": "9daf0d7a-aeca-4f21-8a9b-ae902d41dca0",
-      "taskId": "f4dd110b-8b9e-4d14-b5c4-7a5519a2d1e3",
+      "workflowInstanceId": "96caacb9-70aa-4cf6-b632-ce5bcefeb26c",
+      "taskId": "56099f2d-1210-4529-8f78-25384c9080f7",
       "status": "FAILED",
       "workerId": "archon-contract",
       "outputData": {

@@ -1,0 +1,245 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/bulk/search",
+    "body": [
+      "3833b46b-4772-49f5-9955-1c9a6383565d",
+      "00000000-0000-0000-0000-000000000000"
+    ]
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "bulkErrorResults": {
+        "00000000-0000-0000-0000-000000000000": "No such workflow found by id: 00000000-0000-0000-0000-000000000000"
+      },
+      "bulkSuccessfulResults": [
+        {
+          "status": "COMPLETED",
+          "endTime": 1793751742809,
+          "workflowId": "3833b46b-4772-49f5-9955-1c9a6383565d",
+          "tasks": [
+            {
+              "taskType": "archon_p8_worker",
+              "status": "COMPLETED",
+              "referenceTaskName": "worker_ref",
+              "retryCount": 0,
+              "seq": 1,
+              "correlationId": "p8-search-1",
+              "pollCount": 0,
+              "taskDefName": "archon_p8_worker",
+              "scheduledTime": 1793751742533,
+              "startTime": 0,
+              "endTime": 1793751742807,
+              "updateTime": 1793751742807,
+              "startDelayInSeconds": 0,
+              "retried": false,
+              "executed": false,
+              "callbackFromWorker": true,
+              "responseTimeoutSeconds": 3600,
+              "workflowInstanceId": "3833b46b-4772-49f5-9955-1c9a6383565d",
+              "workflowType": "archon_p8_search",
+              "taskId": "9a44afe5-b54c-4c4d-8cf2-441f792a385f",
+              "callbackAfterSeconds": 0,
+              "callbackAfterMs": 0,
+              "firstScheduledTime": 1793751742533,
+              "workerId": "archon-contract",
+              "workflowTask": {
+                "name": "archon_p8_worker",
+                "taskReferenceName": "worker_ref",
+                "inputParameters": {
+                  "x": "${workflow.input.x}"
+                },
+                "type": "SIMPLE",
+                "decisionCases": {},
+                "defaultCase": [],
+                "forkTasks": [],
+                "startDelay": 0,
+                "joinOn": [],
+                "optional": false,
+                "taskDefinition": {
+                  "createTime": 1793751742445,
+                  "updateTime": 0,
+                  "createdBy": "",
+                  "name": "archon_p8_worker",
+                  "retryCount": 0,
+                  "timeoutSeconds": 3600,
+                  "inputKeys": [],
+                  "outputKeys": [],
+                  "runtimeMetadata": [],
+                  "timeoutPolicy": "TIME_OUT_WF",
+                  "retryLogic": "FIXED",
+                  "retryDelaySeconds": 60,
+                  "responseTimeoutSeconds": 3600,
+                  "inputTemplate": {},
+                  "rateLimitPerFrequency": 0,
+                  "rateLimitFrequencyInSeconds": 1,
+                  "backoffScaleFactor": 1,
+                  "maxRetryDelaySeconds": 0,
+                  "backoffJitterMs": 0,
+                  "totalTimeoutSeconds": 0,
+                  "taskStatusListenerEnabled": true,
+                  "enforceSchema": false
+                },
+                "defaultExclusiveJoinTask": [],
+                "asyncComplete": false,
+                "loopOver": [],
+                "onStateChange": {},
+                "permissive": false,
+                "metadata": {}
+              },
+              "rateLimitPerFrequency": 0,
+              "rateLimitFrequencyInSeconds": 1,
+              "workflowPriority": 0,
+              "iteration": 0,
+              "waitTimeout": 0,
+              "subworkflowChanged": false,
+              "onStateChange": {},
+              "idempotent": false,
+              "cachedOutput": false,
+              "notifications": {},
+              "nonWorkflowEventTask": false,
+              "asyncComplete": false,
+              "taskDefinition": {
+                "createTime": 1793751742445,
+                "updateTime": 0,
+                "createdBy": "",
+                "name": "archon_p8_worker",
+                "retryCount": 0,
+                "timeoutSeconds": 3600,
+                "inputKeys": [],
+                "outputKeys": [],
+                "runtimeMetadata": [],
+                "timeoutPolicy": "TIME_OUT_WF",
+                "retryLogic": "FIXED",
+                "retryDelaySeconds": 60,
+                "responseTimeoutSeconds": 3600,
+                "inputTemplate": {},
+                "rateLimitPerFrequency": 0,
+                "rateLimitFrequencyInSeconds": 1,
+                "backoffScaleFactor": 1,
+                "maxRetryDelaySeconds": 0,
+                "backoffJitterMs": 0,
+                "totalTimeoutSeconds": 0,
+                "taskStatusListenerEnabled": true,
+                "enforceSchema": false
+              },
+              "loopOverTask": false,
+              "queueWaitTime": 0,
+              "idempotentExecution": false,
+              "inputData": {
+                "x": "p8-x"
+              },
+              "outputData": {
+                "done": true,
+                "z": [
+                  1
+                ]
+              }
+            }
+          ],
+          "correlationId": "p8-search-1",
+          "taskToDomain": {},
+          "workflowDefinition": {
+            "createTime": 1793751742492,
+            "updateTime": 0,
+            "name": "archon_p8_search",
+            "version": 1,
+            "tasks": [
+              {
+                "name": "archon_p8_worker",
+                "taskReferenceName": "worker_ref",
+                "inputParameters": {
+                  "x": "${workflow.input.x}"
+                },
+                "type": "SIMPLE",
+                "decisionCases": {},
+                "defaultCase": [],
+                "forkTasks": [],
+                "startDelay": 0,
+                "joinOn": [],
+                "optional": false,
+                "taskDefinition": {
+                  "createTime": 1793751742445,
+                  "updateTime": 0,
+                  "createdBy": "",
+                  "name": "archon_p8_worker",
+                  "retryCount": 0,
+                  "timeoutSeconds": 3600,
+                  "inputKeys": [],
+                  "outputKeys": [],
+                  "runtimeMetadata": [],
+                  "timeoutPolicy": "TIME_OUT_WF",
+                  "retryLogic": "FIXED",
+                  "retryDelaySeconds": 60,
+                  "responseTimeoutSeconds": 3600,
+                  "inputTemplate": {},
+                  "rateLimitPerFrequency": 0,
+                  "rateLimitFrequencyInSeconds": 1,
+                  "backoffScaleFactor": 1,
+                  "maxRetryDelaySeconds": 0,
+                  "backoffJitterMs": 0,
+                  "totalTimeoutSeconds": 0,
+                  "taskStatusListenerEnabled": true,
+                  "enforceSchema": false
+                },
+                "defaultExclusiveJoinTask": [],
+                "asyncComplete": false,
+                "loopOver": [],
+                "onStateChange": {},
+                "permissive": false,
+                "metadata": {}
+              }
+            ],
+            "inputParameters": [],
+            "outputParameters": {},
+            "schemaVersion": 2,
+            "restartable": true,
+            "workflowStatusListenerEnabled": false,
+            "timeoutPolicy": "ALERT_ONLY",
+            "timeoutSeconds": 0,
+            "variables": {},
+            "inputTemplate": {},
+            "enforceSchema": true,
+            "metadata": {},
+            "maskedFields": []
+          },
+          "priority": 0,
+          "variables": {},
+          "lastRetriedTime": 0,
+          "ownerApp": "",
+          "createTime": 1793751742530,
+          "updatedTime": 1793751742809,
+          "previousStatus": "RUNNING",
+          "workflowName": "archon_p8_search",
+          "workflowVersion": 1,
+          "input": {
+            "a": {
+              "b": "c"
+            },
+            "f": 2.5,
+            "list": [
+              1,
+              "two"
+            ],
+            "m": {
+              "k1": 1,
+              "k2": "v"
+            },
+            "n": 1,
+            "none": null,
+            "text": "P8 Alpha%Beta\\Gamma",
+            "x": "p8-x"
+          },
+          "output": {
+            "done": true,
+            "z": [
+              1
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

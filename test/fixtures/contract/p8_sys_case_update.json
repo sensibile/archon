@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks",
+    "body": {
+      "workflowInstanceId": "2ba6f76e-1f57-4b1e-baec-bfe1b75638a5",
+      "taskId": "aa7493fb-c027-4fb2-8ffb-251b018f23a4",
+      "status": "COMPLETED",
+      "workerId": "archon-contract",
+      "outputData": {}
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "aa7493fb-c027-4fb2-8ffb-251b018f23a4"
+  }
+}

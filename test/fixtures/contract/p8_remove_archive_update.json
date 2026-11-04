@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks",
+    "body": {
+      "workflowInstanceId": "5fa9371b-4f8d-4c08-86a8-086f9e1c16b5",
+      "taskId": "caf68c3a-2969-4629-b647-534da01770e6",
+      "status": "COMPLETED",
+      "workerId": "archon-contract",
+      "outputData": {},
+      "logs": [
+        {
+          "log": "p8 removed log",
+          "createdTime": 1700000000000
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "caf68c3a-2969-4629-b647-534da01770e6"
+  }
+}

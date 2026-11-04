@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/workflow/2f7b49e0-c5b4-47e6-a061-d3fd4d06cce8/restart",
+    "path": "/api/workflow/487cf206-5cc7-4ff0-b481-9c04a5070a23/restart",
     "body": null
   },
   "response": {
@@ -9,7 +9,7 @@
     "content_type": "application/json",
     "body": {
       "status": 409,
-      "message": "Workflow: archon_simple.1/2f7b49e0-c5b4-47e6-a061-d3fd4d06cce8.RUNNING is not in terminal state, unable to restart.",
+      "message": "Workflow: archon_simple.1/487cf206-5cc7-4ff0-b481-9c04a5070a23.RUNNING is not in terminal state, unable to restart.",
       "instance": "<redacted-hostname>",
       "retryable": false
     }

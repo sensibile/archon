@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/bulk/search",
+    "body": "null"
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Required request body is missing: public com.netflix.conductor.common.model.BulkResponse<com.netflix.conductor.model.WorkflowModel> com.netflix.conductor.rest.controllers.WorkflowBulkResource.searchWorkflow(java.util.List<java.lang.String>,boolean)",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

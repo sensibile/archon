@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/search?query=updateTime%3Clater%20AND%20workflowType%3Darchon_p8_search",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "For input string: \"later\"",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

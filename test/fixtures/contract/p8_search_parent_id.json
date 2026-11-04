@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=parentWorkflowId%3Da724d478-ae12-4180-8c99-c20492e628ce",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 1,
+      "results": [
+        {
+          "workflowType": "archon_p8_child",
+          "version": 1,
+          "workflowId": "57e4192a-f0a1-3631-af74-6f9a75d4df6d",
+          "correlationId": "p8-parent",
+          "startTime": "2026-11-04T00:22:29.957Z",
+          "updateTime": "2026-11-04T00:22:30.202Z",
+          "endTime": "2026-11-04T00:22:30.099Z",
+          "status": "RUNNING",
+          "input": "{subWorkflowDefinition=null, workflowInput={}, subWorkflowTaskToDomain=null, idempotencyKey=null, subWorkflowName=archon_p8_child, priority=null, subWorkflowVersion=1, idempotencyStrategy=null}",
+          "output": "{y=2}",
+          "executionTime": 142,
+          "failedReferenceTaskNames": "",
+          "priority": 0,
+          "failedTaskNames": [],
+          "taskToDomain": {},
+          "parentWorkflowId": "a724d478-ae12-4180-8c99-c20492e628ce",
+          "classifier": "workflow",
+          "inputSize": 193,
+          "outputSize": 5
+        }
+      ]
+    }
+  }
+}

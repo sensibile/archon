@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_p8_skip",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_p8_worker",
+          "taskReferenceName": "a_ref",
+          "type": "SIMPLE",
+          "inputParameters": {
+            "x": "${workflow.input.x}"
+          }
+        },
+        {
+          "name": "archon_p8_case",
+          "taskReferenceName": "b_ref",
+          "type": "SIMPLE",
+          "inputParameters": {
+            "x": "${workflow.input.x}"
+          }
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

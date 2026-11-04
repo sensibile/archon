@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=workflowType~archon_p8_search",
+    "body": null
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Incorrectly formatted query string: workflowType~archon_p8_search",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "POST",
-    "path": "/api/tasks/4db676bb-c38e-471f-8cd8-c5e01bfb49f2/task_a_ref/COMPLETED",
+    "path": "/api/tasks/bce16b00-ec53-4261-939d-810cb173fa8e/task_a_ref/COMPLETED",
     "body": {}
   },
   "response": {

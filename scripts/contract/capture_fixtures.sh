@@ -44,12 +44,16 @@ curl -sf "$HTTP_STUB/json" >/dev/null || { echo "the HTTP stub does not answer a
 
 # call NAME METHOD PATH [BODY]
 # Writes $OUT/NAME.json and leaves the response body in $tmp/body, status in $tmp/status.
-# A BODY argument is sent as JSON even when it is empty ('' sends an empty body).
+# A BODY argument is sent as JSON even when it is empty ('' sends an empty body), or with the
+# Content-Type ARCHON_REQUEST_CONTENT_TYPE names (ARCHON_REQUEST_CONTENT_TYPE=text/plain call ...),
+# which the fixture then
+# records as the request's content_type.
 call() {
   local name="$1" method="$2" path="$3" body="${4:-}" has_body=$(($# >= 4))
+  local req_ctype="${ARCHON_REQUEST_CONTENT_TYPE:-}"
   local args=(-sS -X "$method" -o "$tmp/body" -D "$tmp/headers" -w '%{http_code}')
   if ((has_body)); then
-    args+=(-H 'Content-Type: application/json' --data "$body")
+    args+=(-H "Content-Type: ${req_ctype:-application/json}" --data "$body")
   fi
   curl "${args[@]}" "$BASE_URL$path" >"$tmp/status"
 
@@ -81,7 +85,9 @@ call() {
     --argjson req_body "$req_body" \
     --argjson status "$status" --arg ctype "$ctype" \
     --argjson resp_body "$resp_body" \
-    '{request: {method: $method, path: $path, body: $req_body},
+    --arg req_ctype "$req_ctype" \
+    '{request: ({method: $method, path: $path, body: $req_body}
+                + (if $req_ctype == "" then {} else {content_type: $req_ctype} end)),
       response: {status: $status, content_type: (if $ctype == "" then null else $ctype end),
                  body: $resp_body}}
      # Error bodies carry the server hostname in "instance"; keep the key, drop the value.
@@ -337,11 +343,9 @@ call task_update_v2_invalid POST /api/tasks/update-v2 \
 # --- routing: unknown path, Later paths shaped like MVP parameter paths, other methods, bad input
 
 call route_not_found GET /api/archon/missing
-call route_later_workflow_search GET /api/workflow/search
 call route_later_workflow_running GET /api/workflow/running/archon_simple
 call route_later_workflow_test POST /api/workflow/test '{}'
 call route_later_metadata_names GET /api/metadata/workflow/names
-call route_later_tasks_search GET /api/tasks/search
 call route_method_patch_workflow PATCH /api/workflow '{}'
 call route_method_put_task PUT /api/tasks/00000000-0000-0000-0000-000000000000 '{}'
 call request_body_not_json POST /api/metadata/taskdefs 'not json'
@@ -599,8 +603,6 @@ call task_signal_sync_no_task POST "/api/tasks/$completed_id/COMPLETED/signal/sy
 # Later and Unsupported routes shaped like the new parameter routes.
 call route_unsupported_workflow_decide PUT "/api/workflow/decide/$missing"
 call route_later_tasks_requeue POST /api/tasks/queue/requeue/archon_ops_idle ''
-call route_later_workflow_bulk_search POST /api/workflow/bulk/search "[\"$missing\"]"
-call route_later_task_log GET "/api/tasks/$missing/log"
 
 # execute: the four return strategies on a WAIT, a finished workflow, a timeout, inline.
 call workflow_execute_not_found POST /api/workflow/execute/archon_missing/1 '{}'
@@ -1177,3 +1179,355 @@ p7_run p7_http_async_input archon_p7_http_async_input \
 call p7_http_register_invalid POST /api/metadata/workflow \
   "$(p7_def archon_p7_http_invalid '[{"name": "archon_p7_http", "taskReferenceName": "http_ref",
     "type": "HTTP", "inputParameters": {"body": 1}}]')"
+
+# --- Phase 8: search, indexing and task logs (ADR 0027, decision 7) ---------------------------
+# Every fixture of this part is named p8_*. The index holds every workflow of this capture, so
+# each query names this part's own definitions (archon_p8_*) or correlation IDs, and the lists
+# have a defined order: a sort on a key unique among the results (correlationId, status,
+# taskType, taskDefName), or one result. upstream orders ties and an absent sort by its query
+# plan (ADR 0027, decision 4).
+
+# p8_search NAME PATH [KEY=VALUE ...]: a GET with the query parameters URL-encoded.
+p8_query() {
+  local qs="" pair
+  for pair in "$@"; do
+    qs+="${qs:+&}${pair%%=*}=$(jq -rn --arg v "${pair#*=}" '$v | @uri')"
+  done
+  echo "$qs"
+}
+p8_search() {
+  local name="$1" path="$2"
+  shift 2
+  call "$name" GET "$path?$(p8_query "$@")"
+}
+# p8_search_until NAME PATH FILTER [KEY=VALUE ...]: repeats it until the body passes FILTER.
+p8_search_until() {
+  local name="$1" path="$2" filter="$3"
+  shift 3
+  call_until "$name" GET "$path?$(p8_query "$@")" "$filter"
+}
+# p8_wait_log_status TASK_ID STATUS: waits until the task log GET answers STATUS.
+p8_wait_log_status() {
+  for _ in $(seq 1 40); do
+    [[ "$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/tasks/$1/log")" == "$2" ]] &&
+      return 0
+    sleep 0.25
+  done
+  echo "the log of task $1 did not answer $2" >&2
+  exit 1
+}
+p8_task_def() { # name
+  jq -nc --arg n "$1" '{name: $n, retryCount: 0, timeoutSeconds: 3600,
+    responseTimeoutSeconds: 3600, timeoutPolicy: "TIME_OUT_WF"}'
+}
+p8_worker() { # name ref
+  jq -nc --arg n "$1" --arg r "$2" '{name: $n, taskReferenceName: $r, type: "SIMPLE",
+    inputParameters: {x: "${workflow.input.x}"}}'
+}
+p8_def() { # name tasks_json [extra_object]
+  local extra="${3:-}"
+  [[ -n "$extra" ]] || extra='{}'
+  jq -nc --arg n "$1" --argjson t "$2" --argjson e "$extra" '{name: $n, version: 1,
+    schemaVersion: 2, timeoutPolicy: "ALERT_ONLY", timeoutSeconds: 0, tasks: $t} + $e'
+}
+p8_complete() { # name workflow_id task_ref status output_json
+  call "$1" POST /api/tasks "$(task_result "$2" "$(task_id "$3")" "$4" "$5")"
+}
+p8_wf=/api/workflow/search
+p8_wf_v2=/api/workflow/search-v2
+p8_by_tasks=/api/workflow/search-by-tasks
+p8_by_tasks_v2=/api/workflow/search-by-tasks-v2
+p8_tasks=/api/tasks/search
+p8_tasks_v2=/api/tasks/search-v2
+
+call p8_register_taskdefs POST /api/metadata/taskdefs "$(jq -sc . <<<"
+  $(p8_task_def archon_p8_worker) $(p8_task_def archon_p8_poll) $(p8_task_def archon_p8_case)
+  $(p8_task_def archon_p8_fork_a) $(p8_task_def archon_p8_fork_b) $(p8_task_def archon_p8_sub)")"
+
+# Three workflows of one definition: completed, failed, and running without a correlation ID
+# (a NULL correlation_id for the NULL ordering). The first input holds what the summary's Java
+# notation shows (a nested map with one key and with two, a list, numbers, null) with its keys in
+# sorted order (Archon's order, ADR 0027 decision 3), and the text the freeText cases look for:
+# case, `%`, `_` and a backslash.
+call p8_search_register POST /api/metadata/workflow \
+  "$(p8_def archon_p8_search "[$(p8_worker archon_p8_worker worker_ref)]")"
+call p8_search_start_1 POST '/api/workflow/archon_p8_search?correlationId=p8-search-1' \
+  '{"a": {"b": "c"}, "f": 2.5, "list": [1, "two"], "m": {"k1": 1, "k2": "v"}, "n": 1,
+    "none": null, "text": "P8 Alpha%Beta\\Gamma", "x": "p8-x"}'
+p8_s1="$(body)"
+call p8_search_start_2 POST '/api/workflow/archon_p8_search?correlationId=p8-search-2' \
+  '{"text": "p8 beta", "x": 2}'
+p8_s2="$(body)"
+call p8_search_start_3 POST /api/workflow/archon_p8_search '{"text": "p8 gamma"}'
+p8_s3="$(body)"
+call_until p8_search_get_1 GET "/api/workflow/$p8_s1" '(.tasks | length) == 1'
+p8_complete p8_search_update_1 "$p8_s1" worker_ref COMPLETED '{"done": true, "z": [1]}'
+call_until p8_search_get_2 GET "/api/workflow/$p8_s2" '(.tasks | length) == 1'
+p8_complete p8_search_update_2 "$p8_s2" worker_ref FAILED '{"reason": "p8"}'
+call_until p8_search_get_3 GET "/api/workflow/$p8_s3" '(.tasks | length) == 1'
+wait_status "$p8_s1" COMPLETED
+wait_status "$p8_s2" FAILED
+call_until p8_search_get_1_completed GET "/api/workflow/$p8_s1" '.status == "COMPLETED"'
+call_until p8_search_get_2_failed GET "/api/workflow/$p8_s2" '.status == "FAILED"'
+
+# A definition with a classifier in its metadata.
+call p8_classified_register POST /api/metadata/workflow \
+  "$(p8_def archon_p8_classified "[$(p8_worker archon_p8_worker worker_ref)]" \
+    '{"metadata": {"classifier": "p8cls"}}')"
+call p8_classified_start POST '/api/workflow/archon_p8_classified?correlationId=p8-classified' '{}'
+call_until p8_classified_get GET "/api/workflow/$(body)" '(.tasks | length) == 1'
+
+p8_type='workflowType=archon_p8_search'
+p8_by_corr='sort=correlationId:ASC'
+
+# workflow search: sort ASC (NULL first) and DESC (NULL last), several items, items dropped, a
+# sort field the table does not have, paging and its negatives, the size limit.
+p8_search_until p8_search_all "$p8_wf" '.totalHits == 3' "query=$p8_type" "$p8_by_corr"
+p8_search p8_search_desc "$p8_wf" "query=$p8_type" 'sort=correlationId:DESC'
+p8_search p8_search_sort_many "$p8_wf" "query=$p8_type" 'sort=workflowType:ASC|status:DESC'
+p8_search p8_search_sort_invalid "$p8_wf" "query=$p8_type" \
+  'sort=correlationId:UP|correlationId|archonField:ASC|correlationId:desc'
+p8_search p8_search_sort_missing_column "$p8_wf" "query=$p8_type" 'sort=taskId:ASC'
+p8_search p8_search_page "$p8_wf" "query=$p8_type" "$p8_by_corr" 'start=1' 'size=1'
+p8_search p8_search_size_negative "$p8_wf" "query=$p8_type" "$p8_by_corr" 'size=-1'
+p8_search p8_search_start_negative "$p8_wf" "query=$p8_type" "$p8_by_corr" 'start=-1' 'size=2'
+p8_search p8_search_start_past_end "$p8_wf" "query=$p8_type" "$p8_by_corr" 'start=5'
+p8_search p8_search_size_limit "$p8_wf" "query=$p8_type" 'size=5001'
+p8_search p8_search_size_limit_v2 "$p8_wf_v2" "query=$p8_type" 'size=5001'
+p8_search p8_search_size_zero "$p8_wf" "query=$p8_type" 'size=0'
+p8_search p8_search_size_not_number "$p8_wf" "query=$p8_type" 'size=many'
+# freeText: a substring, any case, `%` and `_` as wildcards, one and two backslashes (the JSON
+# text holds the value's backslash escaped), `*` and empty as no filter.
+p8_search p8_search_free_text "$p8_wf" "query=$p8_type" 'freeText=alpha'
+p8_search p8_search_free_text_case "$p8_wf" "query=$p8_type" "$p8_by_corr" 'freeText=GAMMA'
+p8_search p8_search_free_text_percent "$p8_wf" "query=$p8_type" 'freeText=alpha%gamma'
+p8_search p8_search_free_text_underscore "$p8_wf" "query=$p8_type" 'freeText=p8_beta'
+p8_search p8_search_free_text_backslash "$p8_wf" "query=$p8_type" 'freeText=beta\gamma'
+p8_search p8_search_free_text_backslashes "$p8_wf" "query=$p8_type" 'freeText=beta\\gamma'
+p8_search p8_search_free_text_star "$p8_wf" "query=$p8_type" "$p8_by_corr" 'freeText=*'
+p8_search p8_search_free_text_empty "$p8_wf" "query=$p8_type" "$p8_by_corr" 'freeText='
+p8_search p8_search_free_text_java "$p8_wf" "query=$p8_type" 'freeText=list=[1, two]'
+# query: =, IN with several values and with one, > and < on times (epoch milliseconds), a time
+# that is not a number, a time IN (only the first value is converted), the * wildcard, jsonData,
+# an unknown field (dropped), a clause that does not parse, a field the table does not have.
+p8_search p8_search_status "$p8_wf" "query=status=FAILED AND $p8_type"
+p8_search p8_search_in_many "$p8_wf" "$p8_by_corr" \
+  "query=$p8_type AND correlationId IN (p8-search-1,p8-search-2)"
+p8_search p8_search_in_one "$p8_wf" "query=correlationId IN ('p8-search-2') AND $p8_type"
+p8_search p8_search_in_spaces "$p8_wf" "query=correlationId IN (p8-search-1, p8-search-2) AND $p8_type"
+p8_search p8_search_time_range "$p8_wf" "$p8_by_corr" \
+  "query=$p8_type AND startTime>1700000000000 AND startTime<4102444800000"
+p8_search p8_search_time_future "$p8_wf" "query=startTime>4102444800000 AND $p8_type"
+p8_search p8_search_time_not_number "$p8_wf" "query=startTime>soon AND $p8_type"
+p8_search p8_search_time_in "$p8_wf" "query=updateTime IN (1700000000000,4102444800000) AND $p8_type"
+p8_search p8_search_wildcard "$p8_wf" "$p8_by_corr" 'query=workflowType=ARCHON_P8_SEAR*'
+p8_search p8_search_json_data "$p8_wf" "query=jsonData=*alpha* AND $p8_type"
+p8_search p8_search_unknown_field "$p8_wf" "$p8_by_corr" "query=archonField=x AND $p8_type"
+p8_search p8_search_bad_clause "$p8_wf" "query=workflowType~archon_p8_search"
+p8_search p8_search_missing_column "$p8_wf" "query=taskId=x AND $p8_type"
+p8_search p8_search_quoted "$p8_wf" "query=workflowType=\"archon_p8_search\" AND correlationId='p8-search-1'"
+# classifier and topLevelOnly (the parent and child below), folded into the query.
+p8_search p8_search_classifier "$p8_wf" \
+  'query=workflowType IN (archon_p8_search,archon_p8_classified)' 'classifier=p8cls'
+p8_search p8_search_classifier_workflow "$p8_wf" "$p8_by_corr" \
+  'query=workflowType IN (archon_p8_search,archon_p8_classified)' 'classifier=workflow'
+p8_search p8_search_classifier_both "$p8_wf" "$p8_by_corr" \
+  'query=workflowType IN (archon_p8_search,archon_p8_classified)' 'classifier= p8cls, workflow'
+p8_search p8_search_classifier_only "$p8_wf" 'classifier=p8cls'
+# search-v2: the workflows read again, in index order.
+p8_search p8_search_v2 "$p8_wf_v2" "query=$p8_type" "$p8_by_corr"
+p8_search p8_search_v2_page "$p8_wf_v2" "query=$p8_type" "$p8_by_corr" 'start=2' 'size=1'
+p8_search p8_search_v2_bad_clause "$p8_wf_v2" "query=workflowType~archon_p8_search"
+
+# Tasks: the worker tasks of the first two were updated, the third's is only scheduled.
+p8_search p8_tasks_search "$p8_tasks" "query=$p8_type" 'sort=status:ASC'
+p8_search p8_tasks_search_v2 "$p8_tasks_v2" "query=$p8_type" 'sort=status:ASC'
+p8_search p8_tasks_search_free_text "$p8_tasks" "query=$p8_type" 'freeText=DONE=true'
+p8_search p8_tasks_search_page "$p8_tasks" "query=$p8_type" 'sort=status:DESC' 'size=1'
+p8_search p8_tasks_search_missing_column "$p8_tasks" "query=correlationId=p8-search-1"
+p8_search p8_tasks_search_sort_missing_column "$p8_tasks" "query=$p8_type" 'sort=correlationId:ASC'
+p8_search p8_tasks_search_bad_clause "$p8_tasks" 'query=taskType~SIMPLE'
+p8_search p8_tasks_search_time_not_number "$p8_tasks" "query=updateTime<later AND $p8_type"
+p8_search p8_tasks_search_size_negative "$p8_tasks" "query=$p8_type" 'sort=status:ASC' 'size=-1'
+p8_search p8_tasks_search_size_limit "$p8_tasks" "query=$p8_type" 'sort=status:ASC' 'size=5001'
+p8_search p8_tasks_search_start_negative "$p8_tasks" "query=$p8_type" 'sort=status:ASC' 'start=-1' 'size=1'
+# search-by-tasks: the workflows of the tasks found.
+p8_search p8_search_by_tasks "$p8_by_tasks" "query=$p8_type" 'sort=status:ASC'
+p8_search p8_search_by_tasks_v2 "$p8_by_tasks_v2" "query=$p8_type" 'sort=status:ASC'
+p8_search p8_search_by_tasks_free_text "$p8_by_tasks" "query=$p8_type" 'freeText=p8' 'sort=status:ASC'
+p8_search p8_search_by_tasks_size_limit "$p8_by_tasks" "query=$p8_type" 'sort=status:ASC' 'size=5001'
+p8_search p8_search_by_tasks_bad_clause "$p8_by_tasks" 'query=taskType~SIMPLE'
+
+# When tasks are indexed: a scheduled worker task is not (createTasks), a polled one is, an
+# extendLease is not; the logs of an update (more than the limit of 10), POSTed logs.
+call p8_index_register POST /api/metadata/workflow \
+  "$(p8_def archon_p8_index "[$(p8_worker archon_p8_poll poll_ref)]")"
+call p8_index_start POST '/api/workflow/archon_p8_index?correlationId=p8-index' '{"x": "p8"}'
+p8_index="$(body)"
+call_until p8_index_get GET "/api/workflow/$p8_index" '(.tasks | length) == 1'
+p8_index_task="$(task_id poll_ref)"
+p8_index_q='query=workflowType=archon_p8_index'
+p8_search p8_index_tasks_scheduled "$p8_tasks" "$p8_index_q"
+p8_search p8_index_workflow_scheduled "$p8_wf" "$p8_index_q"
+poll_until p8_index_poll archon_p8_poll
+p8_search_until p8_index_tasks_polled "$p8_tasks" '.totalHits == 1' "$p8_index_q"
+call p8_index_extend_lease POST /api/tasks "$(jq -nc --arg w "$p8_index" --arg t "$p8_index_task" \
+  --arg worker "$WORKER" '{workflowInstanceId: $w, taskId: $t, status: "IN_PROGRESS",
+  workerId: $worker, extendLease: true, outputData: {lease: "p8lease"}}')"
+p8_search p8_index_tasks_extended "$p8_tasks" "$p8_index_q" 'freeText=p8lease'
+call p8_index_get_extended GET "/api/workflow/$p8_index"
+call p8_index_update_logs POST /api/tasks "$(jq -nc --arg w "$p8_index" --arg t "$p8_index_task" \
+  --arg worker "$WORKER" '{workflowInstanceId: $w, taskId: $t, status: "IN_PROGRESS",
+  workerId: $worker, outputData: {progress: "p8progress"}, callbackAfterSeconds: 3600,
+  logs: [range(1; 12) | {log: "p8 log \(.)", createdTime: (1700000000000 + .)}]}')"
+p8_search_until p8_index_tasks_updated "$p8_tasks" '.totalHits == 1' "$p8_index_q" \
+  'freeText=p8progress'
+call p8_index_logs GET "/api/tasks/$p8_index_task/log"
+ARCHON_REQUEST_CONTENT_TYPE=text/plain call p8_log_post_text POST "/api/tasks/$p8_index_task/log" 'p8 plain log'
+call p8_log_post_json POST "/api/tasks/$p8_index_task/log" '"p8 json log"'
+call p8_log_post_empty POST "/api/tasks/$p8_index_task/log" ''
+call p8_index_logs_posted GET "/api/tasks/$p8_index_task/log"
+call p8_index_complete POST /api/tasks \
+  "$(task_result "$p8_index" "$p8_index_task" COMPLETED '{"y": 1}')"
+wait_status "$p8_index" COMPLETED
+call p8_index_get_completed GET "/api/workflow/$p8_index"
+p8_search_until p8_index_tasks_completed "$p8_tasks" '.results[0].status == "COMPLETED"' \
+  "$p8_index_q"
+p8_search_until p8_index_workflow_completed "$p8_wf" '.results[0].status == "COMPLETED"' \
+  "$p8_index_q"
+# Logs of a task that does not exist: a POST stores them, a GET reads them; no logs is a 204.
+ARCHON_REQUEST_CONTENT_TYPE=text/plain call p8_log_post_missing POST \
+  /api/tasks/00000000-0000-0000-0000-0000000008a1/log 'p8 log of no task'
+call p8_log_get_missing GET /api/tasks/00000000-0000-0000-0000-0000000008a1/log
+call p8_log_get_none GET /api/tasks/00000000-0000-0000-0000-0000000008a2/log
+
+# A first task that is a synchronous system task (SET_VARIABLE), SWITCH and FORK; the JOIN is
+# left out of the task queries (upstream's system task worker evaluates it on its own clock).
+call p8_sys_register POST /api/metadata/workflow "$(p8_def archon_p8_sys '[
+  {"name": "archon_p8_set", "taskReferenceName": "set_ref", "type": "SET_VARIABLE",
+   "inputParameters": {"v": "p8"}},
+  {"name": "archon_p8_switch", "taskReferenceName": "switch_ref", "type": "SWITCH",
+   "evaluatorType": "value-param", "expression": "kind",
+   "inputParameters": {"kind": "${workflow.input.kind}"},
+   "decisionCases": {"a": [{"name": "archon_p8_case", "taskReferenceName": "case_ref",
+     "type": "SIMPLE"}]}},
+  {"name": "archon_p8_fork", "taskReferenceName": "fork_ref", "type": "FORK_JOIN",
+   "forkTasks": [[{"name": "archon_p8_fork_a", "taskReferenceName": "fork_a_ref", "type": "SIMPLE"}],
+                 [{"name": "archon_p8_fork_b", "taskReferenceName": "fork_b_ref", "type": "SIMPLE"}]]},
+  {"name": "archon_p8_join", "taskReferenceName": "join_ref", "type": "JOIN",
+   "joinOn": ["fork_a_ref", "fork_b_ref"]}]')"
+call p8_sys_start POST '/api/workflow/archon_p8_sys?correlationId=p8-sys' '{"kind": "a"}'
+p8_sys="$(body)"
+call_until p8_sys_get GET "/api/workflow/$p8_sys" '(.tasks | length) == 3'
+p8_sys_case="$(task_id case_ref)"
+# A SIMPLE task's taskType is its name.
+p8_sys_q='query=workflowType=archon_p8_sys AND taskType IN (SET_VARIABLE,SWITCH,FORK,archon_p8_case,archon_p8_fork_a,archon_p8_fork_b)'
+p8_search p8_sys_tasks_started "$p8_tasks" "$p8_sys_q" 'sort=taskType:ASC'
+call p8_sys_case_update POST /api/tasks "$(task_result "$p8_sys" "$p8_sys_case" COMPLETED '{}')"
+call_until p8_sys_get_forked GET "/api/workflow/$p8_sys" '(.tasks | length) == 7'
+p8_search p8_sys_tasks_forked "$p8_tasks" "$p8_sys_q" 'sort=taskType:ASC'
+# Two tasks of one workflow: search-by-tasks gives it once and lowers totalHits.
+p8_search p8_sys_search_by_tasks "$p8_by_tasks" \
+  'query=workflowType=archon_p8_sys AND taskType IN (SET_VARIABLE,SWITCH)'
+p8_search p8_sys_search_by_tasks_v2 "$p8_by_tasks_v2" \
+  'query=workflowType=archon_p8_sys AND taskType IN (SET_VARIABLE,SWITCH)'
+
+# skiptask: the skipped task is created, not updated.
+call p8_skip_register POST /api/metadata/workflow "$(p8_def archon_p8_skip \
+  "[$(p8_worker archon_p8_worker a_ref), $(p8_worker archon_p8_case b_ref)]")"
+call p8_skip_start POST '/api/workflow/archon_p8_skip?correlationId=p8-skip' '{}'
+p8_skip="$(body)"
+call_until p8_skip_get GET "/api/workflow/$p8_skip" '(.tasks | length) == 1'
+p8_skip_a="$(task_id a_ref)"
+call p8_skip_skiptask PUT "/api/workflow/$p8_skip/skiptask/b_ref"
+call p8_skip_get_skipped GET "/api/workflow/$p8_skip"
+p8_search p8_skip_tasks_skipped "$p8_tasks" 'query=workflowType=archon_p8_skip'
+call p8_skip_complete POST /api/tasks "$(task_result "$p8_skip" "$p8_skip_a" COMPLETED '{}')"
+wait_status "$p8_skip" COMPLETED
+call p8_skip_get_completed GET "/api/workflow/$p8_skip"
+p8_search_until p8_skip_tasks_completed "$p8_tasks" '.totalHits >= 1' \
+  'query=workflowType=archon_p8_skip' 'sort=status:ASC'
+p8_search p8_skip_search_by_tasks "$p8_by_tasks" 'query=workflowType=archon_p8_skip'
+
+# remove: archiveWorkflow=true keeps the index rows, archiveWorkflow=false removes them (and the
+# task rows and logs) asynchronously.
+call p8_remove_register POST /api/metadata/workflow \
+  "$(p8_def archon_p8_remove "[$(p8_worker archon_p8_worker worker_ref)]")"
+for p8_kind in archive delete; do
+  call "p8_remove_${p8_kind}_start" POST \
+    "/api/workflow/archon_p8_remove?correlationId=p8-remove-$p8_kind" '{}'
+  p8_id="$(body)"
+  call_until "p8_remove_${p8_kind}_get" GET "/api/workflow/$p8_id" '(.tasks | length) == 1'
+  p8_task="$(task_id worker_ref)"
+  call "p8_remove_${p8_kind}_update" POST /api/tasks "$(jq -nc --arg w "$p8_id" --arg t "$p8_task" \
+    --arg worker "$WORKER" '{workflowInstanceId: $w, taskId: $t, status: "COMPLETED",
+    workerId: $worker, outputData: {}, logs: [{log: "p8 removed log", createdTime: 1700000000000}]}')"
+  wait_status "$p8_id" COMPLETED
+  call "p8_remove_${p8_kind}_get_completed" GET "/api/workflow/$p8_id"
+  printf -v "p8_remove_${p8_kind}_id" '%s' "$p8_id"
+  printf -v "p8_remove_${p8_kind}_task" '%s' "$p8_task"
+done
+p8_rm_q='query=workflowType=archon_p8_remove'
+call p8_remove_archive DELETE "/api/workflow/$p8_remove_archive_id/remove?archiveWorkflow=true"
+p8_search p8_remove_archive_search "$p8_wf" "$p8_rm_q AND correlationId=p8-remove-archive"
+p8_search p8_remove_archive_search_v2 "$p8_wf_v2" "$p8_rm_q AND correlationId=p8-remove-archive"
+p8_search p8_remove_archive_tasks "$p8_tasks" "$p8_rm_q" 'freeText=p8-remove-archive'
+p8_search p8_remove_archive_tasks_v2 "$p8_tasks_v2" "$p8_rm_q" 'freeText=p8-remove-archive'
+p8_search p8_remove_archive_by_tasks "$p8_by_tasks" "$p8_rm_q" 'freeText=p8-remove-archive'
+p8_search p8_remove_archive_by_tasks_v2 "$p8_by_tasks_v2" "$p8_rm_q" 'freeText=p8-remove-archive'
+call p8_remove_archive_log GET "/api/tasks/$p8_remove_archive_task/log"
+call p8_remove_delete DELETE "/api/workflow/$p8_remove_delete_id/remove?archiveWorkflow=false"
+p8_search_until p8_remove_delete_search "$p8_wf" '.totalHits == 0' \
+  "$p8_rm_q AND correlationId=p8-remove-delete"
+p8_search_until p8_remove_delete_tasks "$p8_tasks" '.totalHits == 0' "$p8_rm_q" \
+  'freeText=p8-remove-delete'
+p8_search p8_remove_delete_search_v2 "$p8_wf_v2" "$p8_rm_q AND correlationId=p8-remove-delete"
+p8_search p8_remove_delete_by_tasks "$p8_by_tasks" "$p8_rm_q" 'freeText=p8-remove-delete'
+p8_wait_log_status "$p8_remove_delete_task" 204
+call p8_remove_delete_log GET "/api/tasks/$p8_remove_delete_task/log"
+call p8_remove_delete_get_removed GET "/api/workflow/$p8_remove_delete_id"
+
+# A child's retry, restart and rerun log on the parent's SUB_WORKFLOW task; topLevelOnly.
+call p8_child_register POST /api/metadata/workflow \
+  "$(p8_def archon_p8_child "[$(p8_worker archon_p8_worker child_ref)]")"
+call p8_parent_register POST /api/metadata/workflow "$(p8_def archon_p8_parent '[
+  {"name": "archon_p8_sub", "taskReferenceName": "sub_ref", "type": "SUB_WORKFLOW",
+   "subWorkflowParam": {"name": "archon_p8_child", "version": 1}}]')"
+call p8_parent_start POST '/api/workflow/archon_p8_parent?correlationId=p8-parent' '{"x": "p8"}'
+p8_parent="$(body)"
+call_until p8_parent_get GET "/api/workflow/$p8_parent" '.tasks[0].subWorkflowId != null'
+p8_sub_task="$(task_id sub_ref)"
+p8_child="$(child_id sub_ref)"
+call_until p8_child_get GET "/api/workflow/$p8_child" '(.tasks | length) == 1'
+p8_complete p8_child_fail "$p8_child" child_ref FAILED '{}'
+call_until p8_parent_get_failed GET "/api/workflow/$p8_parent" '.status == "FAILED"'
+call p8_child_retry POST "/api/workflow/$p8_child/retry"
+call_until p8_parent_get_retried GET "/api/workflow/$p8_parent" \
+  '.status == "RUNNING" and .tasks[0].status == "IN_PROGRESS"'
+call p8_parent_log_retried GET "/api/tasks/$p8_sub_task/log"
+call p8_child_terminate DELETE "/api/workflow/$p8_child?reason=p8"
+call_until p8_parent_get_terminated GET "/api/workflow/$p8_parent" '.status != "RUNNING"'
+call p8_child_restart POST "/api/workflow/$p8_child/restart"
+call_until p8_parent_get_restarted GET "/api/workflow/$p8_parent" \
+  '.status == "RUNNING" and .tasks[0].status == "IN_PROGRESS"'
+call_until p8_child_get_restarted GET "/api/workflow/$p8_child" \
+  '(.tasks | length) == 1 and .tasks[0].status == "SCHEDULED"'
+p8_complete p8_child_complete "$p8_child" child_ref COMPLETED '{"y": 2}'
+call_until p8_parent_get_completed GET "/api/workflow/$p8_parent" '.status == "COMPLETED"'
+call p8_child_rerun POST "/api/workflow/$p8_child/rerun" '{}'
+call_until p8_parent_get_reran GET "/api/workflow/$p8_parent" '.status == "RUNNING"'
+call p8_parent_logs GET "/api/tasks/$p8_sub_task/log"
+p8_family='query=workflowType IN (archon_p8_parent,archon_p8_child)'
+p8_search p8_search_family "$p8_wf" "$p8_family" 'sort=workflowType:ASC'
+p8_search p8_search_top_level "$p8_wf" "$p8_family" 'topLevelOnly=true'
+p8_search p8_search_top_level_v2 "$p8_wf_v2" "$p8_family" 'topLevelOnly=true'
+p8_search p8_search_top_level_only "$p8_wf" 'topLevelOnly=true' 'query=workflowType=archon_p8_child'
+p8_search p8_search_parent_id "$p8_wf" "query=parentWorkflowId=$p8_parent"
+
+# bulk/search: no index, the workflows by ID.
+call p8_bulk_search_empty POST /api/workflow/bulk/search '[]'
+call p8_bulk_search_too_many POST /api/workflow/bulk/search \
+  "$(jq -nc '[range(0; 1001) | "00000000-0000-0000-0000-\(1000000000000 + . | tostring | .[1:])"]')"
+call p8_bulk_search_mixed POST /api/workflow/bulk/search "[\"$p8_s1\", \"$missing\"]"
+call p8_bulk_search_no_tasks POST '/api/workflow/bulk/search?includeTasks=false' "[\"$p8_s2\"]"
+call p8_bulk_search_null_body POST /api/workflow/bulk/search 'null'
