@@ -7,13 +7,15 @@
 # (startWorkflow, startWorkflowIdempotent, resolveWorkflowDefinition, createWorkflowModel,
 # validateWorkflow, terminateWorkflow, getWorkflows, getRunningWorkflowIds),
 # core/.../metadata/MetadataMapperService.java (lookupForWorkflowDefinition,
-# populateTaskDefinitions), core/.../service/ExecutionService.java (getWorkflowInstances) and
-# core/.../service/WorkflowServiceImpl.java (getRunningWorkflows) at commit
+# populateTaskDefinitions), core/.../service/ExecutionService.java (getWorkflowInstances, search,
+# searchV2, searchWorkflowByTasks, searchWorkflowByTasksV2, searchTasks, getSearchTasks,
+# getSearchTasksV2) and core/.../service/WorkflowServiceImpl.java (getRunningWorkflows) at commit
 # 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the caller resolves the definition and builds the workflow, and the
 # workflow's own process creates and decides it (ADR 0018, decisions 1 and 7); a definition
 # enforcing a schema that cannot be checked is refused (ADR 0023, decision 5); the queries read
-# ordered store queries (ADR 0025, decision 4).
+# ordered store queries (ADR 0025, decision 4); the searches read the store's search index and
+# re-read each result in turn instead of in a parallel stream (ADR 0027, decision 5).
 
 defmodule Archon.Runtime do
   @moduledoc """
@@ -30,6 +32,9 @@ defmodule Archon.Runtime do
     * `terminate_workflow/2` - upstream `terminateWorkflow(String, String)`.
     * `correlated_workflows/4` and `running_workflow_ids/4` - upstream `getWorkflowInstances`
       and `getRunningWorkflows`, read from the store (ADR 0025, decision 4).
+    * `search_workflows/5`, `search_workflows_v2/5`, `search_workflows_by_tasks/5`,
+      `search_workflows_by_tasks_v2/5`, `search_tasks/5` and `search_tasks_v2/5` - upstream
+      `ExecutionService`'s searches over the store's search index (ADR 0027, decision 5).
 
   Pause, resume, retry and restart are `Archon.Runtime.Lifecycle`.
 
@@ -65,9 +70,20 @@ defmodule Archon.Runtime do
   """
 
   alias Archon.Decider.{Context, Parameters}
-  alias Archon.Domain.{SubWorkflowParams, TaskDef, Workflow, WorkflowDef, WorkflowTask}
+
+  alias Archon.Domain.{
+    SubWorkflowParams,
+    Task,
+    TaskDef,
+    Workflow,
+    WorkflowDef,
+    WorkflowSummary,
+    WorkflowTask
+  }
+
   alias Archon.Runtime.Step.Effect
   alias Archon.Runtime.WorkflowServer
+  alias Archon.Search.Query
 
   @typedoc """
   What to start, as upstream's `StartWorkflowInput` (`t:Archon.Runtime.Step.Effect.start/0`).
@@ -166,6 +182,159 @@ defmodule Archon.Runtime do
   @spec terminate_workflow(String.t(), String.t() | nil) :: :ok | {:error, term()}
   def terminate_workflow(id, reason) when is_binary(id),
     do: WorkflowServer.terminate_workflow(id, reason)
+
+  @typedoc """
+  A page of search results and the number of matches, or why the search failed. Every search
+  takes `query`, `freeText` and the `sort` items as upstream's controllers pass them on
+  (`Archon.Search.Query.parse/3`), then the page's `start` and `size` (a negative `size` is
+  every match, a negative `start` 0).
+  """
+  @type search_result(result) ::
+          {:ok, total_hits :: integer(), [result]} | {:error, Query.error()}
+
+  @doc """
+  Upstream `ExecutionService#search`: the workflow summaries the search index stored, as their
+  JSON text (not encoded again, ADR 0027 decision 5). A removed workflow that was archived is
+  still found.
+  """
+  @spec search_workflows(String.t() | nil, String.t() | nil, [String.t()], integer(), integer()) ::
+          search_result(String.t())
+  def search_workflows(query, free_text, sort, start, size) do
+    with {:ok, total, page} <- search(:search_workflows, query, free_text, sort, start, size),
+         do: {:ok, total, Enum.map(page, &elem(&1, 1))}
+  end
+
+  @doc """
+  Upstream `ExecutionService#searchV2`: the workflows (without their tasks) of the index's page,
+  each read again in index order. A workflow that cannot be read is left out and taken off the
+  total.
+  """
+  @spec search_workflows_v2(
+          String.t() | nil,
+          String.t() | nil,
+          [String.t()],
+          integer(),
+          integer()
+        ) ::
+          search_result(Workflow.t())
+  def search_workflows_v2(query, free_text, sort, start, size) do
+    with {:ok, total, page} <- search(:search_workflows, query, free_text, sort, start, size) do
+      workflows = page |> Enum.map(&elem(&1, 0)) |> read(&workflow/1)
+      less({:ok, total, workflows}, page)
+    end
+  end
+
+  @doc """
+  Upstream `ExecutionService#searchWorkflowByTasks`: a new workflow summary JSON text for the
+  workflow of each task summary in the task index's page, a workflow once, in page order. The
+  total loses the workflows that cannot be read and the repeated ones.
+  """
+  @spec search_workflows_by_tasks(
+          String.t() | nil,
+          String.t() | nil,
+          [String.t()],
+          integer(),
+          integer()
+        ) :: search_result(String.t())
+  def search_workflows_by_tasks(query, free_text, sort, start, size) do
+    with {:ok, total, page} <- search(:search_tasks, query, free_text, sort, start, size) do
+      summaries =
+        page
+        |> Enum.map(fn {_id, json} -> summary_workflow_id(json) end)
+        |> workflows_of()
+        |> Enum.map(&(&1 |> WorkflowSummary.new() |> WorkflowSummary.encode()))
+
+      less({:ok, total, summaries}, page)
+    end
+  end
+
+  @doc """
+  Upstream `ExecutionService#searchWorkflowByTasksV2`: the tasks of the task index's page read
+  again (a task that cannot be read taken off the total), then the workflow (without its tasks)
+  of each, a workflow once, in page order (the ones that cannot be read and the repeated ones
+  taken off the total too).
+  """
+  @spec search_workflows_by_tasks_v2(
+          String.t() | nil,
+          String.t() | nil,
+          [String.t()],
+          integer(),
+          integer()
+        ) :: search_result(Workflow.t())
+  def search_workflows_by_tasks_v2(query, free_text, sort, start, size) do
+    with {:ok, total, page} <- search(:search_tasks, query, free_text, sort, start, size),
+         {:ok, total, tasks} <- less({:ok, total, read_tasks(page)}, page) do
+      workflows = tasks |> Enum.map(& &1.workflow_instance_id) |> workflows_of()
+      less({:ok, total, workflows}, tasks)
+    end
+  end
+
+  @doc """
+  Upstream `ExecutionService#getSearchTasks`: the task summaries the search index stored, as
+  their JSON text.
+  """
+  @spec search_tasks(String.t() | nil, String.t() | nil, [String.t()], integer(), integer()) ::
+          search_result(String.t())
+  def search_tasks(query, free_text, sort, start, size) do
+    with {:ok, total, page} <- search(:search_tasks, query, free_text, sort, start, size),
+         do: {:ok, total, Enum.map(page, &elem(&1, 1))}
+  end
+
+  @doc """
+  Upstream `ExecutionService#getSearchTasksV2`: the tasks of the task index's page, each read
+  again in index order. A task that cannot be read is left out and taken off the total.
+  """
+  @spec search_tasks_v2(String.t() | nil, String.t() | nil, [String.t()], integer(), integer()) ::
+          search_result(Task.t())
+  def search_tasks_v2(query, free_text, sort, start, size) do
+    with {:ok, total, page} <- search(:search_tasks, query, free_text, sort, start, size),
+         do: less({:ok, total, read_tasks(page)}, page)
+  end
+
+  defp search(callback, query, free_text, sort, start, size)
+       when is_list(sort) and is_integer(start) and is_integer(size) do
+    with {:ok, parsed} <- Query.parse(query, free_text, sort),
+         do: apply(store(), callback, [parsed, start, size])
+  end
+
+  # The results that could be read, and the total less the ones of `page` that could not (or
+  # were repeated): upstream's `totalHits - (results.size() - found.size())`.
+  defp less({:ok, total, found}, page), do: {:ok, total - (length(page) - length(found)), found}
+
+  defp read(ids, fun), do: Enum.flat_map(ids, &List.wrap(fun.(&1)))
+
+  defp workflow(id) when is_binary(id) do
+    case get_workflow(id, false) do
+      {:ok, workflow} -> workflow
+      {:error, :not_found} -> nil
+    end
+  end
+
+  defp workflow(_id), do: nil
+
+  defp read_tasks(page) do
+    read(page, fn {id, _json} ->
+      case store().get_task(id) do
+        {:ok, task, _workflow_id} -> task
+        {:error, :not_found} -> nil
+      end
+    end)
+  end
+
+  # Each workflow once (the stream's `distinct`: upstream's Workflow and WorkflowSummary of the
+  # same workflow are equal), read once, in the order of their first task.
+  defp workflows_of(ids) do
+    ids
+    |> Enum.uniq()
+    |> read(&workflow/1)
+  end
+
+  defp summary_workflow_id(json) do
+    case JSON.decode(json) do
+      {:ok, %{"workflowId" => id}} -> id
+      _other -> nil
+    end
+  end
 
   # resolveWorkflowDefinition + createWorkflowModel
   defp new_workflow(input, id) do

@@ -9,8 +9,8 @@
 # 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: the Phase 6 handlers (ADR 0025, decision 6) on the single workflow
 # functions of Archon.Runtime and Archon.Runtime.Lifecycle; a failure's message is the one the
-# single REST action answers. The Phase 8 search handler (ADR 0027) is a skeleton that answers
-# the 404 of a path without a handler until slice 8e implements it.
+# single REST action answers; the Phase 8 search handler (ADR 0027, decision 5) reads each
+# workflow with Archon.Runtime.get_workflow/2 and answers upstream's WorkflowModel shape.
 
 defmodule ArchonWeb.WorkflowBulkController do
   @moduledoc """
@@ -37,9 +37,9 @@ defmodule ArchonWeb.WorkflowBulkController do
   `DELETE` always need a CORS preflight. Unlike the single `retry`, `restart` and
   `resetcallbacks` (ADR 0025, decision 3) no cross-origin check is added.
 
-  `search` (Phase 8, ADR 0027 decision 5) is a skeleton (decision 7): it answers the 404 of a
-  path without a handler, and the contract replay (`ArchonWeb.ContractCase`) skips the steps that
-  reach an action of `unimplemented/0`. Slice 8e empties the list.
+  `search` (ADR 0027, decision 5) checks its body the same way and reads each ID's workflow; its
+  successful results are workflows in upstream's internal `WorkflowModel` shape
+  (`Archon.Domain.WorkflowModelJson`), not the REST `Workflow`.
   """
 
   use ArchonWeb, :controller
@@ -47,9 +47,9 @@ defmodule ArchonWeb.WorkflowBulkController do
   # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
   Module.register_attribute(__MODULE__, :unimplemented, persist: true)
 
-  @unimplemented [:search]
+  @unimplemented []
 
-  alias Archon.Domain.{BulkResponse, Codec}
+  alias Archon.Domain.{BulkResponse, Codec, WorkflowModelJson}
   alias Archon.Runtime
   alias Archon.Runtime.Lifecycle
 
@@ -64,6 +64,9 @@ defmodule ArchonWeb.WorkflowBulkController do
 
   @handler "public com.netflix.conductor.common.model.BulkResponse<java.lang.String> " <>
              "com.netflix.conductor.rest.controllers.WorkflowBulkResource."
+  @search_handler "public com.netflix.conductor.common.model.BulkResponse" <>
+                    "<com.netflix.conductor.model.WorkflowModel> " <>
+                    "com.netflix.conductor.rest.controllers.WorkflowBulkResource."
   @ids_type "java.util.List<java.lang.String>"
 
   @doc "The actions not implemented yet."
@@ -71,11 +74,39 @@ defmodule ArchonWeb.WorkflowBulkController do
   def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
 
   @doc """
-  `POST /api/workflow/bulk/search` (`searchWorkflow`, `includeTasks` query): the workflows of the
-  body's IDs as a `BulkResponse`. Not implemented yet.
+  `POST /api/workflow/bulk/search` (`searchWorkflow`, `includeTasks` true): each ID's workflow,
+  with its tasks unless `includeTasks` is false, read with `Archon.Runtime.get_workflow/2` in
+  request order (a repeated ID is there again). An unknown ID fails with
+  `"No such workflow found by id: <id>"`. No index is used.
   """
   @spec search(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def search(conn, _params), do: Errors.send_no_route(conn)
+  def search(conn, _params) do
+    with {:ok, ids, conn} <- ids(conn, "searchWorkflow", ["boolean"], @search_handler),
+         {:ok, tasks?} <- query(conn, Request.boolean(conn, "includeTasks", true)),
+         :ok <- check(conn, ids, "searchWorkflow") do
+      {workflows, response} = Enum.reduce(ids, {[], %BulkResponse{}}, &read_one(&1, tasks?, &2))
+
+      if Enum.member?(ids, nil) do
+        Errors.send_error(conn, {:server_error, @null_key_message})
+      else
+        now = System.system_time(:millisecond)
+        response = %{response | bulk_successful_results: Enum.reverse(workflows)}
+
+        Response.json(conn, BulkResponse.to_json(response, &WorkflowModelJson.workflow(&1, now)))
+      end
+    end
+  end
+
+  defp read_one(id, tasks?, {workflows, response}) do
+    case read(id, tasks?) do
+      {:ok, workflow} -> {[workflow | workflows], response}
+      {:error, reason} -> {workflows, BulkResponse.failure(response, id, message(id, reason))}
+    end
+  end
+
+  # A null ID is not found upstream; its failure is never written (search/2).
+  defp read(nil, _tasks?), do: {:error, :not_found}
+  defp read(id, tasks?), do: run(&Runtime.get_workflow(&1, tasks?), id)
 
   @doc "`PUT /api/workflow/bulk/pause` (`pauseWorkflow`): `Archon.Runtime.Lifecycle.pause/1` for each ID."
   @spec pause(Plug.Conn.t(), map()) :: Plug.Conn.t()
@@ -228,8 +259,8 @@ defmodule ArchonWeb.WorkflowBulkController do
   defp message(_id, reason), do: Errors.error_response(reason).message
 
   # Every failure below is answered here, so a `with` falls through with the sent conn.
-  defp ids(conn, method, query_types) do
-    handler = "#{@handler}#{method}(#{Enum.join([@ids_type | query_types], ",")})"
+  defp ids(conn, method, query_types, prefix \\ @handler) do
+    handler = "#{prefix}#{method}(#{Enum.join([@ids_type | query_types], ",")})"
 
     with {:ok, json, conn} <- body(conn, handler),
          {:ok, ids} <- decode(conn, cast_ids(json)) do
