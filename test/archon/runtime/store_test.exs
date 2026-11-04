@@ -41,7 +41,7 @@ defmodule Archon.Runtime.StoreTest do
     assert is_list(Memory.outbox_workflow_ids(nil, 10))
     # The shared store may hold many running workflows; start the page just before this one.
     assert Memory.due_workflow_ids(0, {0, "store-test-name"}, 1) == [{0, "store-test-named"}]
-    assert Memory.remove_workflow("store-test-named") == :ok
+    assert Memory.remove_workflow("store-test-named", false) == :ok
   end
 
   test "a commit whose queue call exits is not applied and the caller exits" do
@@ -78,5 +78,18 @@ defmodule Archon.Runtime.StoreTest do
     end
 
     assert Process.alive?(store)
+  end
+
+  # ADR 0027, decision 2: the logs of the tasks the workflow has go with its index rows.
+  test "remove_workflow deletes the logs of the workflow's tasks unless archiving", ctx do
+    for id <- ~w(wf1 wf2), do: create(ctx, workflow(id, tasks: [task(id, 1)]))
+    logs = Map.new(~w(wf1_t1 wf2_t1 other), &{&1, [:log]})
+    :sys.replace_state(ctx.server, &%{&1 | task_logs: logs})
+    stored = fn -> ctx.server |> :sys.get_state() |> Map.fetch!(:task_logs) |> Map.keys() end
+
+    assert Memory.remove_workflow(ctx.server, "wf1", true) == :ok
+    assert Enum.sort(stored.()) == ~w(other wf1_t1 wf2_t1)
+    assert Memory.remove_workflow(ctx.server, "wf2", false) == :ok
+    assert Enum.sort(stored.()) == ~w(other wf1_t1)
   end
 end

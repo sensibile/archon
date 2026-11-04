@@ -9,7 +9,8 @@
 # Modified by sensibile: reduced to the operations the MVP runtime uses (ADR 0018, decision 3);
 # workflow and task writes are one atomic `Archon.Runtime.Commit` and the store never stamps times;
 # a commit also carries queue operations, an outbox, a re-evaluation time and limits (ADR 0021);
-# the queries by name and correlation ID are ordered (ADR 0025, decision 4).
+# the queries by name and correlation ID are ordered (ADR 0025, decision 4); the search index is
+# written by the commit and removed with the workflow (ADR 0027, decision 2).
 
 defmodule Archon.Runtime.Store do
   @moduledoc """
@@ -30,6 +31,10 @@ defmodule Archon.Runtime.Store do
       name in binary order. A Postgres store whose node lost the database refuses with
       `{:error, :fenced}` (ADR 0021, decision 7). A refused commit changes nothing, queues included.
       The queue operations go to the queue of the same backend (`Archon.Runtime.Queue`).
+      The commit's index rows are upserted with it (ADR 0027, decision 2): a row replaces the
+      stored one only when its `update_time` is at least the stored one (a `nil` time on either
+      side replaces nothing, as SQL `NULL >=`), a replaced task row keeps its `start_time` and
+      `workflow_type`, and deleting tasks leaves their rows (`SqliteIndexDAO`).
     * `c:get_workflow/2` - the workflow, with its tasks ordered by `seq` when `include_tasks?`
       (upstream `getWorkflow(id, true)`), otherwise with `tasks: []`.
     * `c:get_task/1` - the task and the ID of its workflow.
@@ -44,8 +49,11 @@ defmodule Archon.Runtime.Store do
     * `c:workflow_ids_created_between/4` - IDs of the workflows of a definition name and version,
       in any status, whose `create_time` is from `start_ms` to `end_ms`, both included (upstream
       `getWorkflowsByType` and the executor's version filter).
-    * `c:remove_workflow/1` - deletes a workflow, its tasks and its outbox (queue messages are the
-      caller's).
+    * `c:remove_workflow/2` - deletes a workflow, its tasks and its outbox (queue messages are the
+      caller's). Unless `archive?`, also the index rows of the workflow and of the tasks it has
+      then, and those tasks' execution logs (upstream `removeWorkflow(id, false)`); with
+      `archive?` the index rows and logs stay (upstream's SQLite index ignores the archive
+      update; ADR 0027, decision 2).
     * `c:in_progress_count/1` - tasks with this task definition name (`Task.task_def_name/1`) in
       `IN_PROGRESS` (upstream `getInProgressTaskCount`).
     * `c:pending_outbox/1` - the workflow's outbox entries `{id, effect}` in ID order (`[]` for a
@@ -60,6 +68,12 @@ defmodule Archon.Runtime.Store do
     * `c:put_poll_data/4`, `c:get_poll_data/2` - the last poll per task type and domain (upstream
       `PollDataDAO`; a `nil` domain shares the key of the domain `"DEFAULT"`, as in
       `SqlitePollDataDAO`, and the returned value keeps the domain it was written with).
+    * `c:search_workflows/3`, `c:search_tasks/3` - a page of `workflow_index` or `task_index`
+      (upstream `IndexDAO#searchWorkflowSummary`/`#searchTaskSummary` on SQLite):
+      `{:ok, total, [{id, json_data}]}`, where `total` counts every matching row and `json_data`
+      is the stored summary JSON, in the query's order (`Archon.Search.Query`: its sort items,
+      then insertion order) from `start`, at most `size` (`Archon.Search.Query.page/3`). A query
+      the table cannot run is `{:error, error}` (`Archon.Search.Query.check/2`).
 
   The three queries by name answer in `create_time` order and then workflow ID in binary order
   (upstream leaves the order unspecified; ADR 0025, decision 4). A name or correlation ID that
@@ -72,6 +86,7 @@ defmodule Archon.Runtime.Store do
   alias Archon.Domain.{Task, Workflow}
   alias Archon.Runtime.Commit
   alias Archon.Runtime.Step.Effect
+  alias Archon.Search.Query
 
   @typedoc "Upstream `PollData`: the last poll of a task type in a domain."
   @type poll_data :: %{
@@ -83,6 +98,10 @@ defmodule Archon.Runtime.Store do
 
   @typedoc "An outbox entry's ID."
   @type outbox_id :: pos_integer()
+
+  @typedoc "A page of a search: the total of matching rows and the page's IDs and summary JSON."
+  @type search_page ::
+          {:ok, non_neg_integer(), [{String.t(), String.t()}]} | {:error, Query.error()}
 
   @typedoc "A due workflow's place in `c:due_workflow_ids/3`: its re-evaluation time (0 unset) and ID."
   @type due_key :: {wake_key :: integer(), workflow_id :: String.t()}
@@ -107,7 +126,7 @@ defmodule Archon.Runtime.Store do
               start_ms :: integer(),
               end_ms :: integer()
             ) :: [String.t()]
-  @callback remove_workflow(id :: String.t()) :: :ok | {:error, :not_found}
+  @callback remove_workflow(id :: String.t(), archive? :: boolean()) :: :ok | {:error, :not_found}
   @callback in_progress_count(task_def_name :: String.t()) :: non_neg_integer()
   @callback pending_outbox(workflow_id :: String.t()) :: [{outbox_id(), Effect.t()}]
   @callback ack_outbox(workflow_id :: String.t(), [outbox_id()]) :: :ok
@@ -126,4 +145,6 @@ defmodule Archon.Runtime.Store do
             ) :: :ok
   @callback get_poll_data(task_type :: String.t(), domain :: String.t() | nil) ::
               {:ok, poll_data()} | {:error, :not_found}
+  @callback search_workflows(Query.t(), start :: integer(), size :: integer()) :: search_page()
+  @callback search_tasks(Query.t(), start :: integer(), size :: integer()) :: search_page()
 end

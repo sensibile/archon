@@ -122,13 +122,13 @@ defmodule Archon.Runtime.Step.Recover do
   end
 
   # forceSetLastTaskAsNotExecuted: a running workflow with no task left to finish is decided
-  # again from its last task.
+  # again from its last task, saved through the ExecutionDAO only (not indexed).
   defp unstick(%State{halted?: true} = state), do: state
 
   defp unstick(%State{wf: %Workflow{status: :running, tasks: [_ | _] = tasks}} = state) do
     if Enum.all?(tasks, &Task.terminal?(&1.status)) do
       last = List.last(tasks)
-      state |> State.save_task(%{last | executed: false}) |> Decide.settle()
+      state |> State.save_task(%{last | executed: false}, index: false) |> Decide.settle()
     else
       state
     end

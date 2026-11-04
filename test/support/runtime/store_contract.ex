@@ -10,7 +10,7 @@
 # implementation (ADR 0018, decision 10); writes go through `Archon.Runtime.Commit`, and cases for
 # atomicity, task order and internal fields were added, and the queue operations, outbox,
 # re-evaluation times and limits of a commit (ADR 0021, decisions 3 to 6), and the queries by
-# name and correlation ID (ADR 0025, decision 4).
+# name and correlation ID (ADR 0025, decision 4), and the search index (ADR 0027, decision 2).
 
 defmodule Archon.Runtime.StoreContract do
   @moduledoc """
@@ -52,6 +52,9 @@ defmodule Archon.Runtime.StoreContract do
       unquote(outbox_cases())
       unquote(wake_cases())
       unquote(limit_cases())
+      unquote(index_helpers())
+      unquote(index_cases())
+      unquote(index_search_cases())
     end
   end
 
@@ -354,14 +357,14 @@ defmodule Archon.Runtime.StoreContract do
           create(ctx, workflow("wf1", tasks: [task("wf1", 1), task("wf1", 2)]))
           create(ctx, workflow("wf2", tasks: [task("wf2", 1)]))
 
-          assert s(ctx, :remove_workflow, ["wf1"]) == :ok
+          assert s(ctx, :remove_workflow, ["wf1", false]) == :ok
           assert s(ctx, :get_workflow, ["wf1", true]) == {:error, :not_found}
           assert s(ctx, :get_task, ["wf1_t1"]) == {:error, :not_found}
           assert s(ctx, :get_task, ["wf1_t2"]) == {:error, :not_found}
           assert s(ctx, :running_workflow_ids, []) == ["wf2"]
           assert {:ok, _task, "wf2"} = s(ctx, :get_task, ["wf2_t1"])
 
-          assert s(ctx, :remove_workflow, ["wf1"]) == {:error, :not_found}
+          assert s(ctx, :remove_workflow, ["wf1", false]) == {:error, :not_found}
           assert create(ctx, workflow("wf1")) == :ok
         end
 
@@ -615,7 +618,7 @@ defmodule Archon.Runtime.StoreContract do
           assert s(ctx, :pending_workflow_ids, ["flow2"]) == ["u1"]
           assert s(ctx, :workflow_ids_created_between, ["flow2", 4, 50, 50]) == ["u1"]
 
-          assert s(ctx, :remove_workflow, ["u1"]) == :ok
+          assert s(ctx, :remove_workflow, ["u1", false]) == :ok
           assert s(ctx, :pending_workflow_ids, ["flow2"]) == []
         end
 
@@ -823,7 +826,7 @@ defmodule Archon.Runtime.StoreContract do
         test "remove_workflow deletes its outbox", ctx do
           create(ctx, workflow("wf1"))
           commit(ctx, "wf1", outbox: [{:retry_sub_workflow, "a"}])
-          assert s(ctx, :remove_workflow, ["wf1"]) == :ok
+          assert s(ctx, :remove_workflow, ["wf1", false]) == :ok
           assert s(ctx, :pending_outbox, ["wf1"]) == []
           assert s(ctx, :outbox_workflow_ids, [nil, 10]) == []
 
@@ -902,7 +905,7 @@ defmodule Archon.Runtime.StoreContract do
           assert due(ctx, 30, {0, "a"}, 1) == [{0, "d"}]
           assert due(ctx, 30, nil, 0) == []
 
-          s(ctx, :remove_workflow, ["c"])
+          s(ctx, :remove_workflow, ["c", false])
           assert due(ctx, 15) == [{0, "d"}]
         end
       end
@@ -1008,6 +1011,245 @@ defmodule Archon.Runtime.StoreContract do
 
           assert commit(ctx, "wf1", upsert_tasks: [extra], limits: %{"worker" => 1}) ==
                    {:error, {:limit, "worker"}}
+        end
+      end
+    end
+  end
+
+  defp index_helpers do
+    quote do
+      alias Archon.Runtime.SearchIndex
+      alias Archon.Search.Query
+
+      defp wrow(%Workflow{} = workflow, overrides \\ []),
+        do: workflow |> SearchIndex.workflow_row() |> Map.merge(Map.new(overrides))
+
+      defp trow(%Task{} = task, overrides \\ []),
+        do: task |> SearchIndex.task_row(0) |> Map.merge(Map.new(overrides))
+
+      defp search(ctx, fun, query, sort \\ nil, start \\ 0, size \\ 100) do
+        {:ok, parsed} = Query.parse(query, "*", Query.sort_list(sort))
+        s(ctx, fun, [parsed, start, size])
+      end
+
+      defp hits({:ok, _total, page}), do: Enum.map(page, &elem(&1, 0))
+    end
+  end
+
+  defp index_cases do
+    quote do
+      describe "Store contract: search index writes" do
+        # SqliteIndexDAO#indexWorkflow/#indexTask in the commit (ADR 0027, decision 2).
+        test "a commit's index rows are stored with it and searched", ctx do
+          t1 = task("wf1", 1)
+          wf = workflow("wf1", tasks: [t1])
+
+          assert commit(ctx, "wf1", create: wf, index_workflow: wrow(wf), index_tasks: [trow(t1)]) ==
+                   :ok
+
+          assert search(ctx, :search_workflows, "") ==
+                   {:ok, 1, [{"wf1", wrow(wf).json_data}]}
+
+          assert search(ctx, :search_tasks, "") == {:ok, 1, [{"wf1_t1", trow(t1).json_data}]}
+          assert hits(search(ctx, :search_workflows, "status=RUNNING")) == ["wf1"]
+
+          assert hits(search(ctx, :search_tasks, "taskType=task1 AND status=SCHEDULED")) == [
+                   "wf1_t1"
+                 ]
+
+          assert search(ctx, :search_workflows, "status=COMPLETED") == {:ok, 0, []}
+        end
+
+        test "a refused commit writes no index rows", ctx do
+          create(ctx, workflow("wf1"))
+          t1 = task("wf1", 1, status: :in_progress, task_def_name: "lim")
+
+          assert commit(ctx, "wf1",
+                   upsert_tasks: [t1],
+                   limits: %{"lim" => 1},
+                   index_workflow: wrow(workflow("wf1")),
+                   index_tasks: [trow(t1)]
+                 ) == :ok
+
+          t2 = task("wf1", 2, status: :in_progress, task_def_name: "lim")
+
+          assert commit(ctx, "wf1",
+                   upsert_tasks: [t2],
+                   limits: %{"lim" => 1},
+                   index_tasks: [trow(t2)]
+                 ) == {:error, {:limit, "lim"}}
+
+          assert commit(ctx, "absent", index_workflow: wrow(workflow("absent"))) ==
+                   {:error, :not_found}
+
+          assert hits(search(ctx, :search_tasks, "")) == ["wf1_t1"]
+          assert hits(search(ctx, :search_workflows, "")) == ["wf1"]
+        end
+
+        # SqliteIndexDAO: ... WHERE excluded.update_time >= <table>.update_time.
+        test "a row replaces the stored one only when its update time is not older", ctx do
+          create(ctx, workflow("wf1"))
+          row = wrow(workflow("wf1"), update_time: 100, status: "RUNNING", json_data: "a")
+          commit(ctx, "wf1", index_workflow: row)
+
+          for {time, status, json, stored} <- [
+                {99, "PAUSED", "b", "a"},
+                {100, "PAUSED", "c", "c"},
+                {nil, "FAILED", "d", "c"},
+                {101, "COMPLETED", "e", "e"}
+              ] do
+            commit(ctx, "wf1",
+              index_workflow: %{row | update_time: time, status: status, json_data: json}
+            )
+
+            assert search(ctx, :search_workflows, "") == {:ok, 1, [{"wf1", stored}]}
+          end
+
+          assert hits(search(ctx, :search_workflows, "status=COMPLETED")) == ["wf1"]
+
+          # A stored row without a time is never replaced.
+          create(ctx, workflow("wf2"))
+
+          commit(ctx, "wf2",
+            index_workflow: wrow(workflow("wf2"), update_time: nil, json_data: "x")
+          )
+
+          commit(ctx, "wf2",
+            index_workflow: wrow(workflow("wf2"), update_time: 1, json_data: "y")
+          )
+
+          assert search(ctx, :search_workflows, "", "workflowId:ASC") ==
+                   {:ok, 2, [{"wf1", "e"}, {"wf2", "x"}]}
+
+          t1 = task("wf1", 1)
+
+          commit(ctx, "wf1",
+            upsert_tasks: [t1],
+            index_tasks: [trow(t1, update_time: 10, json_data: "t")]
+          )
+
+          commit(ctx, "wf1", index_tasks: [trow(t1, update_time: 9, json_data: "old")])
+          assert search(ctx, :search_tasks, "") == {:ok, 1, [{"wf1_t1", "t"}]}
+        end
+
+        test "a replaced task row keeps its start time and workflow type", ctx do
+          create(ctx, workflow("wf1"))
+          t1 = task("wf1", 1)
+
+          first =
+            trow(t1, start_time: 10, workflow_type: "a", update_time: 5, status: "SCHEDULED")
+
+          commit(ctx, "wf1", upsert_tasks: [t1], index_tasks: [first])
+
+          second = %{
+            first
+            | start_time: 20,
+              workflow_type: "b",
+              update_time: 6,
+              status: "COMPLETED",
+              end_time: 30,
+              task_type: "other",
+              json_data: "new"
+          }
+
+          commit(ctx, "wf1", index_tasks: [second])
+
+          q =
+            "startTime=10 AND workflowType=a AND status=COMPLETED AND endTime=30 AND taskType=other"
+
+          assert search(ctx, :search_tasks, q) == {:ok, 1, [{"wf1_t1", "new"}]}
+          assert search(ctx, :search_tasks, "startTime=20") == {:ok, 0, []}
+        end
+      end
+    end
+  end
+
+  defp index_search_cases do
+    quote do
+      describe "Store contract: search index reads and removal" do
+        test "rows come in insertion order unless sorted, with the total of every match", ctx do
+          for id <- ~w(c a b) do
+            wf = workflow(id, correlation_id: "k-" <> id)
+            commit(ctx, id, create: wf, index_workflow: wrow(wf))
+          end
+
+          # A replaced row keeps its place.
+          commit(ctx, "c",
+            index_workflow: wrow(workflow("c"), update_time: 99, correlation_id: "z")
+          )
+
+          assert hits(search(ctx, :search_workflows, "")) == ~w(c a b)
+          assert hits(search(ctx, :search_workflows, "", "correlationId:DESC")) == ~w(c b a)
+
+          assert {:ok, 3, [{"b", _json}]} =
+                   search(ctx, :search_workflows, "", "workflowId:ASC", 1, 1)
+
+          assert search(ctx, :search_workflows, "", nil, 5, 10) == {:ok, 3, []}
+          assert {:ok, 3, [_, _, _]} = search(ctx, :search_workflows, "", nil, -1, -1)
+
+          assert search(ctx, :search_workflows, "taskId=x") ==
+                   {:error, {:unknown_column, "task_id"}}
+
+          assert search(ctx, :search_tasks, "correlationId=x") ==
+                   {:error, {:unknown_column, "correlation_id"}}
+        end
+
+        test "a commit with two rows of one task raises", ctx do
+          create(ctx, workflow("wf1"))
+          t1 = task("wf1", 1)
+
+          assert_raise ArgumentError, fn ->
+            commit(ctx, "wf1", index_tasks: [trow(t1), trow(t1, update_time: 1)])
+          end
+        end
+
+        test "deleting tasks leaves their rows", ctx do
+          t1 = task("wf1", 1)
+          wf = workflow("wf1", tasks: [t1])
+          commit(ctx, "wf1", create: wf, index_tasks: [trow(t1)])
+          assert commit(ctx, "wf1", delete_task_ids: ["wf1_t1"]) == :ok
+          assert hits(search(ctx, :search_tasks, "")) == ["wf1_t1"]
+        end
+
+        test "a row whose text a column cannot hold is stored without it", ctx do
+          wf =
+            workflow("wf1",
+              correlation_id: "c\u0000",
+              workflow_definition: %WorkflowDef{name: "fl\u0000ow", version: 1}
+            )
+
+          row = wrow(wf)
+          assert row.correlation_id == nil and row.workflow_type == nil
+          assert commit(ctx, "wf1", create: wf, index_workflow: row) == :ok
+          assert hits(search(ctx, :search_workflows, "status=RUNNING")) == ["wf1"]
+        end
+
+        # ExecutionDAOFacade#removeWorkflow: archiving leaves the index, deleting removes the
+        # rows of the workflow and of the tasks it has then (ADR 0027, decision 2).
+        test "remove_workflow keeps the index when archiving and deletes it otherwise", ctx do
+          for id <- ~w(wf1 wf2) do
+            tasks = [task(id, 1), task(id, 2)]
+            wf = workflow(id, tasks: tasks)
+
+            commit(ctx, id,
+              create: wf,
+              index_workflow: wrow(wf),
+              index_tasks: Enum.map(tasks, &trow/1)
+            )
+          end
+
+          # A task deleted before (keepLastN) keeps its row.
+          commit(ctx, "wf2", delete_task_ids: ["wf2_t1"])
+
+          assert s(ctx, :remove_workflow, ["wf1", true]) == :ok
+          assert hits(search(ctx, :search_workflows, "", "workflowId:ASC")) == ~w(wf1 wf2)
+          assert length(hits(search(ctx, :search_tasks, ""))) == 4
+
+          assert s(ctx, :remove_workflow, ["wf2", false]) == :ok
+          assert hits(search(ctx, :search_workflows, "")) == ["wf1"]
+          assert hits(search(ctx, :search_tasks, "")) == ~w(wf1_t1 wf1_t2 wf2_t1)
+
+          assert s(ctx, :remove_workflow, ["wf2", false]) == {:error, :not_found}
         end
       end
     end

@@ -19,6 +19,9 @@ defmodule Archon.Runtime.Step.State do
   #   * `stored` - the workflow as the store holds it once the commit is applied: what upstream
   #     wrote through `ExecutionDAOFacade`.
   #   * `upserts`/`order`, `deletes`, `workflow_dirty?`, `created?` - the commit.
+  #   * `index`/`index_order` - the tasks upstream indexes in this step (`updateTask`), as they
+  #     were saved then, by ID, and the IDs in the order they were first indexed (ADR 0027,
+  #     decision 2).
   #   * `pre`/`post` - effects, newest first.
   #   * `iterations` - decide loop iterations so far (ADR 0018, decision 4); `halted?` once the
   #     limit stopped the loop.
@@ -34,7 +37,7 @@ defmodule Archon.Runtime.Step.State do
   #     definition's map, which a `SET_VARIABLE` then changes in both; ADR 0026, decision 3).
 
   alias Archon.Domain.{Task, TaskDef, Workflow}
-  alias Archon.Runtime.Commit
+  alias Archon.Runtime.{Commit, SearchIndex}
   alias Archon.Runtime.Step.{Effect, Env}
 
   defstruct [
@@ -47,6 +50,8 @@ defmodule Archon.Runtime.Step.State do
     created?: false,
     upserts: %{},
     order: [],
+    index: %{},
+    index_order: [],
     deletes: [],
     workflow_dirty?: false,
     pre: [],
@@ -70,6 +75,8 @@ defmodule Archon.Runtime.Step.State do
           created?: boolean(),
           upserts: %{optional(String.t() | nil) => Task.t() | map()},
           order: [String.t() | nil],
+          index: %{optional(String.t() | nil) => Task.t()},
+          index_order: [String.t() | nil],
           deletes: [String.t() | nil],
           workflow_dirty?: boolean(),
           pre: [Effect.t()],
@@ -116,17 +123,34 @@ defmodule Archon.Runtime.Step.State do
 
   @doc """
   `ExecutionDAOFacade#updateTask`: `updateTime` becomes now unless the task is terminal and
-  already has one, and a terminal task without an `endTime` gets now.
+  already has one, and a terminal task without an `endTime` gets now. The task is indexed as
+  saved, unless `index: false`: upstream's `extendLease` and the sweeper's
+  `forceSetLastTaskAsNotExecuted` write to the `ExecutionDAO` only (ADR 0027, decision 2).
   """
-  @spec save_task(t(), Task.t()) :: t()
-  def save_task(%__MODULE__{now: now} = state, %Task{status: status} = task) do
+  @spec save_task(t(), Task.t(), keyword()) :: t()
+  def save_task(%__MODULE__{now: now} = state, %Task{status: status} = task, opts \\ []) do
     terminal? = Task.terminal?(status)
 
     task =
       if not terminal? or task.update_time == 0, do: %{task | update_time: now}, else: task
 
     task = if terminal? and task.end_time == 0, do: %{task | end_time: now}, else: task
-    write(state, task)
+    state = write(state, task)
+
+    cond do
+      not Keyword.get(opts, :index, true) ->
+        state
+
+      Map.has_key?(state.index, task.task_id) ->
+        %{state | index: Map.put(state.index, task.task_id, task)}
+
+      true ->
+        %{
+          state
+          | index: Map.put(state.index, task.task_id, task),
+            index_order: [task.task_id | state.index_order]
+        }
+    end
   end
 
   @spec save_tasks(t(), [Task.t()]) :: t()
@@ -239,8 +263,14 @@ defmodule Archon.Runtime.Step.State do
 
   @doc "The commit the step collected."
   @spec commit(t()) :: Commit.t()
-  def commit(%__MODULE__{created?: true, stored: stored} = state),
-    do: %Commit{create: stored, limits: held_limits(state.limits, stored.tasks)}
+  def commit(%__MODULE__{created?: true, stored: stored} = state) do
+    %Commit{
+      create: stored,
+      limits: held_limits(state.limits, stored.tasks),
+      index_workflow: SearchIndex.workflow_row(stored),
+      index_tasks: index_rows(state)
+    }
+  end
 
   def commit(%__MODULE__{} = state) do
     upserts =
@@ -253,8 +283,18 @@ defmodule Archon.Runtime.Step.State do
       workflow: if(state.workflow_dirty?, do: state.stored),
       upsert_tasks: upserts,
       delete_task_ids: state.deletes,
-      limits: held_limits(state.limits, upserts)
+      limits: held_limits(state.limits, upserts),
+      index_workflow: if(state.workflow_dirty?, do: SearchIndex.workflow_row(state.stored)),
+      index_tasks: index_rows(state)
     }
+  end
+
+  # In the order upstream's updateTask first indexed them; a task deleted afterwards stays indexed,
+  # as upstream's removeTask leaves the index.
+  defp index_rows(%__MODULE__{index: index, now: now} = state) do
+    state.index_order
+    |> Enum.reverse()
+    |> Enum.map(&SearchIndex.task_row(Map.fetch!(index, &1), now))
   end
 
   # The limits of the definitions a saved task still holds a slot of: a task the step started

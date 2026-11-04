@@ -110,6 +110,44 @@ archon에 이미 있는 것(`541865c` 기준):
   작업이라 노드 펜스를 거치지 않는다.
 - **비용.** 색인은 요약 JSON(입력·출력 포함)을 한 번 더 저장하므로 쓰기량이 늘어난다. upstream 기본 서버와 같은 비용이며 받아들인다.
   비동기 색인 설정(`asyncIndexingEnabled`)은 옮기지 않는다.
+- **조각 8c에서 정한 것(2026-11-04).**
+  - 커밋에는 요약 struct가 아니라 색인 행이 실린다. `Archon.Runtime.SearchIndex.workflow_row/1`·`task_row/2`가 열 값과 요약 JSON
+    (`encode/1`)을 함께 만들고, 커밋·백필·메모리 저장소가 이 함수를 같이 쓴다. 열 값의 규칙은 다음과 같다.
+    - 시각은 원본의 epoch 밀리초 정수다. 워크플로우 `start_time`은 `create_time`이다.
+    - 열에 담을 수 없는 글자와 `bigint` 밖 시각은 `nil`이다. 부모가 없으면 `parent_workflow_id`는 `""`이다.
+    - 상태는 upstream 상수 이름(`RUNNING`)이다.
+  - 색인 자리는 `Step.State`에서 정한다.
+    - `save_task`는 그때 저장한 버전을 색인한다. 같은 Step에서 다시 저장하면 마지막 버전이고, 요약 시각은 Step의 `now`다.
+    - 한 커밋의 태스크 행 순서는 upstream `updateTask`처럼 처음 색인한 순서다(태스크를 만든 순서가 아니다).
+    - `create_tasks`는 색인하지 않는다.
+    - `save_task(..., index: false)`는 두 곳뿐이다. 하나는 extendLease이고, 다른 하나는 sweeper의 `forceSetLastTaskAsNotExecuted`다
+      (upstream이 `executionDAO.updateWorkflow`만 부른다).
+    - 워크플로우 행은 생성 커밋과 `save_workflow`가 있었던 커밋에 하나 있다. 내용은 Step 끝에 저장된 워크플로우다.
+    - 같은 Step에서 색인한 뒤 `keepLastN`으로 지운 태스크도 행을 남긴다(upstream `removeTask`는 색인을 지우지 않는다).
+  - 표의 세부는 다음과 같다.
+    - 글자 열은 `COLLATE "C"`다.
+    - 태스크 로그 표의 `log_id`는 `bigserial`, `created_time`은 `bigint`다.
+    - 완료 표시 표는 `search_index_backfill(completed_at bigint)`다.
+    - upstream의 `task_index(task_id)` 인덱스는 기본 키와 겹치므로 두지 않는다.
+  - `update_time` 가드는 SQL처럼 어느 쪽이든 `NULL`이면 바꾸지 않는다. 메모리 저장소도 같다. Postgres는 충돌한 삽입도 `seq`를
+    쓰지만, 정렬에는 새 행 사이의 순서만 쓰이므로 결과 순서는 같다. 같은 커밋의 새 태스크 행은 목록 순서로 `seq`를 받는다.
+  - `archiveWorkflow=false`는 워크플로우 행을 `FOR UPDATE`로 잠근 뒤, 같은 트랜잭션에서 다음 순서로 지운다: 그때 태스크의 로그와
+    `task_index` 행 → `workflow_index` 행 → 워크플로우. 워크플로우가 없으면 색인을 건드리지 않고 `{:error, :not_found}`다(upstream도
+    먼저 읽다가 실패한다). 기동 실패 정리(`remove_started`)는 `remove_workflow(id, false)`다.
+  - 저장소 검색 콜백(8e가 쓴다)은 `search_workflows/3`·`search_tasks/3`(`Archon.Search.Query.t`, `start`, `size`)이다. 결과는
+    `{:ok, total, [{id, json_data}]}` 또는 `{:error, Query.error}`다.
+    - Postgres는 `Query.sql/3`로 페이지와 개수를 upstream처럼 두 문장으로 읽는다.
+    - 메모리는 행을 복사해 호출한 프로세스에서 `Query.run/5`를 돌린다.
+  - 백필은 다음과 같이 돈다.
+    - 진입점: `migrate/0`·`migrate/1`이 스키마마다 마이그레이션 뒤 `backfill_search_index/2`를 부른다. 시험용 `migrate/2`는
+      마이그레이션만 한다. `backfill_search_index/0`은 `mix ecto.migrate`처럼 다른 방법으로 마이그레이션한 런타임 스키마용이다.
+    - 읽기: 워크플로우 ID를 `create_time NULLS LAST, workflow_id` 순으로 한 번 읽고 500개씩 나눈다. 묶음마다 워크플로우와 태스크
+      (`seq`, `task_id` 순)를 읽고, 그사이 지워진 워크플로우는 건너뛴다.
+    - 쓰기: ordinality 순서로 `ON CONFLICT DO NOTHING` 삽입하고, 태스크 행은 1,000개씩 나눠 넣는다. `queueWaitTime`은 백필을
+      실행한 시각으로 낸다.
+    - 동시 실행: 한 스키마의 백필은 advisory lock으로 하나씩 돈다. 백필의 문장에는 시간 제한을 두지 않는다(묶음 크기에 상한이 없다).
+    - 실패: 행을 디코드하지 못하면 예외를 낸다. 다시 실행하면 처음부터 돌고, 이미 쓴 행은 남는다.
+    - 시험 스키마와 옛 버전 노드: [운영 문서](../operations.md)에 적었다.
 
 ### 3. 요약 모델
 
