@@ -450,6 +450,24 @@ defmodule Archon.Runtime.Step.HttpTest do
       end
     end
 
+    # Jackson 2.18.8 readTree, run on these texts: an escaped quote does not end the string, so
+    # the brackets after it are text and the object parses; an escaped backslash does not escape
+    # the quote after it, so the brackets past that quote nest deeper than 1000.
+    test "an escape in a string decides where the string ends for the nesting limit" do
+      escaped_quote = ~s({"s":"\\") <> String.duplicate("[", 2000) <> ~s("})
+      {task, _workflow} = complete(ok(200, escaped_quote))
+
+      assert task.output_data["response"]["body"] == %{
+               "s" => ~s(") <> String.duplicate("[", 2000)
+             }
+
+      escaped_backslash =
+        ~s(["\\\\",) <> String.duplicate("[", 1001) <> String.duplicate("]", 1001) <> "]"
+
+      {task, _workflow} = complete(ok(200, escaped_backslash))
+      assert task.output_data["response"]["body"] == escaped_backslash
+    end
+
     test "a text body without a charset is read as ISO-8859-1, JSON as UTF-8" do
       {task, _workflow} = complete(ok(200, <<0xE9>>, [{"content-type", "text/plain"}]))
       assert task.output_data["response"]["body"] == "é"
