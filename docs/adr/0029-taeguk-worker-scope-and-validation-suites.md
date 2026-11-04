@@ -54,7 +54,8 @@ ADR 0028은 태극 `7d0a7a8`을 재설치하면서 두 도구를 설치만 하�
    실행한다. 목록은 현재 디렉터리 기준으로 열리므로 시험 대상 worktree의 절대 경로로 준다.
    - 스위트: `mix deps.get`, `mix deps.unlock --check-unused`, AGENTS.md 검증 여섯 가지(`mix format --check-formatted`,
      `mix compile --warnings-as-errors`, `mix test`, `mix credo --strict`, `mix dialyzer`, `mix deps.audit`),
-     `ARCHON_BACKEND=postgres mix test`, `mix hex.audit`, skill-creator 검증기. 모두 CI와 같이 `MIX_ENV=test`다.
+     `ARCHON_BACKEND=postgres mix test`, `mix hex.audit`, skill-creator 검증기. 모두 CI와 같이 `MIX_ENV=test`다. 도구는 실행 환경을 물려주므로 첫 `mix test`는
+     `ARCHON_BACKEND=memory`로 고정해, 바깥에 `postgres`가 설정돼 있어도 기본 백엔드 시험을 건너뛰지 않게 한다.
    - 두 `mix test`는 `scripts/with_test_postgres.sh`로 감싼다. 스위트마다 CI와 같은 이미지의 일회용 컨테이너를
      `127.0.0.1` 임의 포트로 띄우고, 비밀번호는 도구의 가려지는 `{secret}`을 쓰고, 끝나면 지운다. 시간 초과로
      SIGKILL되면 지우지 못하므로 실행 끝에 이 실행의 `archon-validation-health-*` 컨테이너가 남았는지 확인해 지운다.
