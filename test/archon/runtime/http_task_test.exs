@@ -184,6 +184,18 @@ defmodule Archon.Runtime.HttpTaskTest do
       conn |> put_resp_header("location", "/loop") |> send_resp(302, "")
     end
 
+    # `left` more redirects, each to a location not visited yet, then the JSON answer.
+    defp answer(conn, ["chain", step, left]) do
+      case String.to_integer(left) do
+        0 ->
+          answer(conn, ["json"])
+
+        left ->
+          location = "/chain/#{String.to_integer(step) + 1}/#{left - 1}"
+          conn |> put_resp_header("location", location) |> send_resp(302, "")
+      end
+    end
+
     defp answer(conn, _other) do
       send_resp(conn, 404, "")
     end
@@ -432,6 +444,17 @@ defmodule Archon.Runtime.HttpTaskTest do
                Client.run(request(url <> "/loop"), @limits)
 
       assert location == url <> "/loop'"
+    end
+
+    # RequestConfig's default maxRedirects and RedirectExec (ADR 0026, decision 7: "50번까지"):
+    # Apache HttpClient 5.5.2 run against such a chain follows 50 redirects to the answer and
+    # fails the 51st with this message.
+    test "follows 50 redirects and stops at the 51st", %{url: url} do
+      assert {:ok, %{status: 200, body: ~s({"a":1})}} =
+               Client.run(request(url <> "/chain/0/50"), @limits)
+
+      assert {:error, {:io, "Maximum redirects (50) exceeded"}} =
+               Client.run(request(url <> "/chain/0/51"), @limits)
     end
 
     test "a URI that is not http or https is refused" do
