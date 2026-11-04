@@ -139,6 +139,8 @@ archon에 이미 있는 것(`541865c` 기준):
   - 날짜는 `SimpleDateFormat`처럼 1582-10-15 이전은 율리우스력, 기원전은 기년(year of era), 연도는 네 자리 이상이다.
   - 워크플로우 정의가 없으면 upstream은 NPE를 내지만 archon은 `workflowType`을 빼고 `version` 0으로 만든다(Step이 만드는 워크플로우는
     늘 정의가 있다).
+  - `taskToDomain` 객체도 키 정렬 순으로 쓴다(upstream `HashMap` 순서는 재현하지 않음, 위 `input`·`output` 키 순서와 같은 의도적 차이).
+    `failedTaskNames`가 `null`이면 upstream처럼 필드를 뺀다.
 
 ### 4. 질의 파서와 실행(BOSS 결정: freeText는 기본 SQLite 서버와 같게)
 

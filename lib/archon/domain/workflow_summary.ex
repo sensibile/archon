@@ -23,9 +23,9 @@ defmodule Archon.Domain.WorkflowSummary do
 
   Differences from upstream, all in ADR 0027:
 
-    * `input`/`output` are `Map#toString` with sorted keys, and `failedTaskNames` and the
-      comma-joined `failedReferenceTaskNames` are sorted; upstream keeps the input order and the
-      `HashSet` order.
+    * `input`/`output` are `Map#toString` with sorted keys, `taskToDomain` is written with sorted
+      keys, and `failedTaskNames` and the comma-joined `failedReferenceTaskNames` are sorted;
+      upstream keeps the input order and the `HashMap`/`HashSet` order.
     * Upstream throws without a workflow definition; here `workflowType` is left out and
       `version` is 0.
   """
@@ -74,9 +74,9 @@ defmodule Archon.Domain.WorkflowSummary do
           external_input_payload_storage_path: String.t() | nil,
           external_output_payload_storage_path: String.t() | nil,
           priority: integer(),
-          failed_task_names: [String.t() | nil],
+          failed_task_names: [String.t() | nil] | nil,
           created_by: String.t() | nil,
-          task_to_domain: %{optional(String.t()) => String.t() | nil},
+          task_to_domain: %{optional(String.t()) => String.t() | nil} | nil,
           idempotency_key: String.t() | nil,
           parent_workflow_id: String.t(),
           classifier: String.t() | nil
@@ -105,7 +105,7 @@ defmodule Archon.Domain.WorkflowSummary do
       execution_time: if(ended?, do: workflow.end_time - workflow.create_time, else: 0),
       event: workflow.event,
       failed_reference_task_names: joined(workflow.failed_reference_task_names),
-      failed_task_names: Enum.sort(workflow.failed_task_names || []),
+      failed_task_names: workflow.failed_task_names && Enum.sort(workflow.failed_task_names),
       external_input_payload_storage_path: present(workflow.external_input_payload_storage_path),
       external_output_payload_storage_path:
         present(workflow.external_output_payload_storage_path),
@@ -159,7 +159,7 @@ defmodule Archon.Domain.WorkflowSummary do
       {"priority", s.priority},
       {"failedTaskNames", s.failed_task_names},
       {"createdBy", s.created_by},
-      {"taskToDomain", s.task_to_domain},
+      {"taskToDomain", s.task_to_domain && sorted_object(s.task_to_domain)},
       {"idempotencyKey", s.idempotency_key},
       {"parentWorkflowId", s.parent_workflow_id},
       {"classifier", s.classifier},
@@ -176,6 +176,8 @@ defmodule Archon.Domain.WorkflowSummary do
       do: "agent",
       else: "workflow"
   end
+
+  defp sorted_object(map), do: map |> Enum.sort() |> Jason.OrderedObject.new()
 
   defp name_and_version(%WorkflowDef{name: name, version: version}), do: {name, version}
   defp name_and_version(nil), do: {nil, 0}

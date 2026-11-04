@@ -102,6 +102,23 @@ defmodule Archon.Domain.SummaryTest do
       assert summary.failed_task_names == [nil, "a", "b"]
     end
 
+    test "leaves out null failed task names, as NON_NULL does" do
+      json =
+        %Workflow{failed_task_names: nil} |> WorkflowSummary.new() |> WorkflowSummary.encode()
+
+      refute json =~ "failedTaskNames"
+    end
+
+    test "writes taskToDomain with sorted keys, however many (ADR 0027)" do
+      domains = Map.new(1..40, &{"t#{&1}", "d"})
+
+      json =
+        %Workflow{task_to_domain: domains} |> WorkflowSummary.new() |> WorkflowSummary.encode()
+
+      keys = Regex.scan(~r/"(t\d+)":"d"/, json, capture: :all_but_first) |> List.flatten()
+      assert keys == Enum.sort(Map.keys(domains))
+    end
+
     test "classifier_of/1 follows WorkflowClassifier.classifierOf" do
       for {metadata, classifier} <- [
             {nil, "workflow"},
