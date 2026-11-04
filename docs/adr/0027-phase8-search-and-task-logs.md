@@ -314,7 +314,10 @@ archon에 이미 있는 것(`541865c` 기준):
     쓴다(upstream에는 다시 전달이 없다). 로그는 워크플로우 상태가 아니고 드문 장애 경로라 받아들인다.
   - **글자.** 두 저장소가 같은 값을 갖도록 로그 글은 잘못된 UTF-8과 NUL을 U+FFFD로 바꿔 저장한다(Java UTF-8 디코딩은 앞의 것을 같게
     바꾼다. PostgreSQL text는 둘 다 담지 못함). 저장할 수 없는 태스크 ID(NUL, 잘못된 UTF-8)의 POST는 200이지만 아무 데도 쓰지 않는다
-    (어느 GET도 그 ID로는 찾을 수 없다). POST body는 BOM을 떼지 않는다(`StringHttpMessageConverter`).
+    (어느 GET도 그 ID로는 찾을 수 없다). POST body는 `StringHttpMessageConverter`처럼 BOM을 떼지 않고 `Content-Type`의 `charset`으로
+    읽는다(Codex 교차 리뷰 r1): `ISO-8859-1`, `US-ASCII`(127 넘는 바이트는 U+FFFD), `UTF-16`(BOM, 없으면 big-endian)·`UTF-16BE`·
+    `UTF-16LE`. 다른 charset과 charset 없음은 UTF-8이다(Spring Boot 기본값. upstream은 JVM이 아는 다른 charset도 그 charset으로 읽음,
+    의도적 차이).
   - **저장소 API.** `Store.add_task_logs/1`(`:ok | {:error, :fenced}`, Postgres는 펜스 트랜잭션 하나), `Store.task_logs/1`
     (`created_time`, 넣은 순서), `Commit.task_logs`(색인 행 뒤에 같은 트랜잭션), `Commit.check_logs!/1`(두 저장소가 쓰기 전에 같은
     검사). POST가 펜스에 걸리면 `{:error, {:commit, :fenced}}`로 커밋의 펜스와 같은 재시도 가능 500이다.

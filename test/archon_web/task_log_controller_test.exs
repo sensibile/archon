@@ -57,6 +57,26 @@ defmodule ArchonWeb.TaskLogControllerTest do
     assert is_integer(time) and abs(time - Runtime.now()) < 60_000
   end
 
+  # StringHttpMessageConverter decodes with the Content-Type's charset, UTF-8 without one.
+  test "the body is decoded with its declared charset" do
+    id = task_id()
+
+    for {body, type} <- [
+          {<<0xE9>>, "text/plain; charset=ISO-8859-1"},
+          {<<"a", 0xE9>>, ~s(text/plain;Charset="us-ascii")},
+          {<<0x00, 0xE9>>, "text/plain;charset=UTF-16BE"},
+          {<<0xFF, 0xFE, 0xE9, 0x00>>, "text/plain;charset=utf-16"},
+          {<<0xE9, 0x00, 0x00, 0xD8>>, "text/plain;charset=UTF-16LE"},
+          {"é", "text/plain;charset=windows-1252"},
+          {"é", "application/json"}
+        ] do
+      assert response(post_log(id, body, type), 200) == ""
+    end
+
+    assert Enum.map(json_response(logs(id), 200), & &1["log"]) ==
+             ["é", "a\uFFFD", "é", "é", "é\uFFFD", "é", "é"]
+  end
+
   test "an empty body is the missing body and writes nothing" do
     id = task_id()
 

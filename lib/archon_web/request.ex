@@ -79,17 +79,63 @@ defmodule ArchonWeb.Request do
   @doc """
   Reads the body as text, as Spring's `StringHttpMessageConverter` gives a `@RequestBody String`:
   whatever its `Content-Type` (a JSON string keeps its quotes), with no byte order mark skipped
-  (ADR 0027, decision 6). Invalid UTF-8 is left to the caller. An empty body is the missing body
-  of `read_json/2`, and a body over 8 MB is a 413.
+  (ADR 0027, decision 6). The bytes are decoded with the `charset` of the `Content-Type`:
+  `ISO-8859-1`, `US-ASCII` (a byte over 127 is U+FFFD, as Java decodes it) and `UTF-16`,
+  `UTF-16BE`, `UTF-16LE`; any other charset, or none, is UTF-8 (Spring Boot's default). Invalid
+  UTF-8 is left to the caller. An empty body is the missing body of `read_json/2`, and a body
+  over 8 MB is a 413.
   """
   @spec read_text(Plug.Conn.t(), handler: String.t()) ::
           {:ok, binary(), Plug.Conn.t()} | {:error, term(), Plug.Conn.t()}
   def read_text(conn, opts \\ []) do
     case read_all(conn, []) do
       {:ok, "", conn} -> {:error, missing_body(opts), conn}
-      other -> other
+      {:ok, bytes, conn} -> {:ok, decode_charset(bytes, charset(conn)), conn}
+      error -> error
     end
   end
+
+  # The charset parameter of the Content-Type, lower case, "utf-8" without one.
+  defp charset(conn) do
+    params =
+      case Plug.Conn.get_req_header(conn, "content-type") do
+        [value | _rest] -> value |> String.split(";") |> tl()
+        [] -> []
+      end
+
+    params
+    |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
+    |> Enum.find_value("utf-8", fn
+      "charset=" <> name -> name |> String.trim() |> String.trim(~s("))
+      _other -> nil
+    end)
+  end
+
+  defp decode_charset(bytes, charset) when charset in ["iso-8859-1", "latin1", "iso8859_1"],
+    do: :unicode.characters_to_binary(bytes, :latin1)
+
+  defp decode_charset(bytes, charset) when charset in ["us-ascii", "ascii"],
+    do: for(<<byte <- bytes>>, into: "", do: if(byte < 128, do: <<byte>>, else: "\uFFFD"))
+
+  defp decode_charset(bytes, "utf-16be"), do: utf16(bytes, :big)
+  defp decode_charset(bytes, "utf-16le"), do: utf16(bytes, :little)
+
+  # Java's UTF-16 reads a byte order mark and drops it; without one it is big-endian.
+  defp decode_charset(<<0xFE, 0xFF, rest::binary>>, "utf-16"), do: utf16(rest, :big)
+  defp decode_charset(<<0xFF, 0xFE, rest::binary>>, "utf-16"), do: utf16(rest, :little)
+  defp decode_charset(bytes, "utf-16"), do: utf16(bytes, :big)
+  defp decode_charset(bytes, _utf8), do: bytes
+
+  # An odd last byte or an unpaired surrogate becomes U+FFFD, as Java's decoder does.
+  defp utf16(bytes, endian) do
+    case :unicode.characters_to_binary(bytes, {:utf16, endian}) do
+      text when is_binary(text) -> text
+      {_error, text, rest} -> text <> "\uFFFD" <> utf16(skip_unit(rest), endian)
+    end
+  end
+
+  defp skip_unit(<<_unit::binary-size(2), rest::binary>>), do: rest
+  defp skip_unit(_odd), do: ""
 
   # An empty body is the missing body whatever its type (decode/3).
   defp json_content_type(_conn, ""), do: :ok
