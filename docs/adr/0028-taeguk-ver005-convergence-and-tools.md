@@ -36,7 +36,7 @@ archon에 설치된 태극 번들은 `81817cf`([ADR 0020](0020-taeguk-codex-tran
    - 새 파일: `.taeguk/tools/check_worker_scope.py`, `taeguk-codex-local-review/scripts/review_record.py`(`.claude/skills/`,
      `.agents/skills/`), 스킬 `taeguk-harvest-lessons`·`taeguk-encode-mistake-class`, 개정안 사본 네 개.
    - 내용이 바뀐 파일: 규칙 `approvals.md`·`development.md`·`index.md`·`verification.md`·`registry.toml`·
-     `mechanical-checks.md`, 스킬 `taeguk-codex-local-review`·`taeguk-daily-cleanup`·`taeguk-test-gap`·
+     `mechanical-checks.md`, 개정안 사본 `proposals/index.md`·`proposals/review-loop-exit.md`, 스킬 `taeguk-codex-local-review`·`taeguk-daily-cleanup`·`taeguk-test-gap`·
      `taeguk-validation-health`·`taeguk-doc-drift`·`taeguk-learn-from-outcome`·`taeguk-implement-small-change`·
      `taeguk-work-contract`, 역할 `taeguk-coordinator`.
    - archon 쪽 파일과 겹치는 경로는 없다. 설치기가 덮어쓰기를 거부한 파일도 없다. 설치본은 직접 고치지 않는다
