@@ -36,7 +36,9 @@ CI는 push와 PR 때만 돌아서 변경이 없는 날의 `main`은 검증을 �
 여전히 통과하는지와 간헐 실패 테스트가 있는지를 본다.
 
 - 절차: 설치된 `taeguk-validation-health` 스킬(`.claude/skills/`, `.agents/skills/`). 아래는 archon에서 스킬의
-  태극용 명령을 대신하는 값이다.
+  태극용 명령을 대신하는 값이다. 스킬이 말하는 프로젝트 스위트 목록은 아래 목록이다. archon용 스위트 목록 TOML이 생기기
+  전까지 태극 `validation_health.py run --suites`는 쓰지 않는다. 읽기 전용 `observations` 명령은 쓸 수 있다
+  ([ADR 0028](adr/0028-taeguk-ver005-convergence-and-tools.md) 결정 5).
 - 최신 `origin/main` SHA를 기록하고 `../archon-worktrees/` 아래 분리(detached) worktree에서 돌린다. main checkout과
   다른 워커의 worktree는 건드리지 않는다.
 - 툴체인 기록: `elixir --version`(Elixir, OTP), `cc --version`, `make --version`(archon_js 빌드),
@@ -112,8 +114,9 @@ check="$(mktemp)" &&
 echo "path check exit: $?"
 ```
 
-- 태극 데일리 정리·테스트 보강 스킬의 "Scope check"는 이 경로 검사다(ADR 0016 결정 5). 스킬에 적힌 태극의
-  `scripts/check_worker_scope.py`는 archon에 없으므로 쓰지 않는다. 스킬이 auto-merge 조건으로 말하는
+- 태극 데일리 정리·테스트 보강 스킬의 "Scope check"는 이 경로 검사다(ADR 0016 결정 5,
+  [ADR 0028](adr/0028-taeguk-ver005-convergence-and-tools.md) 결정 4). 설치된 `.taeguk/tools/check_worker_scope.py`는
+  archon 범위 파일(`.taeguk/worker-scope.toml`)이 없어 `UNKNOWN`을 내므로 아직 쓰지 않는다. 스킬이 auto-merge 조건으로 말하는
   "exit 0 with status PASS"는 이 검사의 `path check exit` 0이다. 스킬이 자체 리뷰를 "project's PR flow step 2"로
   가리키는 곳은 archon에서는 AGENTS.md "PR과 머지" 1단계(자체 리뷰 반복 후 Codex 리뷰)다.
 - 출력된 `path check exit` 값이 0일 때만 통과다. fetch나 스크립트 꺼내기가 실패해도 0이 아니게 묶여 있다. 스크립트의

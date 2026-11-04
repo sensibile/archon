@@ -4,7 +4,7 @@ Build the prompt file in this order: the target line, the purpose context, one f
 
 ## Target
 
-Use exactly one line, with the recorded SHAs:
+Use exactly one line, with the recorded SHAs. Write the range or commit exactly as passed to the record helper's `--target`, so the record can confirm the prompt names it:
 
 ```text
 Review only the changes shown by `git diff <base_sha>...<head_sha>`.

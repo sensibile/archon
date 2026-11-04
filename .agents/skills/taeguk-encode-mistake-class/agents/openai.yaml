@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk encode mistake class"
+  short_description: "Move a repeated mistake to the highest enforcement level and prove it fails on the real past mistake"
+  default_prompt: "Use $taeguk-encode-mistake-class for the mistake BOSS just corrected again."

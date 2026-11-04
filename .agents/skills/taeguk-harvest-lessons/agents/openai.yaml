@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taeguk harvest lessons"
+  short_description: "Report-only lesson intake from one finished task's records, routed to skills, the ledger, rule proposals or self-improvement"
+  default_prompt: "Use $taeguk-harvest-lessons on the task that just finished."

@@ -15,6 +15,8 @@ On 2026-10-29 BOSS approved this worker with its proposed defaults: weekly, repo
 
 The Taeguk repository (`sensibile/taeguk`) only. The scan script lives in this repository and is not part of the installed bundle.
 
+The script also has an opt-in ADR index check (`--adr-dir`, with `--adr-index`, `--adr-*-pattern` (title and status are read before the first `## ` line unless `--adr-header-end-pattern` changes it) and `--adr-only` for a project without `docs/rules`). It is off by default and this weekly run does not enable it: Taeguk has no ADR index. A project session may run it read-only against its own repository; its `adr_index` findings are candidates like the rest, and the check never judges whether a status is correct.
+
 ## Run
 
 1. Fetch and record the `origin/main` SHA. Read the latest report under `.taeguk/doc-drift/` in the main checkout (ignored by Git); its `checkpoint` SHA starts the window. Without a report, start at the last `main` commit older than seven days. Work in a detached worktree at the recorded SHA under `taeguk-worktrees/`.

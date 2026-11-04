@@ -1,6 +1,6 @@
 # ADR 0022: 태극 검증 건강도 워커 적용과 주간 CI 실행
 
-- 상태: 제안
+- 상태: 승인
 - 날짜: 2026-11-01
 - 태극 원본: sensibile/taeguk `42fb9647ac8ceb17708e173344a3f924baa9cecc`(sensibile/taeguk#31 머지 커밋)
 

@@ -101,12 +101,21 @@ approval = "approvals.md#approval-2026-10-11"
 
 [[rules]]
 id = "VER-005"
-version = "1.0"
+version = "1.1"
 status = "approved"
 scope = "Taeguk and explicitly assigned workflows"
 document = "verification.md#ver-005"
 enforcement = "guidance"
-approval = "approvals.md#approval-2026-10-28"
+approval = "approvals.md#approval-2026-11-04"
+
+[[rules]]
+id = "VER-007"
+version = "1.1"
+status = "approved"
+scope = "Taeguk and Taeguk pilot projects: hoplites, acropolis, thesmothetai, archon"
+document = "verification.md#ver-007"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-30-ver007-general"
 
 [[rules]]
 id = "DEV-003"
@@ -116,6 +125,15 @@ scope = "Taeguk and installed projects"
 document = "development.md#dev-003"
 enforcement = "guidance"
 approval = "approvals.md#approval-2026-10-29-worktree"
+
+[[rules]]
+id = "DEV-004"
+version = "1.0"
+status = "approved"
+scope = "Taeguk and explicitly assigned workflows"
+document = "development.md#dev-004"
+enforcement = "guidance"
+approval = "approvals.md#approval-2026-10-30-lessons"
 
 [[rules]]
 id = "GOV-005"
