@@ -111,31 +111,51 @@ defmodule ArchonWeb.Request do
     end)
   end
 
-  defp decode_charset(bytes, charset) when charset in ["iso-8859-1", "latin1", "iso8859_1"],
+  defp decode_charset(bytes, charset) when charset in ["iso-8859-1", "iso_8859-1", "latin1"],
     do: :unicode.characters_to_binary(bytes, :latin1)
 
   defp decode_charset(bytes, charset) when charset in ["us-ascii", "ascii"],
     do: for(<<byte <- bytes>>, into: "", do: if(byte < 128, do: <<byte>>, else: "\uFFFD"))
 
-  defp decode_charset(bytes, "utf-16be"), do: utf16(bytes, :big)
-  defp decode_charset(bytes, "utf-16le"), do: utf16(bytes, :little)
+  defp decode_charset(bytes, "utf-16be"), do: utf16(bytes, :big, [])
+  defp decode_charset(bytes, "utf-16le"), do: utf16(bytes, :little, [])
 
   # Java's UTF-16 reads a byte order mark and drops it; without one it is big-endian.
-  defp decode_charset(<<0xFE, 0xFF, rest::binary>>, "utf-16"), do: utf16(rest, :big)
-  defp decode_charset(<<0xFF, 0xFE, rest::binary>>, "utf-16"), do: utf16(rest, :little)
-  defp decode_charset(bytes, "utf-16"), do: utf16(bytes, :big)
+  defp decode_charset(<<0xFE, 0xFF, rest::binary>>, charset) when charset in ["utf-16", "utf16"],
+    do: utf16(rest, :big, [])
+
+  defp decode_charset(<<0xFF, 0xFE, rest::binary>>, charset) when charset in ["utf-16", "utf16"],
+    do: utf16(rest, :little, [])
+
+  defp decode_charset(bytes, charset) when charset in ["utf-16", "utf16"],
+    do: utf16(bytes, :big, [])
+
   defp decode_charset(bytes, _utf8), do: bytes
 
-  # An odd last byte or an unpaired surrogate becomes U+FFFD, as Java's decoder does.
-  defp utf16(bytes, endian) do
-    case :unicode.characters_to_binary(bytes, {:utf16, endian}) do
-      text when is_binary(text) -> text
-      {_error, text, rest} -> text <> "\uFFFD" <> utf16(skip_unit(rest), endian)
-    end
-  end
+  # One pass over the units, as Java's decoder: a surrogate pair is one character, a surrogate
+  # without its pair and an odd last byte are U+FFFD each, and decoding goes on after them.
+  defp utf16(<<>>, _endian, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
 
-  defp skip_unit(<<_unit::binary-size(2), rest::binary>>), do: rest
-  defp skip_unit(_odd), do: ""
+  defp utf16(<<hi::16-big, lo::16-big, rest::binary>>, :big = endian, acc)
+       when hi in 0xD800..0xDBFF and lo in 0xDC00..0xDFFF,
+       do: utf16(rest, endian, [<<pair(hi, lo)::utf8>> | acc])
+
+  defp utf16(<<hi::16-little, lo::16-little, rest::binary>>, :little = endian, acc)
+       when hi in 0xD800..0xDBFF and lo in 0xDC00..0xDFFF,
+       do: utf16(rest, endian, [<<pair(hi, lo)::utf8>> | acc])
+
+  defp utf16(<<unit::16-big, rest::binary>>, :big = endian, acc),
+    do: utf16(rest, endian, [unit_text(unit) | acc])
+
+  defp utf16(<<unit::16-little, rest::binary>>, :little = endian, acc),
+    do: utf16(rest, endian, [unit_text(unit) | acc])
+
+  defp utf16(<<_odd>>, endian, acc), do: utf16(<<>>, endian, ["\uFFFD" | acc])
+
+  defp pair(hi, lo), do: 0x10000 + Bitwise.bsl(hi - 0xD800, 10) + (lo - 0xDC00)
+
+  defp unit_text(unit) when unit in 0xD800..0xDFFF, do: "\uFFFD"
+  defp unit_text(unit), do: <<unit::utf8>>
 
   # An empty body is the missing body whatever its type (decode/3).
   defp json_content_type(_conn, ""), do: :ok

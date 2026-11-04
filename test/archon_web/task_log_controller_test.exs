@@ -77,6 +77,24 @@ defmodule ArchonWeb.TaskLogControllerTest do
              ["é", "a\uFFFD", "é", "é", "é\uFFFD", "é", "é"]
   end
 
+  # Self-review r3: a converter that returns the rest of a large body as a list lost its tail.
+  test "a large UTF-16 body keeps the text after a unit without its pair, in linear time" do
+    id = task_id()
+
+    body =
+      String.duplicate(<<0, ?A>>, 5000) <> <<0xDC, 0x00>> <> String.duplicate(<<0, ?B>>, 5000)
+
+    assert response(post_log(id, body, "text/plain;charset=UTF-16BE"), 200)
+    expected = String.duplicate("A", 5000) <> "\uFFFD" <> String.duplicate("B", 5000)
+    assert [%{"log" => ^expected}] = json_response(logs(id), 200)
+
+    # 4 MB of alternating valid and unpaired units: quadratic decoding would take hours.
+    body = String.duplicate(<<0, ?A, 0xDC, 0x00>>, 1_000_000)
+    {micros, conn} = :timer.tc(fn -> post_log(id, body, "text/plain;charset=UTF-16BE") end)
+    assert response(conn, 200)
+    assert micros < 10_000_000
+  end
+
   test "an empty body is the missing body and writes nothing" do
     id = task_id()
 
