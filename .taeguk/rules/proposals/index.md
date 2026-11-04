@@ -1,6 +1,6 @@
 # 미승인 규칙 후보
 
-Taeguk 저장소의 [기존 규칙 목록](https://github.com/sensibile/taeguk/blob/81817cf899e22bc193205f6a3de3863ea52f3b70/docs/research/archive/규칙-목록.md) 후보 중 현행 registry에 등록되지 않은 항목은 계속 제안 상태다. archive는 원본을 보존하며 현행 규칙의 승인 목록으로 사용하지 않는다.
+Taeguk 저장소의 [기존 규칙 목록](https://github.com/sensibile/taeguk/blob/7d0a7a82a0386651848f9b86411b2f48923acba8/docs/research/archive/규칙-목록.md) 후보 중 현행 registry에 등록되지 않은 항목은 계속 제안 상태다. archive는 원본을 보존하며 현행 규칙의 승인 목록으로 사용하지 않는다.
 
 ## GOV-005
 
@@ -8,9 +8,17 @@ Taeguk 저장소의 [기존 규칙 목록](https://github.com/sensibile/taeguk/b
 
 새 개정안은 Taeguk 저장소에서 작성하며 현재 ID·버전, 문제 사례, 변경 전후 판정, 정상·실패 사례 검사, 비용·권한 영향, 전환·되돌림 조건을 기록한다. BOSS 확인 전에는 현행 기준을 유지한다. 스킬: taeguk-propose-rule-change.
 
+## DEV-004
+
+2026-10-30 승인되어 DEV-004 1.0으로 현행 규칙에 반영했다. [학습 수집·강제 개정안](lesson-enforcement.md)은 개정 근거로 보존한다.
+
 ## VER-006 후보
 
 커버리지를 빈 곳을 찾는 측정 도구로만 쓰고 목표·수용 기준으로 쓰지 않는 규칙 후보다. [커버리지 측정 도구 개정안](coverage-as-instrument.md)이 BOSS 확인을 기다린다.
+
+## VER-007
+
+2026-10-30 승인되어 VER-007 1.0으로 현행 규칙에 반영했다. [테스트 대역 선택 개정안](test-double-preference.md)은 개정 근거로 보존한다. 같은 날 승인된 1.1 개정의 근거는 [테스트 대역 규칙의 일반 개발 확대 개정안](test-double-general-dev.md)이다.
 
 ## DEV-003
 
@@ -21,6 +29,8 @@ Taeguk 저장소의 [기존 규칙 목록](https://github.com/sensibile/taeguk/b
 2026-10-29 승인되어 REQ-001 1.2와 REQ-007 1.1로 현행 규칙에 반영했다. [archon 시험 프로젝트 추가 개정안](archon-pilot.md)은 개정 근거로 보존한다.
 
 ## VER-005
+
+2026-11-04 승인된 1.1 개정의 근거는 [리뷰 반복 수렴 기준 개정안](review-loop-convergence.md)이다. P2 이하 지적의 반영 판정 기준과 연속 3회차 상향 조건을 더했다.
 
 2026-10-28 승인되어 VER-005 1.0으로 현행 규칙에 반영했다. [리뷰 반복 종료·상향 기준 개정안](review-loop-exit.md)은 개정 근거로 보존한다.
 

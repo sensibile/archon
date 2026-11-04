@@ -25,6 +25,7 @@ The Taeguk repository (`sensibile/taeguk`), and an installed project only when t
 - The expected value of a proposed test comes from a requirement, contract, rule or BOSS answer, never from what the code currently returns. A gap whose expected behavior has no such source is a question, not a test.
 - A proposed test must name the fault that would make it fail. A test that would still pass with the behavior broken does not close the gap.
 - When reading the code suggests the current behavior contradicts its requirement, report a suspected defect. Do not propose a test that pins the current behavior.
+- Choose test doubles per VER-007: a hand-written fake or stub first, and no replacement (a mock, or a hand-written fake inserted with `patch` or another mock-library replacement) of an internal function, module, global or static call because the code has no injection point. Such a gap needs a product seam, which this worker cannot add; record it as a restructuring signal (VER-007) in the run report instead of writing a test.
 
 ## Measurement
 
@@ -61,8 +62,8 @@ Reinforce mode continues:
 9. Create a worktree and a `test/test-gap-<date>` branch from the recorded SHA. Write one test per gap, one commit per gap, in the project's test locations (for Rust, the `#[cfg(test)]` module or `tests/`). The expected value comes from the cited source, not from running the code.
 10. Check each test: it passes on the unmodified product code, and it fails by assertion when the step 6 fault is injected; restore the fault and confirm `git status` is clean. Separately confirm that the cumulative diff from the recorded SHA touches only test code: test files, and inside a source file only lines within its `#[cfg(test)]` module or equivalent test-only block. A test that fails on unmodified code is a suspected defect: drop the test, keep the product code as it is, and report it with the requirement it contradicts. A test that still passes with the fault does not close the gap; drop it. Then run the validation commands that apply.
 11. First run the self-review loop of the project's PR flow step 2 (`docs/repository-operations.md` in Taeguk) on the branch range until VER-005 ends it; drop or fix tests it rejects and record each round. Then ask Codex whether each test is needed: run `$taeguk-codex-local-review` on the branch range with the test adequacy focus from its review prompts together with the cross review focus, and the security review. Remove every test Codex judges unneeded, implementation-derived or not checking the cited requirement, and every test where its judgment is missing or unclear. Record rejections and do not argue them again in the same run. If tests were removed, rerun validation, the self-review loop and the Codex review on the new head.
-12. If any test is left, open a PR labeled `test-gap` whose body lists, per test, the gap, the oracle source, the injected fault and its result, and Codex's judgment, and continue with the project's PR flow including auto-merge. Apply VER-005 to review findings.
-13. Write the report to `.taeguk/test-gap/<date>.md`: mode, base SHA, measurements with commands, versions, statuses and threats, every gap with its location, classification and evidence, ranked proposals with their fault check results, tests added, dropped or rejected with reasons, PR number and head SHA after every push, questions for BOSS, cleanup candidates, and suspected defects.
+12. If any test is left, open a PR labeled `test-gap` whose body lists, per test, the gap, the oracle source, the injected fault and its result, each test double's kind, replaced boundary and reason (VER-007), and Codex's judgment, plus a `## 정리 후보` section listing this run's VER-007 restructuring signals with their locations and evidence, and continue with the project's PR flow including auto-merge. Apply VER-005 to review findings.
+13. Write the report to `.taeguk/test-gap/<date>.md`: mode, base SHA, measurements with commands, versions, statuses and threats, every gap with its location, classification and evidence, ranked proposals with their fault check results, tests added, dropped or rejected with reasons, PR number and head SHA after every push, questions for BOSS, cleanup candidates, restructuring signals (VER-007), and suspected defects.
 
 ## Scope check
 
@@ -76,8 +77,16 @@ python3 -I "$checker" test-gap --base <recorded base SHA> --head <reviewed head 
 
 Run it from the PR worktree, which only supplies the Git objects. If the base commit has no checker, the result is UNKNOWN.
 
-Enable auto-merge only on exit 0 with status PASS. On FAIL, drop the rejected tests, rerun validation and the step 11 review on the new head, and check again. On UNKNOWN or any other exit, do not enable auto-merge; report the PR to BOSS. The check covers paths, file modes, binary content and, for Rust sources, edits outside the trailing `#[cfg(test)]` module; it does not judge necessity or correctness. In an installed project, use the scope check its delivery document names; without one, open the PR without auto-merge and report it to BOSS.
+Enable auto-merge only on exit 0 with status PASS. On FAIL, drop the rejected tests, rerun validation and the step 11 review on the new head, and check again. On UNKNOWN or any other exit, do not enable auto-merge; report the PR to BOSS. The check covers paths, file modes, binary content and, for Rust sources, edits outside the trailing `#[cfg(test)]` module; it does not judge necessity or correctness. In an installed project, use the scope check its delivery document names; without one, open the PR without auto-merge and report it to BOSS. The bundle installs this checker as `.taeguk/tools/check_worker_scope.py`. Run it the same way, from the base commit and never from the PR checkout, with the project's scope file:
+
+```sh
+checker="$(mktemp -d)/check_worker_scope.py"
+git show <recorded base SHA>:.taeguk/tools/check_worker_scope.py > "$checker"
+python3 -I "$checker" test-gap --base <recorded base SHA> --head <reviewed head SHA> --config .taeguk/worker-scope.toml
+```
+
+Without `--config` it returns UNKNOWN outside the Taeguk repository.
 
 ## Report
 
-Tell BOSS in Korean what was merged or opened, the top remaining proposals, the questions that block a proposal, suspected defects and which measurements did not run. A stopped run is NOT_RUN or FAIL with its cause, never a silent skip. A run that found no requirement-linked gap says so; that is not PASS for test adequacy, since coverage cannot see an assertion that checks the wrong thing.
+Tell BOSS in Korean what was merged or opened, the top remaining proposals, the questions that block a proposal, restructuring signals (VER-007), suspected defects and which measurements did not run. A stopped run is NOT_RUN or FAIL with its cause, never a silent skip. A run that found no requirement-linked gap says so; that is not PASS for test adequacy, since coverage cannot see an assertion that checks the wrong thing.

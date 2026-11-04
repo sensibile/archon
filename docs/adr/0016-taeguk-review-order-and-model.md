@@ -6,6 +6,8 @@
 - 대체: [ADR 0011](0011-local-review-auto-merge.md) 결정 3의 리뷰 순서("PR 누적 범위를 태극
   `taeguk-codex-local-review` 절차로 리뷰한다" 앞에 자체 리뷰 반복을 더함)와 리뷰 설정 "`gpt-6-astra`, `medium`
   effort". ADR 0011의 나머지 결정은 그대로 유효하다.
+- 비고(2026-11-04): 태극 `7d0a7a8` 재설치로 `check_worker_scope.py`가 archon `.taeguk/tools/`에 들어왔다. 결정 5의
+  "archon에 없으므로 쓰지 않는다"는 "범위 파일이 없어 아직 쓰지 않는다"로 보완됐다([ADR 0028](0028-taeguk-ver005-convergence-and-tools.md) 결정 4).
 
 ## 맥락
 

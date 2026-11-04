@@ -1,6 +1,6 @@
 ---
 name: taeguk-learn-from-outcome
-description: "Connect observed use and incidents to a purpose hypothesis and next small task; use for post-delivery learning and retrospectives."
+description: "Connect observed use and incidents to a purpose hypothesis and next small task; use for post-delivery learning and retrospectives about product outcomes; lessons about how the agents worked go to taeguk-harvest-lessons."
 ---
 
 # taeguk-learn-from-outcome
@@ -12,3 +12,5 @@ Read [evidence packet](references/evidence-packet.md) when exchanging results or
 목적에 대한 완료 검토는 $taeguk-work-contract의 참고를 사용한다. 미확인을 나열하는 대신 수행한 조사·결론에 미치는 영향·남은 다음 행동을 연결한다. 이번 과제의 누락과 후속 실험을 구분하고, 해결 가능한 기존 과제를 임의로 다음 과제로 돌리지 않는다.
 
 When the user authorizes repairing Taeguk itself, continue with $taeguk-self-improve rather than ending at a follow-up proposal. Carry the raw retrospective evidence and distinguish observed defects from hypotheses.
+
+Lessons about the agents' own process (mistakes, BOSS corrections, review adjudications, skill friction) are harvested with $taeguk-harvest-lessons, not here.
