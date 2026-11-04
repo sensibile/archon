@@ -163,7 +163,7 @@ archon에 이미 있는 것(`541865c` 기준):
 - **페이징.** `LIMIT size OFFSET start`. upstream SQLite처럼 음수 `size`는 제한 없음, 음수 `start`는 0으로 다룬다(Postgres는 음수를
   오류로 내므로 바꿔 넣는다). `totalHits`는 같은 조건의 개수.
 - **조각 8b에서 정한 것(2026-11-04).** upstream의 실제 `SqliteIndexQueryBuilder`·`Query`와 sqlite-jdbc 3.49.0.0을 JDK 25에서 upstream
-  색인 스키마에 돌린 168개 사례(`test/support/search/query_oracle.ex`)를 정답으로 두고, 메모리 평가(`run/5`)와 Postgres SQL(`sql/3`,
+  색인 스키마에 돌린 178개 사례(`test/support/search/query_oracle.ex`)를 정답으로 두고, 메모리 평가(`run/5`)와 Postgres SQL(`sql/3`,
   `test/archon/search/query_postgres_test.exs`)이 둘 다 같은 개수·행·오류를 낸다(정렬이 없는 사례는 순서를 보지 않는다).
   - API: `parse(query, freeText, sort 목록)`, `sort_list/1`(upstream `Utils.convertStringToList`, `|`로 나눔), `check(query, 표)`,
     `run(query, 표, 행, start, size)`, `sql(query, 표, 첫 매개변수 번호)`(`where`·`params`·`order_by`), `limit_offset/2`, `describe/1`.
@@ -192,7 +192,11 @@ archon에 이미 있는 것(`541865c` 기준):
     `LIKE` 패턴(freeText와 `=`의 `*`)은 SQLite가 C 문자열로 읽으므로 첫 NUL 앞까지만 쓴다(길이 상한은 전체 바이트, 사례로 확인).
     freeText 소문자화는 Java `toLowerCase`처럼 그리스어 어말 시그마 규칙을 따른다.
   - 글자 열의 `>`·`<`와 정렬은 `COLLATE "C"`(SQLite BINARY처럼 바이트 순)이고 메모리 평가도 바이트 순이다. 시각 열은 epoch 밀리초
-    정수로 비교한다(upstream UTC 글자 비교와 1970~9999년에서 같다).
+    정수로 비교한다. upstream은 UTC 글자(`yyyy`는 기년, 9999년 뒤는 `+10000-...`)를 비교하므로, 1~9999년 밖의 경계값(예:
+    `endTime<9223372036854775807`)은 모든 행 글자보다 앞서는 값으로 다룬다(`>`는 모두, `<`·`=`는 없음, 사례로 확인). 색인 행은
+    서버 시계 시각이라 그 범위 안이다. 기원전 1970년 이전 경계의 기년 글자가 행 사이에 끼는 경우는 재현하지 않는다.
+  - 메모리 평가의 `LIKE`는 마지막 `%`로만 되돌아가 비용이 글자 길이×패턴 길이다(upstream SQLite도 같은 성질, 패턴은 50,000바이트
+    상한). 메모리 저장소는 개발·시험용이고 운영은 Postgres라(`config/config.exs` prod) 작업 상한을 따로 두지 않는다.
   - 의도적 차이 둘: `agentHierarchy` 정렬 항목은 버린다(결정 1). `Long.parseLong`이 읽는 비ASCII 숫자(예: `١٢`)는 숫자가 아닌 값으로
     다룬다(ADR 0014 `DateTimeUtils`와 같은 기준).
 

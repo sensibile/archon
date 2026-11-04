@@ -68,6 +68,9 @@ defmodule Archon.Search.Query do
 
   @time_columns [:start_time, :end_time, :update_time]
 
+  # 0001-01-01T00:00:00.000Z to 9999-12-31T23:59:59.999Z.
+  @four_digit_years -62_135_596_800_000..253_402_300_799_999
+
   @long_min -9_223_372_036_854_775_808
   @long_max 9_223_372_036_854_775_807
 
@@ -480,8 +483,18 @@ defmodule Archon.Search.Query do
     end
   end
 
-  defp time_list([millis | later]),
-    do: Enum.uniq([millis | later |> Enum.map(&utc_text_millis/1) |> Enum.reject(&is_nil/1)])
+  defp time_list([millis | later]) do
+    first = if time_bound(millis) == :below_all, do: [], else: [millis]
+    Enum.uniq(first ++ (later |> Enum.map(&utc_text_millis/1) |> Enum.reject(&is_nil/1)))
+  end
+
+  # Upstream compares its UTC column text with the bound's text. Times from year 1 to 9999 are
+  # four-digit years, ordered as the milliseconds; later years are written "+10000-..." and sort
+  # before every such text, as Archon takes years before 1 (upstream writes the year of era,
+  # which for 1970 BC and earlier would fall among real rows; not reproduced). Index rows are
+  # server clock times, inside the range.
+  defp time_bound(millis) when millis in @four_digit_years, do: {:ok, millis}
+  defp time_bound(_millis), do: :below_all
 
   ## Checking
 
@@ -536,10 +549,11 @@ defmodule Archon.Search.Query do
 
   defp condition_match?(%{column: column, operator: operator, values: values}, row)
        when column in @time_columns do
-    case {Map.get(row, column), operator} do
-      {nil, _operator} -> false
-      {value, :in} -> value in time_list(values)
-      {value, operator} -> compare(operator, value, hd(values))
+    case {Map.get(row, column), operator, time_bound(hd(values))} do
+      {nil, _operator, _bound} -> false
+      {value, :in, _bound} -> value in time_list(values)
+      {_value, operator, :below_all} -> operator == :gt
+      {value, operator, {:ok, millis}} -> compare(operator, value, millis)
     end
   end
 
@@ -631,12 +645,21 @@ defmodule Archon.Search.Query do
 
   # Each clause is a template taking its parameter placeholders, and its parameters.
   defp condition_sql(%{column: column, operator: :in, values: values})
-       when column in @time_columns,
-       do: {&"#{column} IN (#{Enum.join(&1, ", ")})", time_list(values)}
+       when column in @time_columns do
+    case time_list(values) do
+      [] -> {fn [] -> "FALSE" end, []}
+      list -> {&"#{column} IN (#{Enum.join(&1, ", ")})", list}
+    end
+  end
 
   defp condition_sql(%{column: column, operator: operator, values: [millis | _later]})
-       when column in @time_columns,
-       do: {&"#{column} #{symbol(operator)} #{hd(&1)}", [millis]}
+       when column in @time_columns do
+    case {time_bound(millis), operator} do
+      {{:ok, millis}, _operator} -> {&"#{column} #{symbol(operator)} #{hd(&1)}", [millis]}
+      {:below_all, :gt} -> {fn [] -> "#{column} IS NOT NULL" end, []}
+      {:below_all, _operator} -> {fn [] -> "FALSE" end, []}
+    end
+  end
 
   defp condition_sql(%{column: column, operator: :in, values: values}) do
     bindable = Enum.reject(values, &nul?/1)
