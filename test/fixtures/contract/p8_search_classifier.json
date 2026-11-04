@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=workflowType%20IN%20%28archon_p8_search%2Carchon_p8_classified%29&classifier=p8cls",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 1,
+      "results": [
+        {
+          "workflowType": "archon_p8_classified",
+          "version": 1,
+          "workflowId": "03b0d04f-84bf-4f49-9e13-4e38464811ed",
+          "correlationId": "p8-classified",
+          "startTime": "2026-11-04T00:22:23.178Z",
+          "updateTime": "2026-11-04T00:22:23.181Z",
+          "status": "RUNNING",
+          "input": "{}",
+          "output": "{}",
+          "executionTime": 0,
+          "failedReferenceTaskNames": "",
+          "priority": 0,
+          "failedTaskNames": [],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "p8cls",
+          "inputSize": 2,
+          "outputSize": 2
+        }
+      ]
+    }
+  }
+}

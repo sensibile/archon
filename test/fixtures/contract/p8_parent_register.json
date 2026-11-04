@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_p8_parent",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_p8_sub",
+          "taskReferenceName": "sub_ref",
+          "type": "SUB_WORKFLOW",
+          "subWorkflowParam": {
+            "name": "archon_p8_child",
+            "version": 1
+          }
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

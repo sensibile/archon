@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/f9ff2cd0-4381-42eb-8974-795dd83a7cb9/log",
+    "body": null
+  },
+  "response": {
+    "status": 204,
+    "content_type": null,
+    "body": null
+  }
+}

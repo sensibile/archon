@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=workflowType%3Darchon_p8_search&size=many",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Method parameter 'size': Failed to convert value of type 'java.lang.String' to required type 'int'; For input string: \"many\"",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

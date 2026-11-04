@@ -1,0 +1,88 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/search?query=workflowType%3Darchon_p8_sys%20AND%20taskType%20IN%20%28SET_VARIABLE%2CSWITCH%2CFORK%2Carchon_p8_case%2Carchon_p8_fork_a%2Carchon_p8_fork_b%29&sort=taskType%3AASC",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 4,
+      "results": [
+        {
+          "workflowId": "2ba6f76e-1f57-4b1e-baec-bfe1b75638a5",
+          "workflowType": "archon_p8_sys",
+          "correlationId": "p8-sys",
+          "scheduledTime": "2026-11-04T00:22:27.574Z",
+          "startTime": "2026-11-04T00:22:27.574Z",
+          "updateTime": "2026-11-04T00:22:27.575Z",
+          "endTime": "2026-11-04T00:22:27.574Z",
+          "status": "COMPLETED",
+          "executionTime": 0,
+          "queueWaitTime": 0,
+          "taskDefName": "FORK",
+          "taskType": "FORK",
+          "input": "{}",
+          "output": "{}",
+          "taskId": "e1e4917c-d323-485d-a389-b82cdb6df770",
+          "workflowPriority": 0
+        },
+        {
+          "workflowId": "2ba6f76e-1f57-4b1e-baec-bfe1b75638a5",
+          "workflowType": "archon_p8_sys",
+          "correlationId": "p8-sys",
+          "scheduledTime": "2026-11-04T00:22:27.410Z",
+          "startTime": "2026-11-04T00:22:27.410Z",
+          "updateTime": "2026-11-04T00:22:27.410Z",
+          "endTime": "2026-11-04T00:22:27.412Z",
+          "status": "COMPLETED",
+          "executionTime": 2,
+          "queueWaitTime": 0,
+          "taskDefName": "archon_p8_set",
+          "taskType": "SET_VARIABLE",
+          "input": "{v=p8}",
+          "output": "{}",
+          "taskId": "c7b158d5-0e89-45ac-a1e7-bd1dd8f07cbf",
+          "workflowPriority": 0
+        },
+        {
+          "workflowId": "2ba6f76e-1f57-4b1e-baec-bfe1b75638a5",
+          "workflowType": "archon_p8_sys",
+          "correlationId": "p8-sys",
+          "scheduledTime": "2026-11-04T00:22:27.412Z",
+          "startTime": "2026-11-04T00:22:27.412Z",
+          "updateTime": "2026-11-04T00:22:27.413Z",
+          "endTime": "2026-11-04T00:22:27.414Z",
+          "status": "COMPLETED",
+          "executionTime": 2,
+          "queueWaitTime": 0,
+          "taskDefName": "SWITCH",
+          "taskType": "SWITCH",
+          "input": "{kind=a, case=a, hasChildren=true}",
+          "output": "{evaluationResult=[a], selectedCase=a}",
+          "taskId": "cc663c7d-1439-4e59-aa6f-c84596797e40",
+          "workflowPriority": 0
+        },
+        {
+          "workflowId": "2ba6f76e-1f57-4b1e-baec-bfe1b75638a5",
+          "workflowType": "archon_p8_sys",
+          "correlationId": "p8-sys",
+          "scheduledTime": "2026-11-04T00:22:27.412Z",
+          "startTime": "1970-01-01T00:00:00.000Z",
+          "updateTime": "2026-11-04T00:22:27.572Z",
+          "endTime": "2026-11-04T00:22:27.572Z",
+          "status": "COMPLETED",
+          "executionTime": 1793751747572,
+          "queueWaitTime": 0,
+          "taskDefName": "archon_p8_case",
+          "taskType": "archon_p8_case",
+          "input": "{}",
+          "output": "{}",
+          "taskId": "aa7493fb-c027-4fb2-8ffb-251b018f23a4",
+          "workflowPriority": 0
+        }
+      ]
+    }
+  }
+}

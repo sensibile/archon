@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/workflow/a105f535-8c83-4a39-89d9-e092b800ea16",
+    "path": "/api/workflow/eb833669-662f-4406-a90b-914e70ae0e40",
     "body": null
   },
   "response": {
@@ -9,11 +9,11 @@
     "content_type": "application/json",
     "body": {
       "ownerApp": "",
-      "createTime": 1793629070779,
-      "updateTime": 1793629070780,
+      "createTime": 1793751741364,
+      "updateTime": 1793751741366,
       "status": "RUNNING",
       "endTime": 0,
-      "workflowId": "a105f535-8c83-4a39-89d9-e092b800ea16",
+      "workflowId": "eb833669-662f-4406-a90b-914e70ae0e40",
       "tasks": [
         {
           "taskType": "HTTP",
@@ -30,25 +30,25 @@
           "seq": 1,
           "pollCount": 1,
           "taskDefName": "archon_p7_http",
-          "scheduledTime": 1793629070780,
-          "startTime": 1793629070833,
+          "scheduledTime": 1793751741365,
+          "startTime": 1793751741449,
           "endTime": 0,
-          "updateTime": 1793629070840,
+          "updateTime": 1793751741457,
           "startDelayInSeconds": 0,
           "retried": false,
           "executed": false,
           "callbackFromWorker": true,
           "responseTimeoutSeconds": 0,
-          "workflowInstanceId": "a105f535-8c83-4a39-89d9-e092b800ea16",
+          "workflowInstanceId": "eb833669-662f-4406-a90b-914e70ae0e40",
           "workflowType": "archon_p7_http_async",
-          "taskId": "8c36abcc-2ef7-4ce5-9822-db1a35bdfde9",
+          "taskId": "c63bc46a-a15f-420f-88bf-168ecbcf3a88",
           "callbackAfterSeconds": 0,
           "workerId": "<redacted-hostname>",
           "outputData": {
             "response": {
               "headers": {
                 "date": [
-                  "Mon, 02 Nov 2026 14:17:49 GMT"
+                  "Wed, 04 Nov 2026 00:22:20 GMT"
                 ],
                 "vary": [
                   "accept-encoding"
@@ -124,8 +124,8 @@
           "firstStartTime": 0,
           "executionMetadata": {
             "additionalContext": {},
-            "additionalContextMap": {},
-            "empty": true
+            "empty": true,
+            "additionalContextMap": {}
           },
           "taskDefinition": {
             "createTime": 0,
@@ -150,8 +150,8 @@
             "taskStatusListenerEnabled": true,
             "enforceSchema": false
           },
-          "queueWaitTime": 53,
-          "loopOverTask": false
+          "loopOverTask": false,
+          "queueWaitTime": 84
         }
       ],
       "input": {
@@ -164,7 +164,7 @@
       "taskToDomain": {},
       "failedReferenceTaskNames": [],
       "workflowDefinition": {
-        "createTime": 1793629070751,
+        "createTime": 1793751741326,
         "updateTime": 0,
         "name": "archon_p7_http_async",
         "version": 1,
@@ -233,7 +233,7 @@
       "failedTaskNames": [],
       "history": [],
       "rateLimited": false,
-      "startTime": 1793629070779,
+      "startTime": 1793751741364,
       "workflowName": "archon_p7_http_async",
       "workflowVersion": 1
     }

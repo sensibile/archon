@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=taskId%3Dx%20AND%20workflowType%3Darchon_p8_search",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Cannot prepare statement for query: [SQLITE_ERROR] SQL error or missing database (no such column: task_id)",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks",
+    "body": {
+      "workflowInstanceId": "99ac26d4-73a8-4e9a-bedc-c82e2891c3c0",
+      "taskId": "471ce9a7-8cad-4dd2-a82c-5edb3f176035",
+      "status": "IN_PROGRESS",
+      "workerId": "archon-contract",
+      "outputData": {
+        "progress": "p8progress"
+      },
+      "callbackAfterSeconds": 3600,
+      "logs": [
+        {
+          "log": "p8 log 1",
+          "createdTime": 1700000000001
+        },
+        {
+          "log": "p8 log 2",
+          "createdTime": 1700000000002
+        },
+        {
+          "log": "p8 log 3",
+          "createdTime": 1700000000003
+        },
+        {
+          "log": "p8 log 4",
+          "createdTime": 1700000000004
+        },
+        {
+          "log": "p8 log 5",
+          "createdTime": 1700000000005
+        },
+        {
+          "log": "p8 log 6",
+          "createdTime": 1700000000006
+        },
+        {
+          "log": "p8 log 7",
+          "createdTime": 1700000000007
+        },
+        {
+          "log": "p8 log 8",
+          "createdTime": 1700000000008
+        },
+        {
+          "log": "p8 log 9",
+          "createdTime": 1700000000009
+        },
+        {
+          "log": "p8 log 10",
+          "createdTime": 1700000000010
+        },
+        {
+          "log": "p8 log 11",
+          "createdTime": 1700000000011
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "471ce9a7-8cad-4dd2-a82c-5edb3f176035"
+  }
+}

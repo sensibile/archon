@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/57e4192a-f0a1-3631-af74-6f9a75d4df6d/retry",
+    "body": null
+  },
+  "response": {
+    "status": 204,
+    "content_type": null,
+    "body": null
+  }
+}

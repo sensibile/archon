@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=workflowType%3Darchon_p8_search&freeText=alpha",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 1,
+      "results": [
+        {
+          "workflowType": "archon_p8_search",
+          "version": 1,
+          "workflowId": "3833b46b-4772-49f5-9955-1c9a6383565d",
+          "correlationId": "p8-search-1",
+          "startTime": "2026-11-04T00:22:22.530Z",
+          "updateTime": "2026-11-04T00:22:22.809Z",
+          "endTime": "2026-11-04T00:22:22.809Z",
+          "status": "COMPLETED",
+          "input": "{a={b=c}, f=2.5, list=[1, two], m={k1=1, k2=v}, n=1, none=null, text=P8 Alpha%Beta\\Gamma, x=p8-x}",
+          "output": "{done=true, z=[1]}",
+          "executionTime": 279,
+          "failedReferenceTaskNames": "",
+          "priority": 0,
+          "failedTaskNames": [],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "workflow",
+          "inputSize": 97,
+          "outputSize": 18
+        }
+      ]
+    }
+  }
+}

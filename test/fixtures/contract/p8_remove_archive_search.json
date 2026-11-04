@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=workflowType%3Darchon_p8_remove%20AND%20correlationId%3Dp8-remove-archive",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 1,
+      "results": [
+        {
+          "workflowType": "archon_p8_remove",
+          "version": 1,
+          "workflowId": "5fa9371b-4f8d-4c08-86a8-086f9e1c16b5",
+          "correlationId": "p8-remove-archive",
+          "startTime": "2026-11-04T00:22:28.324Z",
+          "updateTime": "2026-11-04T00:22:28.433Z",
+          "endTime": "2026-11-04T00:22:28.433Z",
+          "status": "COMPLETED",
+          "input": "{}",
+          "output": "{}",
+          "executionTime": 109,
+          "failedReferenceTaskNames": "",
+          "priority": 0,
+          "failedTaskNames": [],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "workflow",
+          "inputSize": 2,
+          "outputSize": 2
+        }
+      ]
+    }
+  }
+}

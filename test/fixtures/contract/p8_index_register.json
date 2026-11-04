@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/metadata/workflow",
+    "body": {
+      "name": "archon_p8_index",
+      "version": 1,
+      "schemaVersion": 2,
+      "timeoutPolicy": "ALERT_ONLY",
+      "timeoutSeconds": 0,
+      "tasks": [
+        {
+          "name": "archon_p8_poll",
+          "taskReferenceName": "poll_ref",
+          "type": "SIMPLE",
+          "inputParameters": {
+            "x": "${workflow.input.x}"
+          }
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": null,
+    "body": null
+  }
+}

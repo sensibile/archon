@@ -19,18 +19,18 @@
       "correlationId": "archon-corr-3",
       "pollCount": 1,
       "taskDefName": "archon_task_c",
-      "scheduledTime": 1793629043259,
-      "startTime": 1793629043452,
+      "scheduledTime": 1793751710634,
+      "startTime": 1793751710883,
       "endTime": 0,
-      "updateTime": 1793629043453,
+      "updateTime": 1793751710885,
       "startDelayInSeconds": 0,
       "retried": false,
       "executed": false,
       "callbackFromWorker": true,
       "responseTimeoutSeconds": 60,
-      "workflowInstanceId": "bf8f4974-febb-4f45-89c7-564a723fb59f",
+      "workflowInstanceId": "d98d0e6b-12d3-4514-b826-992dfebba671",
       "workflowType": "archon_inline",
-      "taskId": "96f78676-1dd0-4ef3-ad57-23002e167593",
+      "taskId": "81e64d1c-acc8-4ae6-a167-ce9838ecf628",
       "callbackAfterSeconds": 0,
       "workerId": "archon-contract",
       "outputData": {},
@@ -48,8 +48,8 @@
         "joinOn": [],
         "optional": false,
         "taskDefinition": {
-          "createTime": 1793629042506,
-          "updateTime": 1793629042535,
+          "createTime": 1793751709818,
+          "updateTime": 1793751709853,
           "createdBy": "",
           "updatedBy": "",
           "name": "archon_task_c",
@@ -88,12 +88,12 @@
       "firstStartTime": 0,
       "executionMetadata": {
         "additionalContext": {},
-        "additionalContextMap": {},
-        "empty": true
+        "empty": true,
+        "additionalContextMap": {}
       },
       "taskDefinition": {
-        "createTime": 1793629042506,
-        "updateTime": 1793629042535,
+        "createTime": 1793751709818,
+        "updateTime": 1793751709853,
         "createdBy": "",
         "updatedBy": "",
         "name": "archon_task_c",
@@ -117,8 +117,8 @@
         "taskStatusListenerEnabled": true,
         "enforceSchema": false
       },
-      "queueWaitTime": 193,
-      "loopOverTask": false
+      "loopOverTask": false,
+      "queueWaitTime": 249
     }
   }
 }

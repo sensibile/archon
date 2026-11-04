@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/search?query=correlationId%3Dp8-search-1",
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "status": 500,
+      "message": "Cannot prepare statement for query: [SQLITE_ERROR] SQL error or missing database (no such column: correlation_id)",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

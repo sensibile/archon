@@ -1,7 +1,8 @@
 defmodule ArchonWeb.ContractCaseTest do
   @moduledoc """
-  The replay helper itself (ADR 0023 decision 6, ADR 0025 decision 7, ADR 0026 decision 8):
-  scenario coverage, the ID mapping, and the step options.
+  The replay helper itself (ADR 0023 decision 6, ADR 0025 decision 7, ADR 0026 decision 8,
+  ADR 0027 decision 7): scenario coverage, the ID mapping, the step options and the skipping of
+  Phase 8 actions not implemented yet.
   """
 
   use ArchonWeb.ContractCase, async: true
@@ -33,19 +34,89 @@ defmodule ArchonWeb.ContractCaseTest do
     assert {:exchange, "workflow_get_options"} == Enum.at(scenario(), first - 1)
   end
 
+  # ADR 0027, decision 7: the Phase 8 steps come after every Phase 7 step.
+  test "the Phase 8 steps come last" do
+    first = Enum.find_index(scenario(), &(&1 == {:exchange, "p8_register_taskdefs"}))
+    assert {:exchange, "p7_http_register_invalid"} == Enum.at(scenario(), first - 1)
+
+    assert scenario() |> Enum.drop(first) |> Enum.all?(&String.starts_with?(elem(&1, 1), "p8_"))
+  end
+
+  describe "skip?/1" do
+    # A step that reaches an action still not implemented, one per controller (ADR 0027,
+    # decision 8); slice 8f removes the skipping.
+    @unimplemented_steps [
+      {"p8_search_all", ArchonWeb.SearchController, :search_workflows},
+      {"p8_index_logs", ArchonWeb.TaskLogController, :get_logs},
+      {"p8_bulk_search_mixed", ArchonWeb.WorkflowBulkController, :search}
+    ]
+
+    defp unimplemented_step do
+      Enum.find(@unimplemented_steps, fn {_name, controller, action} ->
+        action in controller.unimplemented()
+      end)
+    end
+
+    test "the scenario skips steps while an action is not implemented" do
+      if unimplemented_step(), do: assert(Enum.any?(scenario(), &skip?/1))
+    end
+
+    test "a step reaching an action its controller has not implemented is skipped" do
+      for {name, controller, action} <- @unimplemented_steps,
+          action in controller.unimplemented() do
+        assert skip?({:exchange, name})
+      end
+
+      refute :pause in ArchonWeb.WorkflowBulkController.unimplemented()
+      refute skip?({:exchange, "workflow_bulk_pause"})
+      refute skip?({:exchange, "p8_search_get_1", until: :settled})
+      refute skip?({:poll_until, "p8_index_poll"})
+      refute skip?({:exchange, "route_unsupported_workflow_decide"})
+    end
+
+    test "a step requiring an action not implemented yet is skipped, waits too" do
+      if step = unimplemented_step() do
+        {_name, controller, action} = step
+        requires = [requires: [{controller, action}]]
+        assert skip?({:exchange, "p8_index_get", requires})
+        assert skip?({:wait_status, "p8_index_start", "COMPLETED", requires})
+      end
+
+      implemented = [requires: [{ArchonWeb.WorkflowBulkController, :pause}]]
+      refute skip?({:exchange, "p8_index_get", implemented})
+      refute skip?({:wait_status, "p8_index_start", "COMPLETED"})
+      refute skip?({:exchange, "health", requires: [{ArchonWeb.HealthController, :check}]})
+    end
+
+    test "every requirement names an action of the router" do
+      routes = MapSet.new(ArchonWeb.Router.__routes__(), &{&1.plug, &1.plug_opts})
+
+      for step <- scenario(),
+          opts = List.last(Tuple.to_list(step)),
+          is_list(opts),
+          action <- Keyword.get(opts, :requires, []) do
+        assert action in routes, inspect(step)
+      end
+    end
+  end
+
   test "until: repeats the request until the conditions hold" do
     replay([
       {:exchange, "health", until: [{["healthy"], true}, {["healthResults"], {:length, 0}}]}
     ])
   end
 
-  # ADR 0026, decision 8: the Phase 7 steps come after every Phase 6 step, and every type they
-  # use runs (slice 7h removed the skipping of steps whose type had no mapper yet).
-  test "the Phase 7 steps come last" do
+  # ADR 0026, decision 8: the Phase 7 steps come after every Phase 6 step and before the Phase 8
+  # steps, and every type they use runs (slice 7h removed the skipping of steps whose type had no
+  # mapper yet).
+  test "the Phase 7 steps come after the Phase 6 steps" do
     first = Enum.find_index(scenario(), &(&1 == {:exchange, "p7_register_taskdefs"}))
     assert {:exchange, "metadata_get_taskdef_deleted"} == Enum.at(scenario(), first - 1)
 
-    assert Enum.all?(Enum.drop(scenario(), first), &String.starts_with?(elem(&1, 1), "p7_"))
+    phase7 =
+      scenario() |> Enum.drop(first) |> Enum.take_while(&(elem(&1, 1) != "p8_register_taskdefs"))
+
+    assert Enum.all?(phase7, &String.starts_with?(elem(&1, 1), "p7_"))
   end
 
   test "every Phase 7 task type has a mapper of its own" do

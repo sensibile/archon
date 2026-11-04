@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "DELETE",
-    "path": "/api/workflow/8679bc1e-443a-445f-8a5b-954c9ea45f62/remove?archiveWorkflow=false",
+    "path": "/api/workflow/49b6b444-8ab1-4697-9aa0-2fc131f7c7df/remove?archiveWorkflow=false",
     "body": null
   },
   "response": {

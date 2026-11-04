@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/search?query=workflowType%3Darchon_p8_remove&freeText=p8-remove-delete",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 0,
+      "results": []
+    }
+  }
+}

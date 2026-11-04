@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/tasks/00000000-0000-0000-0000-0000000008a1/log",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": [
+      {
+        "log": "p8 log of no task",
+        "taskId": "00000000-0000-0000-0000-0000000008a1",
+        "createdTime": 1793751747252
+      }
+    ]
+  }
+}

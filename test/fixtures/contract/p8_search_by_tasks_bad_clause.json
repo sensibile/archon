@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search-by-tasks?query=taskType~SIMPLE",
+    "body": null
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "status": 400,
+      "message": "Incorrectly formatted query string: taskType~SIMPLE",
+      "instance": "<redacted-hostname>",
+      "retryable": false
+    }
+  }
+}

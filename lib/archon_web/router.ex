@@ -6,13 +6,14 @@
 # Paths derived from conductor-oss rest/src/main/java/com/netflix/conductor/rest/controllers/
 # {HealthCheckResource,MetadataResource,WorkflowResource,WorkflowBulkResource,TaskResource}.java and
 # rest/.../rest/config/RequestMappingConstants.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
-# Modified by sensibile: only the MVP routes of ADR 0001 and the Phase 6 routes of ADR 0025;
-# every other request is a 404.
+# Modified by sensibile: only the MVP routes of ADR 0001, the Phase 6 routes of ADR 0025 and the
+# Phase 8 routes of ADR 0027; every other request is a 404.
 
 defmodule ArchonWeb.Router do
   @moduledoc """
-  The 19 MVP routes of ADR 0001 (ADR 0023, decision 2) and the 33 workflow operation routes of
-  Phase 6 (ADR 0025, decision 1). Everything else is a 404 with the body upstream gives a path it
+  The 19 MVP routes of ADR 0001 (ADR 0023, decision 2), the 33 workflow operation routes of
+  Phase 6 (ADR 0025, decision 1) and the 9 search and task log routes of Phase 8 (ADR 0027,
+  decision 1). Everything else is a 404 with the body upstream gives a path it
   has no handler for (`ArchonWeb.Errors.send_no_route/1`): unknown paths, Later and Unsupported
   routes, and a path with another method (upstream's 405 is not reproduced).
 
@@ -20,6 +21,8 @@ defmodule ArchonWeb.Router do
   upstream patterns take the same path, the more specific one is listed first:
 
     * the bulk literals (`PUT /api/workflow/bulk/pause`) before `{workflowId}/pause` and the like;
+    * the search literals (`GET /api/workflow/search`, `GET /api/tasks/search-v2`) before
+      `GET /api/workflow/{workflowId}` and `GET /api/tasks/{taskId}`;
     * `GET /api/workflow/running/{name}` before `{workflowId}/tasks` and `{workflowId}/status`;
     * the signal routes (`POST /api/tasks/{workflowId}/{status}/signal`) before the task update
       by reference (`POST /api/tasks/{workflowId}/{taskRefName}/{status}`).
@@ -36,10 +39,9 @@ defmodule ArchonWeb.Router do
   alias Archon.Domain.ErrorResponse
 
   # WorkflowResource: GET /api/workflow/{workflowId} would take these.
-  @later_workflow_gets ~w(search search-v2 search-by-tasks search-by-tasks-v2
-                          externalstoragelocation external-storage-location)
+  @later_workflow_gets ~w(externalstoragelocation external-storage-location)
   # TaskResource: GET /api/tasks/{taskId} would take these.
-  @later_task_gets ~w(search search-v2 externalstoragelocation external-storage-location)
+  @later_task_gets ~w(externalstoragelocation external-storage-location)
 
   scope "/", ArchonWeb do
     get "/health", HealthController, :check
@@ -74,6 +76,7 @@ defmodule ArchonWeb.Router do
     post "/terminate", WorkflowBulkController, :terminate
     delete "/remove", WorkflowBulkController, :remove
     delete "/terminate-remove", WorkflowBulkController, :terminate_remove
+    post "/search", WorkflowBulkController, :search
   end
 
   scope "/api/workflow", ArchonWeb do
@@ -83,6 +86,12 @@ defmodule ArchonWeb.Router do
     post "/:name", WorkflowController, :start_by_name
     get "/:name/correlated/:correlationId", WorkflowQueryController, :correlated
     post "/:name/correlated", WorkflowQueryController, :correlated_many
+
+    # GET /api/workflow/{workflowId} would take these.
+    get "/search", SearchController, :search_workflows
+    get "/search-v2", SearchController, :search_workflows_v2
+    get "/search-by-tasks", SearchController, :search_workflows_by_tasks
+    get "/search-by-tasks-v2", SearchController, :search_workflows_by_tasks_v2
 
     for path <- @later_workflow_gets do
       get "/#{path}", Errors, :no_route
@@ -115,11 +124,17 @@ defmodule ArchonWeb.Router do
     post "/", TaskController, :update
     post "/update-v2", TaskController, :update_v2
 
+    # GET /api/tasks/{taskId} would take these.
+    get "/search", SearchController, :search_tasks
+    get "/search-v2", SearchController, :search_tasks_v2
+
     for path <- @later_task_gets do
       get "/#{path}", Errors, :no_route
     end
 
     get "/:taskId", TaskController, :get
+    post "/:taskId/log", TaskLogController, :log
+    get "/:taskId/log", TaskLogController, :get_logs
 
     # Later; the task update by reference would take it.
     post "/queue/requeue/:taskType", Errors, :no_route

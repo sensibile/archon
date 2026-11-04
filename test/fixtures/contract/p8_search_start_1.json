@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/workflow/archon_p8_search?correlationId=p8-search-1",
+    "body": {
+      "a": {
+        "b": "c"
+      },
+      "f": 2.5,
+      "list": [
+        1,
+        "two"
+      ],
+      "m": {
+        "k1": 1,
+        "k2": "v"
+      },
+      "n": 1,
+      "none": null,
+      "text": "P8 Alpha%Beta\\Gamma",
+      "x": "p8-x"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "text/plain;charset=UTF-8",
+    "body": "3833b46b-4772-49f5-9955-1c9a6383565d"
+  }
+}

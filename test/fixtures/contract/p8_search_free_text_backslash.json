@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=workflowType%3Darchon_p8_search&freeText=beta%5Cgamma",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 0,
+      "results": []
+    }
+  }
+}

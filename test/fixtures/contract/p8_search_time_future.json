@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search?query=startTime%3E4102444800000%20AND%20workflowType%3Darchon_p8_search",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 0,
+      "results": []
+    }
+  }
+}

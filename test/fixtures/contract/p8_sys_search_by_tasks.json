@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/workflow/search-by-tasks?query=workflowType%3Darchon_p8_sys%20AND%20taskType%20IN%20%28SET_VARIABLE%2CSWITCH%29",
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "totalHits": 1,
+      "results": [
+        {
+          "workflowType": "archon_p8_sys",
+          "version": 1,
+          "workflowId": "2ba6f76e-1f57-4b1e-baec-bfe1b75638a5",
+          "correlationId": "p8-sys",
+          "startTime": "2026-11-04T00:22:27.408Z",
+          "updateTime": "2026-11-04T00:22:27.577Z",
+          "status": "RUNNING",
+          "input": "{kind=a}",
+          "output": "{}",
+          "executionTime": 0,
+          "failedReferenceTaskNames": "",
+          "priority": 0,
+          "failedTaskNames": [],
+          "taskToDomain": {},
+          "parentWorkflowId": "",
+          "classifier": "workflow",
+          "inputSize": 8,
+          "outputSize": 2
+        }
+      ]
+    }
+  }
+}
