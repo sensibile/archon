@@ -14,7 +14,7 @@ defmodule Archon.Runtime.SearchIndex do
 
   `Archon.Runtime.Step` builds them where upstream's `ExecutionDAOFacade` indexes a workflow or
   a task, puts them in the commit (`Archon.Runtime.Commit`) and the store upserts them in the same
-  transaction; `Archon.Release.backfill_search_index/0` builds them for rows written before the
+  transaction; `Archon.Release.backfill_search_index/2` builds them for rows written before the
   index existed.
 
   A row has the columns of upstream's `SqliteIndexDAO#indexWorkflow`/`#indexTask` as

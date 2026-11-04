@@ -19,6 +19,35 @@ defmodule Archon.Release do
   alias Archon.Runtime.{Postgres, SearchIndex}
 
   @backfill_batch 500
+  # Task index rows per INSERT, so one statement stays small whatever a workflow holds.
+  @backfill_insert 1_000
+  # The first key of the backfill's advisory lock ("Arch" in ASCII, as the store's limit locks);
+  # the second is a key of the schema.
+  @backfill_lock_class 0x41726368
+
+  @workflow_index_columns [
+    workflow_id: :text,
+    correlation_id: :text,
+    workflow_type: :text,
+    start_time: :bigint,
+    end_time: :bigint,
+    update_time: :bigint,
+    status: :text,
+    parent_workflow_id: :text,
+    classifier: :text,
+    json_data: :text
+  ]
+  @task_index_columns [
+    task_id: :text,
+    task_type: :text,
+    task_def_name: :text,
+    status: :text,
+    start_time: :bigint,
+    end_time: :bigint,
+    update_time: :bigint,
+    workflow_type: :text,
+    json_data: :text
+  ]
 
   @doc "Migrates the runtime schema of every configured repository."
   @spec migrate() :: :ok
@@ -65,7 +94,8 @@ defmodule Archon.Release do
   `create_time` order (none last) and then ID, in batches, each with its tasks in `seq` and then
   task ID order, and inserted with `ON CONFLICT DO NOTHING`, which keeps a row a commit already
   wrote. The run ends by recording that it finished; a run that stopped before that starts over,
-  and the rows it wrote stay. `queueWaitTime` of a task summary is taken at the time of the run.
+  and the rows it wrote stay. Runs on one schema wait for each other (an advisory lock), so a
+  second migrator finds the marker. `queueWaitTime` of a task summary is taken at the time of the run.
   Like a migration, it runs before the application and is not fenced. A row that does not decode
   raises.
   """
@@ -73,18 +103,43 @@ defmodule Archon.Release do
           :done | {:ok, non_neg_integer(), non_neg_integer()}
   def backfill_search_index(repo, prefix) do
     table = &Postgres.table(%Postgres{repo: repo, prefix: prefix}, &1)
+    <<key::signed-32>> = <<:erlang.crc32("search_index_backfill:" <> prefix)::32>>
 
+    # One connection, so the session lock serializes migrators of the schema; a second one finds
+    # the marker once the first is done.
+    repo.checkout(
+      fn ->
+        repo.query!(
+          "SELECT pg_advisory_lock($1::integer, $2::integer)",
+          [@backfill_lock_class, key],
+          timeout: :infinity
+        )
+
+        try do
+          backfill_unlocked(repo, table)
+        after
+          repo.query!("SELECT pg_advisory_unlock($1::integer, $2::integer)", [
+            @backfill_lock_class,
+            key
+          ])
+        end
+      end,
+      timeout: :infinity
+    )
+  end
+
+  defp backfill_unlocked(repo, table) do
     case repo.query!("SELECT 1 FROM #{table.("search_index_backfill")} LIMIT 1") do
       %{num_rows: 1} ->
         :done
 
       %{num_rows: 0} ->
         %{rows: ids} =
-          repo.query!(
+          query!(
+            repo,
             "SELECT workflow_id FROM #{table.("workflow")} " <>
               "ORDER BY create_time NULLS LAST, workflow_id",
-            [],
-            timeout: :infinity
+            []
           )
 
         now = System.system_time(:millisecond)
@@ -107,16 +162,21 @@ defmodule Archon.Release do
     end
   end
 
+  # A batch's rows have no bound on their size, so no statement of the backfill times out.
+  defp query!(repo, sql, params), do: repo.query!(sql, params, timeout: :infinity)
+
   # A workflow removed since its ID was read is skipped, and so are its tasks.
   defp backfill_batch(repo, table, ids, now) do
     %{rows: workflow_rows} =
-      repo.query!(
+      query!(
+        repo,
         "SELECT workflow_id, json_data FROM #{table.("workflow")} WHERE workflow_id = ANY($1)",
         [ids]
       )
 
     %{rows: task_rows} =
-      repo.query!(
+      query!(
+        repo,
         "SELECT workflow_id, task_id, json_data FROM #{table.("task")} " <>
           ~s|WHERE workflow_id = ANY($1) ORDER BY seq, task_id COLLATE "C"|,
         [ids]
@@ -136,18 +196,11 @@ defmodule Archon.Release do
           {task_id, json} <- Map.get(tasks, id, []),
           do: SearchIndex.task_row(decode!(Task, json, task_id), now)
 
-    insert_index(repo, table.("workflow_index"), workflows, ~w(workflow_id correlation_id
-      workflow_type start_time end_time update_time status parent_workflow_id classifier
-      json_data)a, ~w(text text text bigint bigint bigint text text text text))
+    insert_index(repo, table.("workflow_index"), workflows, @workflow_index_columns)
 
-    insert_index(
-      repo,
-      table.("task_index"),
-      tasks,
-      ~w(task_id task_type task_def_name status
-      start_time end_time update_time workflow_type json_data)a,
-      ~w(text text text text bigint bigint bigint text text)
-    )
+    tasks
+    |> Enum.chunk_every(@backfill_insert)
+    |> Enum.each(&insert_index(repo, table.("task_index"), &1, @task_index_columns))
 
     {length(workflows), length(tasks)}
   end
@@ -159,14 +212,21 @@ defmodule Archon.Release do
     end
   end
 
-  defp insert_index(_repo, _table, [], _columns, _types), do: :ok
+  defp insert_index(_repo, _table, [], _columns), do: :ok
 
-  # In list order, so new rows take their seq in that order.
-  defp insert_index(repo, table, rows, columns, types) do
+  # In list order: PostgreSQL computes the seq default as it inserts the sorted rows, as the
+  # store's commit relies on too.
+  defp insert_index(repo, table, rows, columns_and_types) do
+    columns = Keyword.keys(columns_and_types)
     names = Enum.join(columns, ", ")
-    arrays = types |> Enum.with_index(1) |> Enum.map_join(", ", fn {t, i} -> "$#{i}::#{t}[]" end)
 
-    repo.query!(
+    arrays =
+      columns_and_types
+      |> Enum.with_index(1)
+      |> Enum.map_join(", ", fn {{_column, type}, i} -> "$#{i}::#{type}[]" end)
+
+    query!(
+      repo,
       "INSERT INTO #{table} (#{names}) SELECT #{Enum.map_join(columns, ", ", &"u.#{&1}")} " <>
         "FROM unnest(#{arrays}) WITH ORDINALITY AS u(#{names}, n) ORDER BY u.n " <>
         "ON CONFLICT DO NOTHING",

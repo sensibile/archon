@@ -6,7 +6,8 @@ defmodule Archon.Runtime.Step.SearchIndexStepTest do
   @moduledoc """
   The search index rows `Archon.Runtime.Step` puts in its commits (ADR 0027, decision 2): where
   upstream's `ExecutionDAOFacade` indexes (`createWorkflow`, `updateWorkflow`, `updateTask`) and
-  where it does not (`createTasks`, `extendLease`). The 8a captures (`p8_index_*`) are the answer.
+  where it does not (`createTasks`, `extendLease`), as the 8a captures (`p8_index_*`, ADR 0027
+  decision 7) showed it.
   """
 
   use ExUnit.Case, async: true
@@ -51,14 +52,15 @@ defmodule Archon.Runtime.Step.SearchIndexStepTest do
   end
 
   # The workflow row is the stored workflow's whenever the commit writes the workflow, and each
-  # task row is that of a task the commit wrote.
+  # task row is that of a task the commit wrote or deleted after saving (keepLastN).
   defp check_rows!(%Commit{} = commit, stored) do
     if commit.create || commit.workflow,
       do: assert(commit.index_workflow == SearchIndex.workflow_row(stored)),
       else: assert(commit.index_workflow == nil)
 
     written =
-      Enum.map((commit.create && commit.create.tasks) || commit.upsert_tasks, & &1.task_id)
+      Enum.map((commit.create && commit.create.tasks) || commit.upsert_tasks, & &1.task_id) ++
+        commit.delete_task_ids
 
     for row <- commit.index_tasks, do: assert(row.task_id in written)
   end
@@ -105,6 +107,25 @@ defmodule Archon.Runtime.Step.SearchIndexStepTest do
     assert stored.status == :completed
     assert indexed(commit) == %{id => "COMPLETED"}
     assert commit.index_workflow.status == "COMPLETED"
+  end
+
+  test "a FORK is indexed once it runs after the task before it" do
+    fork =
+      task("FORK_JOIN", "fork", fork_tasks: [[task("SIMPLE", "left")], [task("SIMPLE", "right")]])
+
+    tasks = [task("SIMPLE", "first"), fork, task("JOIN", "join", join_on: ["left", "right"])]
+    {_reply, workflow, commit} = run(nil, {:start, new_workflow(tasks)})
+    assert indexed(commit) == %{}
+
+    first = by_ref(workflow, "first").task_id
+    {_task, workflow, _commit} = run(workflow, {:poll, first, "w"})
+
+    {_task, workflow, commit} =
+      run(workflow, {:update, result(workflow, "first", status: :completed)})
+
+    assert indexed(commit)[by_ref(workflow, "fork").task_id] == "COMPLETED"
+    # The branches are only scheduled.
+    refute Map.has_key?(indexed(commit), by_ref(workflow, "left").task_id)
   end
 
   test "a task skiptask makes is not indexed, then or when the workflow ends" do

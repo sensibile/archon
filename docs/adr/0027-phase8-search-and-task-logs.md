@@ -142,7 +142,9 @@ archon에 이미 있는 것(`541865c` 기준):
       마이그레이션만 한다. `backfill_search_index/0`은 `mix ecto.migrate`처럼 다른 방법으로 마이그레이션한 런타임 스키마용이다.
     - 읽기: 워크플로우 ID를 `create_time NULLS LAST, workflow_id` 순으로 한 번 읽고 500개씩 나눈다. 묶음마다 워크플로우와 태스크
       (`seq`, `task_id` 순)를 읽고, 그사이 지워진 워크플로우는 건너뛴다.
-    - 쓰기: ordinality 순서로 `ON CONFLICT DO NOTHING` 삽입한다. `queueWaitTime`은 백필을 실행한 시각으로 낸다.
+    - 쓰기: ordinality 순서로 `ON CONFLICT DO NOTHING` 삽입하고, 태스크 행은 1,000개씩 나눠 넣는다. `queueWaitTime`은 백필을
+      실행한 시각으로 낸다.
+    - 동시 실행: 한 스키마의 백필은 advisory lock으로 하나씩 돈다. 백필의 문장에는 시간 제한을 두지 않는다(묶음 크기에 상한이 없다).
     - 실패: 행을 디코드하지 못하면 예외를 낸다. 다시 실행하면 처음부터 돌고, 이미 쓴 행은 남는다.
     - 시험 스키마와 옛 버전 노드: [운영 문서](../operations.md)에 적었다.
 

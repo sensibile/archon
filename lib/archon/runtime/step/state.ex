@@ -275,11 +275,12 @@ defmodule Archon.Runtime.Step.State do
     }
   end
 
-  # In the order the tasks were first saved; a task deleted afterwards stays indexed, as upstream's
-  # removeTask leaves the index.
+  # In the order the tasks were first saved, once each; a task deleted afterwards stays indexed,
+  # as upstream's removeTask leaves the index.
   defp index_rows(%__MODULE__{index: index, now: now} = state) do
     state.order
     |> Enum.reverse()
+    |> Enum.uniq()
     |> Enum.filter(&Map.has_key?(index, &1))
     |> Enum.map(&SearchIndex.task_row(Map.fetch!(index, &1), now))
   end

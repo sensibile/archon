@@ -207,6 +207,15 @@ defmodule Archon.Runtime.PostgresTest do
       assert "search_index_backfill" in marked(@scratch)
     end
 
+    test "backfills of one schema run one at a time, and the second finds the marker" do
+      assert [_ | _] = Release.migrate(Repo, @scratch)
+
+      runs =
+        for _ <- 1..2, do: Task.async(fn -> Release.backfill_search_index(Repo, @scratch) end)
+
+      assert runs |> Enum.map(&Task.await/1) |> Enum.sort() == [:done, {:ok, 0, 0}]
+    end
+
     test "migrate/1 backfills each schema it migrates" do
       assert Release.migrate([@scratch]) == :ok
       assert "search_index_backfill" in marked(@scratch)

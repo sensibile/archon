@@ -801,7 +801,8 @@ defmodule Archon.Runtime.Store.Postgres do
   defp index_tasks(_instance, []), do: :ok
 
   # SqliteIndexDAO#indexTask, which keeps start_time and workflow_type. The rows (one per task ID)
-  # are inserted in list order, so new ones take their seq in that order.
+  # are inserted in list order, and PostgreSQL computes the seq default as it inserts the sorted
+  # rows, so new ones take their seq in that order.
   defp index_tasks(instance, rows) do
     query!(
       instance,
