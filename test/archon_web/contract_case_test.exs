@@ -41,8 +41,9 @@ defmodule ArchonWeb.ContractCaseTest do
     assert scenario() |> Enum.drop(first) |> Enum.all?(&String.starts_with?(elem(&1, 1), "p8_"))
   end
 
-  # ADR 0027, decision 7: every Phase 8 step reaches an action of its own, as each fixture is a
-  # Phase 8 route's answer (slice 8f removed the skipping of steps whose action was a skeleton).
+  # ADR 0027, decision 7: no Phase 8 fixture captured a path without a handler, so each step's
+  # request reaches a controller action (slice 8f removed the skipping of steps whose action was a
+  # skeleton; the full replay checks what the actions answer).
   test "every Phase 8 step reaches a handler" do
     for step <- scenario(),
         String.starts_with?(elem(step, 1), "p8_"),
@@ -50,8 +51,11 @@ defmodule ArchonWeb.ContractCaseTest do
       %{"method" => method, "path" => path} = Contract.fixture(elem(step, 1))["request"]
       uri = URI.parse(path).path
 
-      assert %{plug: plug} = Phoenix.Router.route_info(ArchonWeb.Router, method, uri, "localhost")
+      assert %{plug: plug, plug_opts: action} =
+               Phoenix.Router.route_info(ArchonWeb.Router, method, uri, "localhost")
+
       refute plug == ArchonWeb.Errors, inspect(step)
+      assert Code.ensure_loaded?(plug) and function_exported?(plug, action, 2), inspect(step)
     end
   end
 

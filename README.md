@@ -65,7 +65,7 @@ Phase 7은 MVP 밖 시스템 태스크 타입 12개를 열었다([ADR 0026](docs
 | Later | `EVENT`, `KAFKA_PUBLISH`, `PULL_WORKFLOW_MESSAGES` 등. 지금처럼 이름이 같은 태스크 정의의 워커 태스크로 다룬다 |
 
 Phase 8은 검색·색인과 task 실행 로그 경로 9개를 더했다([ADR 0027](docs/adr/0027-phase8-search-and-task-logs.md)). upstream 기본
-서버(SQLite 색인)처럼 워크플로우·태스크 요약을 별도 색인 표에 워크플로우 커밋과 같은 트랜잭션으로 쓰고, 질의 문법(`AND`로 이은
+서버(SQLite 색인)처럼 워크플로우·태스크 요약을 별도 색인 표에 동기로 쓰고(Archon은 워크플로우 커밋과 같은 트랜잭션), 질의 문법(`AND`로 이은
 `=`·`IN`·`>`·`<` 절, `*` 와일드카드), `freeText`(요약 JSON의 대소문자 무시 부분 문자열), `sort`, 페이징은 그 서버와 같다. 기존
 데이터는 릴리스의 마이그레이션 단계가 한 번 채운다([운영 문서](docs/operations.md)).
 
@@ -125,14 +125,15 @@ Phase 8 검색과 task 로그(ADR 0027):
 - 요약의 `input`·`output`, `taskToDomain`, `failedTaskNames`·`failedReferenceTaskNames`는 키·이름의 정렬 순이다(upstream은 입력
   순서와 `HashSet` 순서). 정의 없는 워크플로우의 요약은 `version` 0이다(upstream은 NPE). `classifier=agent`의 `agentHierarchy`
   정렬은 없다.
-- 시각 열은 epoch 밀리초로 비교한다. 1~9999년 밖 경계값과 기원전 경계의 upstream 글자 비교는 재현하지 않는다. 다른 문자 체계의
+- 시각 열은 epoch 밀리초로 비교한다. 1~9999년 밖 경계값은 모든 행보다 앞선 값으로 다루고, 기원전·1970년 이전 경계의 upstream
+  글자 비교는 재현하지 않는다. 다른 문자 체계의
   숫자는 숫자가 아닌 값이다. 50,000바이트를 넘는 `LIKE` 패턴은 늘 500이다.
 - `archiveWorkflow=false`의 색인·로그 삭제는 비동기가 아니라 같은 트랜잭션이다. 배포 전부터 있던 태스크는 백필에서 모두 색인한다.
   비동기 색인과 요약 JSON 직렬화 설정은 없다.
 - 검색의 다시 읽기(`-v2`, by-tasks)에서 저장소 오류가 나면 결과에서 빼지 않고 500이다.
 - `TaskResult.logs`의 `null` 원소는 버리고(upstream은 500), 로그 글의 잘못된 UTF-8과 NUL은 U+FFFD로 저장한다. POST 로그 body는
   `ISO-8859-1`·`US-ASCII`·`UTF-16` 계열 밖의 charset을 UTF-8로 읽는다. 브라우저가 교차 출처로 표시한 POST 로그는 403이다.
-- 자식 rerun에서 입력·상관 ID만 받는 위 단계는 `reran.` 로그를 쓰지 않고, outbox가 되살림을 다시 전달하면 자식 로그가 한 번 더
+- 자식 태스크 rerun이 위의 워크플로우로 이어질 때 입력·상관 ID만 받는 위 워크플로우 단계는 `reran.` 로그를 쓰지 않고, outbox가 되살림을 다시 전달하면 자식 로그가 한 번 더
   쌓일 수 있다.
 
 **인증 없음.** upstream OSS처럼 MVP REST에는 인증·인가가 없다([ADR 0024](docs/adr/0024-worker-input-trust-and-auth.md) 결정 4).

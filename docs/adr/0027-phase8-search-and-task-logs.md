@@ -467,8 +467,9 @@ archon에 이미 있는 것(`541865c` 기준):
 - **조각 8f에서 정한 것(2026-11-04).**
   - 재생 건너뛰기 장치를 없앴다: `ArchonWeb.ContractCase`의 `skip?/1`, 단계 옵션 `requires:`, 4튜플 `wait_status`, 세 컨트롤러
     (`SearchController`, `TaskLogController`, `WorkflowBulkController`)의 `unimplemented/0`과 persist 속성, `ContractCaseTest`의 건너뛰기
-    시험, `RouterTest`의 "미구현 액션은 404" 시험. 대신 `ContractCaseTest`가 모든 Phase 8 단계의 요청이 없는 경로의 404
-    (`ArchonWeb.Errors`)가 아닌 액션에 닿는 것을 본다. 이제 골든 픽스처 691개 전체가 메모리·Postgres 두 백엔드에서 건너뛰는 단계
+    시험, `RouterTest`의 "미구현 액션은 404" 시험. `ContractCaseTest`는 Phase 8 픽스처 중 없는 경로의 404를 캡처한 것이 없다는
+    시나리오 불변식(모든 Phase 8 단계의 요청이 `ArchonWeb.Errors`가 아닌 컨트롤러 액션에 닿음)만 보고, 액션의 응답은 전체 재생이
+    본다. 이제 골든 픽스처 691개 전체가 메모리·Postgres 두 백엔드에서 건너뛰는 단계
     없이 재생된다.
   - 조각 인계 노트에 빠진 픽스처는 없었다. 재캡처하지 않았다.
   - 조각들이 남긴 의도적 차이를 아래 "upstream과 의도적으로 다른 점"에 모으고 README 호환성 절에 요약했다. 상속 위험(인증 없는 로그
