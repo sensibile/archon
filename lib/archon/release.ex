@@ -8,7 +8,7 @@ defmodule Archon.Release do
 
   A release runs `migrate/0`, which migrates the runtime schema only. Development and tests also
   migrate the contract test schema (`migrate/1` with both prefixes, as `mix ecto.setup`
-  does; `test/test_helper.exs` uses `migrate/2`). Each Postgres schema keeps its own `schema_migrations` table.
+  does; the test setup, `Archon.PostgresCase.setup_database/0`, uses `migrate/2`). Each Postgres schema keeps its own `schema_migrations` table.
 
   `migrate/0` and `migrate/1` end with `backfill_search_index/2` for each schema, so the search
   index holds the rows written before it existed before the application starts (ADR 0027,

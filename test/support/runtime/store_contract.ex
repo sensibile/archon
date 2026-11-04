@@ -1194,6 +1194,15 @@ defmodule Archon.Runtime.StoreContract do
                    {:error, {:unknown_column, "correlation_id"}}
         end
 
+        test "a commit with two rows of one task raises", ctx do
+          create(ctx, workflow("wf1"))
+          t1 = task("wf1", 1)
+
+          assert_raise ArgumentError, fn ->
+            commit(ctx, "wf1", index_tasks: [trow(t1), trow(t1, update_time: 1)])
+          end
+        end
+
         test "deleting tasks leaves their rows", ctx do
           t1 = task("wf1", 1)
           wf = workflow("wf1", tasks: [t1])

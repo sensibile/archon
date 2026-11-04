@@ -89,7 +89,7 @@ defmodule Archon.Runtime.Commit do
   The checks every store makes before it applies `commit` to `workflow_id`, raising
   `ArgumentError` in the caller: the workflows belong to `workflow_id` and have a known status,
   the tasks have IDs and reference names and belong to `workflow_id`, the index rows are of
-  `workflow_id` and of task IDs, and `outbox_ack`, `outbox`, `wake` and `limits` have their
+  `workflow_id` and of distinct task IDs, and `outbox_ack`, `outbox`, `wake` and `limits` have their
   shapes. The queue operations are checked by the store's queue.
   """
   @spec check!(String.t(), t()) :: :ok
@@ -117,8 +117,10 @@ defmodule Archon.Runtime.Commit do
     unless row == nil or index_row?(row, :workflow_id, workflow_id),
       do: raise(ArgumentError, "invalid workflow index row #{inspect(row)} for #{workflow_id}")
 
-    unless is_list(rows) and Enum.all?(rows, &index_row?(&1, :task_id, nil)),
-      do: raise(ArgumentError, "invalid task index rows #{inspect(rows)}")
+    # One row per task, as one upsert statement takes them.
+    unless is_list(rows) and Enum.all?(rows, &index_row?(&1, :task_id, nil)) and
+             length(Enum.uniq_by(rows, & &1.task_id)) == length(rows),
+           do: raise(ArgumentError, "invalid task index rows #{inspect(rows)}")
   end
 
   # A row keyed by `key`, the given ID or any non-empty one, with its summary JSON.

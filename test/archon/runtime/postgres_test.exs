@@ -226,13 +226,19 @@ defmodule Archon.Runtime.PostgresTest do
 
       Repo.checkout(fn ->
         Repo.query!("SELECT pg_advisory_lock($1::integer, $2::integer)", lock)
-        waiting = Task.async(fn -> Release.backfill_search_index(Repo, @scratch) end)
-        assert Task.yield(waiting, 300) == nil
 
-        # What the running one leaves when it finishes.
-        Repo.query!(~s|INSERT INTO "#{@scratch}".search_index_backfill VALUES (1)|)
-        Repo.query!("SELECT pg_advisory_unlock($1::integer, $2::integer)", lock)
-        assert Task.await(waiting) == :done
+        try do
+          waiting = Task.async(fn -> Release.backfill_search_index(Repo, @scratch) end)
+          assert Task.yield(waiting, 300) == nil
+
+          # What the running one leaves when it finishes.
+          Repo.query!(~s|INSERT INTO "#{@scratch}".search_index_backfill VALUES (1)|)
+          Repo.query!("SELECT pg_advisory_unlock($1::integer, $2::integer)", lock)
+          assert Task.await(waiting) == :done
+        after
+          # A failed assertion must not leave the lock on a pooled connection.
+          Repo.query!("SELECT pg_advisory_unlock_all()")
+        end
       end)
     end
 
