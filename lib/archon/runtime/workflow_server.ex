@@ -513,7 +513,7 @@ defmodule Archon.Runtime.WorkflowServer do
   def handle_call({:remove, archive?}, _from, state) do
     with :ok <- Lifecycle.removable(state.workflow, archive?),
          :ok <- outbox_empty(state) do
-      remove_workflow(state)
+      remove_workflow(state, archive?)
     else
       error -> reply_and_settle(error, state)
     end
@@ -648,9 +648,10 @@ defmodule Archon.Runtime.WorkflowServer do
 
   defp outbox_empty(_state), do: {:error, :outbox_pending}
 
-  # ExecutionDAOFacade#removeWorkflow: the store, then the queue messages of the tasks.
-  defp remove_workflow(%__MODULE__{workflow: workflow} = state) do
-    case guard(fn -> Runtime.store().remove_workflow(state.id) end) do
+  # ExecutionDAOFacade#removeWorkflow: the store (with the search index unless archive?), then
+  # the queue messages of the tasks.
+  defp remove_workflow(%__MODULE__{workflow: workflow} = state, archive?) do
+    case guard(fn -> Runtime.store().remove_workflow(state.id, archive?) end) do
       {:ok, result} when result in [:ok, {:error, :not_found}] ->
         Enum.each(workflow.tasks, &remove_message(state, &1))
         cancel_timer(state.timer)
@@ -884,7 +885,9 @@ defmodule Archon.Runtime.WorkflowServer do
          outbox: [],
          wake: :keep,
          limits: limits,
-         queue: []
+         queue: [],
+         index_workflow: nil,
+         index_tasks: []
        })
        when map_size(limits) == 0,
        do: true
@@ -1013,11 +1016,11 @@ defmodule Archon.Runtime.WorkflowServer do
     %{journal | committed?: true, pushed: Enum.reverse(pushed, journal.pushed)}
   end
 
-  # startWorkflow's cleanup (ExecutionDAOFacade#removeWorkflow): the workflow and its tasks,
-  # then the queue messages this process pushed.
+  # startWorkflow's cleanup (ExecutionDAOFacade#removeWorkflow(id, false)): the workflow, its
+  # tasks and their index rows, then the queue messages this process pushed.
   defp remove_started(state) do
     removals =
-      [{:workflow, fn -> Runtime.store().remove_workflow(state.id) end}] ++
+      [{:workflow, fn -> Runtime.store().remove_workflow(state.id, false) end}] ++
         for {queue, id} <- state.journal.pushed,
             do: {{:queue, queue, id}, fn -> Runtime.queue().remove(queue, id) end}
 

@@ -140,6 +140,22 @@ echo "path check exit: $?"
   막지 못한다. 테스트를 약하게 만드는 추가(제외 설정, skip 태그)도 경로로는 잡히지 않아 Codex 리뷰에 기댄다.
   남는 위험은 [ADR 0013](adr/0013-taeguk-daily-workers.md) 결과에 적었다.
 
+## 마이그레이션과 검색 색인 백필
+
+[ADR 0027](adr/0027-phase8-search-and-task-logs.md) 결정 2의 검색 색인(`workflow_index`, `task_index`)은 커밋이 채운다.
+색인 표가 생기기 전에 저장된 행은 `Archon.Release.backfill_search_index/2`가 한 번 채운다.
+
+- 릴리스는 `Archon.Release.migrate/0`으로 마이그레이션한다. 개발 환경에서는 `mix ecto.setup`(`migrate/1`, 두 스키마)을 쓴다.
+  두 함수 모두 스키마마다 마이그레이션 뒤 백필을 부르고, 끝나면 `search_index_backfill` 표에 완료 표시를 남긴다. 완료 표시가 있으면
+  다시 돌려도 아무것도 하지 않는다.
+- `mix ecto.migrate`처럼 다른 방법으로 마이그레이션했으면, 앱을 띄우기 전에 `Archon.Release.backfill_search_index()`를 실행한다
+  (런타임 스키마). 백필이 중간에 멈추면 완료 표시가 남지 않는다. 다시 실행하면 처음부터 돌고, 이미 있는 행은 그대로 둔다
+  (`ON CONFLICT DO NOTHING`).
+- 옛 버전 노드가 아직 돌고 있을 때 마이그레이션하면, 백필이 끝난 뒤 그 노드가 쓴 변경은 색인에 들어가지 않는다. 그 워크플로우나
+  태스크가 다시 저장되기 전까지 검색 결과에 반영되지 않으므로, 옛 노드를 멈춘 뒤 마이그레이션한다.
+- 시험은 `Archon.Release.migrate/2`로 마이그레이션만 하므로 시험 스키마에는 완료 표시가 없다. `PostgresCase.reset!/1`은 색인 표
+  세 개를 비우고, 완료 표시 표는 `schema_migrations`처럼 그대로 둔다.
+
 ## 공통
 
 - 데일리 정리와 테스트 보강의 검증 명령은 AGENTS.md "검증"의 여섯 가지다. 검증 건강도의 스위트는 위 절의 목록이다.

@@ -6,12 +6,16 @@ defmodule Archon.Runtime.PostgresTest do
 
   use Archon.PostgresCase
 
+  alias Archon.Domain.Task, as: DomainTask
   alias Archon.Domain.{Workflow, WorkflowDef}
   alias Archon.Release
+  alias Archon.Runtime.SearchIndex
 
   @scratch "archon_migration_test"
   # The first migration: the runtime tables.
   @first 20_261_031_000_000
+  # The workflow query columns, the last migration before the search index.
+  @query_columns 20_261_102_000_000
 
   describe "new/1" do
     test "defaults to the runtime schema without fencing" do
@@ -40,16 +44,19 @@ defmodule Archon.Runtime.PostgresTest do
     end
 
     test "create the schema, the tables and the node_lease row, and roll back" do
-      assert [@first, _query_columns] = Release.migrate(Repo, @scratch)
+      assert [@first, _query_columns, _search_index] = Release.migrate(Repo, @scratch)
+
       assert tables(@scratch) == ~w(meta_task_def meta_workflow_def node_lease outbox poll_data
-                                     queue_message schema_migrations task workflow)
+                                     queue_message schema_migrations search_index_backfill task
+                                     task_execution_logs task_index workflow workflow_index)
+
       assert Repo.query!(~s(SELECT id, epoch FROM "#{@scratch}".node_lease)).rows == [[1, 0]]
       assert Release.migrate(Repo, @scratch) == []
 
-      assert [_query_columns, @first] = Release.rollback(Repo, @scratch, 0)
+      assert [_search_index, _query_columns, @first] = Release.rollback(Repo, @scratch, 0)
       assert tables(@scratch) == ["schema_migrations"]
 
-      assert [@first, _query_columns] = Release.migrate(Repo, @scratch)
+      assert [@first, _query_columns, _search_index] = Release.migrate(Repo, @scratch)
       assert Repo.query!(~s(SELECT id, epoch FROM "#{@scratch}".node_lease)).rows == [[1, 0]]
     end
 
@@ -102,7 +109,7 @@ defmodule Archon.Runtime.PostgresTest do
         )
       end
 
-      assert [_query_columns] = Release.migrate(Repo, @scratch)
+      assert [_query_columns, _search_index] = Release.migrate(Repo, @scratch)
 
       assert Repo.query!(
                ~s|SELECT count(*) FROM "#{@scratch}".workflow WHERE create_time IS NULL|
@@ -123,6 +130,89 @@ defmodule Archon.Runtime.PostgresTest do
              ]
     end
 
+    # ADR 0027, decision 2: the rows written before the index, once.
+    test "the search index backfill indexes every row once, keeping rows already written" do
+      migrate_to(@query_columns)
+
+      definition = %WorkflowDef{name: "flow", version: 1}
+
+      workflows = [
+        # In create time order, the one without a create time last, then by ID in bytes.
+        %Workflow{workflow_id: "b", status: :running, create_time: 5, update_time: 6},
+        %Workflow{workflow_id: "a", status: :completed, create_time: 9, end_time: 12},
+        %Workflow{workflow_id: "B", status: :running, create_time: 9},
+        %Workflow{workflow_id: "n", status: :running, correlation_id: "c\u0000"}
+      ]
+
+      for workflow <- workflows do
+        workflow = %{workflow | workflow_definition: definition}
+
+        Repo.query!(
+          ~s|INSERT INTO "#{@scratch}".workflow (workflow_id, status, create_time, json_data) | <>
+            "VALUES ($1, 'RUNNING', $2, $3)",
+          [
+            workflow.workflow_id,
+            if(workflow.workflow_id == "n", do: nil, else: workflow.create_time),
+            workflow |> Workflow.to_storage() |> JSON.encode!()
+          ]
+        )
+      end
+
+      tasks = [
+        task("b", "t2", 2, start_time: 20, scheduled_time: 15),
+        task("b", "t1", 1, status: :scheduled),
+        task("a", "t3", 1, status: :completed, start_time: 10, end_time: 11)
+      ]
+
+      for task <- tasks do
+        Repo.query!(
+          ~s|INSERT INTO "#{@scratch}".task (task_id, workflow_id, seq, status, json_data) | <>
+            "VALUES ($1, $2, $3, 'SCHEDULED', $4)",
+          [
+            task.task_id,
+            task.workflow_instance_id,
+            task.seq,
+            task |> DomainTask.to_storage() |> JSON.encode!()
+          ]
+        )
+      end
+
+      assert [_search_index] = Release.migrate(Repo, @scratch)
+      refute "search_index_backfill" in marked(@scratch)
+
+      # A row a commit wrote before the backfill reached it.
+      Repo.query!(
+        ~s|INSERT INTO "#{@scratch}".task_index (task_id, json_data) VALUES ('t3', 'kept')|
+      )
+
+      assert Release.backfill_search_index(Repo, @scratch) == {:ok, 4, 3}
+
+      assert index(@scratch, "workflow_index", "workflow_id") == [
+               {"b",
+                SearchIndex.workflow_row(with_definition(Enum.at(workflows, 0), definition))},
+               {"B",
+                SearchIndex.workflow_row(with_definition(Enum.at(workflows, 2), definition))},
+               {"a",
+                SearchIndex.workflow_row(with_definition(Enum.at(workflows, 1), definition))},
+               {"n", SearchIndex.workflow_row(with_definition(Enum.at(workflows, 3), definition))}
+             ]
+
+      assert [{"t3", %{json_data: "kept"}}, {"t1", t1}, {"t2", t2}] =
+               index(@scratch, "task_index", "task_id")
+
+      assert t1 == SearchIndex.task_row(Enum.at(tasks, 1), 0)
+      assert t2 == SearchIndex.task_row(Enum.at(tasks, 0), 0)
+
+      assert Release.backfill_search_index(Repo, @scratch) == :done
+      assert "search_index_backfill" in marked(@scratch)
+    end
+
+    test "migrate/1 backfills each schema it migrates" do
+      assert Release.migrate([@scratch]) == :ok
+      assert "search_index_backfill" in marked(@scratch)
+      assert Release.backfill_search_index(Repo, @scratch) == :done
+    end
+
     test "node_lease holds a single row" do
       Release.migrate(Repo, @scratch)
 
@@ -140,7 +230,12 @@ defmodule Archon.Runtime.PostgresTest do
             [prefix]
           )
 
-        assert rows == [["outbox", "C"], ["task", "C"], ["workflow", "C"]]
+        assert rows == [
+                 ["outbox", "C"],
+                 ["task", "C"],
+                 ["workflow", "C"],
+                 ["workflow_index", "C"]
+               ]
       end
     end
 
@@ -352,6 +447,41 @@ defmodule Archon.Runtime.PostgresTest do
   end
 
   # Release.migrate/2 runs every migration; this stops after `version`.
+  defp task(workflow_id, task_id, seq, fields) do
+    struct!(
+      %DomainTask{
+        task_id: task_id,
+        workflow_instance_id: workflow_id,
+        seq: seq,
+        reference_task_name: task_id,
+        task_type: "SIMPLE",
+        status: :in_progress
+      },
+      fields
+    )
+  end
+
+  defp with_definition(workflow, definition), do: %{workflow | workflow_definition: definition}
+
+  # The schema's tables that hold a row.
+  defp marked(schema) do
+    for table <- tables(schema),
+        Repo.query!(~s|SELECT 1 FROM "#{schema}"."#{table}" LIMIT 1|).num_rows == 1,
+        do: table
+  end
+
+  # The rows of an index table in seq order, as maps of their columns without seq.
+  defp index(schema, table, id) do
+    %{columns: columns, rows: rows} =
+      Repo.query!(~s|SELECT * FROM "#{schema}"."#{table}" ORDER BY seq|)
+
+    Enum.map(rows, fn row ->
+      map = columns |> Enum.map(&String.to_atom/1) |> Enum.zip(row) |> Map.new()
+      map = Map.delete(map, :seq)
+      {Map.fetch!(map, String.to_atom(id)), map}
+    end)
+  end
+
   defp migrate_to(version) do
     Repo.query!(~s(CREATE SCHEMA IF NOT EXISTS "#{@scratch}"))
     previous = Code.get_compiler_option(:ignore_module_conflict)

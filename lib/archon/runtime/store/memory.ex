@@ -8,15 +8,16 @@
 # SqlitePollDataDAO.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: an in-memory GenServer holding the structs as they are (ADR 0018,
 # decision 3); a commit is applied in one message, so readers never see half of it, and also holds
-# the outbox, re-evaluation times and limit checks of ADR 0021, and the ordered queries by name
-# of ADR 0025.
+# the outbox, re-evaluation times and limit checks of ADR 0021, the ordered queries by name
+# of ADR 0025, and the search index of ADR 0027 (SqliteIndexDAO's upserts and removals).
 
 defmodule Archon.Runtime.Store.Memory do
   @moduledoc """
   In-memory `Archon.Runtime.Store` for development and tests (ADR 0018, decision 3).
 
-  One GenServer holds the workflows (without tasks), the tasks, the outbox, the re-evaluation times
-  and the poll data. Data is lost when the process stops. Each function takes an optional first
+  One GenServer holds the workflows (without tasks), the tasks, the outbox, the re-evaluation times,
+  the poll data and the search index rows (ADR 0027, decision 2), searched with
+  `Archon.Search.Query.run/5`. Data is lost when the process stops. Each function takes an optional first
   argument, the server (this module's name by default); the arities without it are the behaviour
   callbacks.
 
@@ -40,6 +41,7 @@ defmodule Archon.Runtime.Store.Memory do
   alias Archon.Runtime.{Commit, Store}
   alias Archon.Runtime.Queue.Memory, as: Queue
   alias Archon.Runtime.Step.Effect
+  alias Archon.Search.Query
 
   @queue_timeout 5_000
 
@@ -135,9 +137,9 @@ defmodule Archon.Runtime.Store.Memory do
   defp storable?(value), do: String.valid?(value) and not String.contains?(value, <<0>>)
 
   @impl Store
-  @spec remove_workflow(GenServer.server(), String.t()) :: :ok | {:error, :not_found}
-  def remove_workflow(server \\ __MODULE__, id),
-    do: GenServer.call(server, {:remove_workflow, id})
+  @spec remove_workflow(GenServer.server(), String.t(), boolean()) :: :ok | {:error, :not_found}
+  def remove_workflow(server \\ __MODULE__, id, archive?) when is_boolean(archive?),
+    do: GenServer.call(server, {:remove_workflow, id, archive?})
 
   @impl Store
   @spec in_progress_count(GenServer.server(), String.t()) :: non_neg_integer()
@@ -205,6 +207,28 @@ defmodule Archon.Runtime.Store.Memory do
     GenServer.call(server, {:get_poll_data, task_type, domain})
   end
 
+  @impl Store
+  @spec search_workflows(GenServer.server(), Query.t(), integer(), integer()) ::
+          Store.search_page()
+  def search_workflows(server \\ __MODULE__, %Query{} = query, start, size)
+      when is_integer(start) and is_integer(size),
+      do: search(server, :workflow_index, query, start, size)
+
+  @impl Store
+  @spec search_tasks(GenServer.server(), Query.t(), integer(), integer()) :: Store.search_page()
+  def search_tasks(server \\ __MODULE__, %Query{} = query, start, size)
+      when is_integer(start) and is_integer(size),
+      do: search(server, :task_index, query, start, size)
+
+  # The rows are copied out and searched in the caller, so a slow search does not hold the store.
+  defp search(server, table, query, start, size) do
+    rows = GenServer.call(server, {:index_rows, table})
+    id = if table == :workflow_index, do: :workflow_id, else: :task_id
+
+    with {:ok, total, page} <- Query.run(query, table, rows, start, size),
+         do: {:ok, total, Enum.map(page, &{Map.fetch!(&1, id), &1.json_data})}
+  end
+
   @impl GenServer
   def init(opts) do
     state = %{
@@ -217,7 +241,13 @@ defmodule Archon.Runtime.Store.Memory do
       outbox_seq: 0,
       # workflow ID => epoch ms (no key: not set)
       wake_at: %{},
-      poll_data: %{}
+      poll_data: %{},
+      # ID => row with its `seq` (Archon.Runtime.SearchIndex)
+      workflow_index: %{},
+      task_index: %{},
+      index_seq: 0,
+      # task ID => execution logs (task_execution_logs)
+      task_logs: %{}
     }
 
     {:ok, state}
@@ -327,12 +357,19 @@ defmodule Archon.Runtime.Store.Memory do
     {:reply, ids, state}
   end
 
-  def handle_call({:remove_workflow, id}, _from, state) do
+  def handle_call({:index_rows, table}, _from, state) do
+    {:reply, state |> Map.fetch!(table) |> Map.values(), state}
+  end
+
+  def handle_call({:remove_workflow, id, archive?}, _from, state) do
     if Map.has_key?(state.workflows, id) do
+      task_ids = MapSet.to_list(state.task_ids[id])
+      state = if archive?, do: state, else: remove_index(state, id, task_ids)
+
       state = %{
         state
         | workflows: Map.delete(state.workflows, id),
-          tasks: Map.drop(state.tasks, MapSet.to_list(state.task_ids[id])),
+          tasks: Map.drop(state.tasks, task_ids),
           task_ids: Map.delete(state.task_ids, id),
           outbox: Map.delete(state.outbox, id),
           wake_at: Map.delete(state.wake_at, id)
@@ -374,9 +411,62 @@ defmodule Archon.Runtime.Store.Memory do
         |> ack(workflow_id, commit.outbox_ack)
         |> append_outbox(workflow_id, commit.outbox)
         |> put_wake(workflow_id, commit.wake)
+        |> index_workflow(commit.index_workflow)
+        |> index_tasks(commit.index_tasks)
 
       with :ok <- check_limits(state, commit.limits), do: {:ok, state}
     end
+  end
+
+  defp index_workflow(state, nil), do: state
+
+  defp index_workflow(state, row),
+    do: upsert_index(state, :workflow_index, row.workflow_id, row, [])
+
+  # SqliteIndexDAO#indexTask does not change a task row's start time and workflow type.
+  defp index_tasks(state, rows) do
+    Enum.reduce(rows, state, fn row, state ->
+      upsert_index(state, :task_index, row.task_id, row, [:start_time, :workflow_type])
+    end)
+  end
+
+  # ON CONFLICT DO UPDATE ... WHERE excluded.update_time >= update_time: a NULL time on either
+  # side changes nothing. A new row takes the next `seq`; a replaced one keeps its own.
+  defp upsert_index(state, table, id, row, kept) do
+    rows = Map.fetch!(state, table)
+
+    case rows do
+      %{^id => stored} ->
+        if newer?(row.update_time, stored.update_time),
+          do:
+            Map.put(
+              state,
+              table,
+              Map.put(rows, id, Map.merge(row, Map.take(stored, [:seq | kept])))
+            ),
+          else: state
+
+      %{} ->
+        seq = state.index_seq + 1
+
+        state
+        |> Map.put(table, Map.put(rows, id, Map.put(row, :seq, seq)))
+        |> Map.put(:index_seq, seq)
+    end
+  end
+
+  defp newer?(time, stored) when is_integer(time) and is_integer(stored), do: time >= stored
+  defp newer?(_time, _stored), do: false
+
+  # ExecutionDAOFacade#removeWorkflow(id, false): the workflow's row, and the rows and logs of the
+  # tasks it has now.
+  defp remove_index(state, id, task_ids) do
+    %{
+      state
+      | workflow_index: Map.delete(state.workflow_index, id),
+        task_index: Map.drop(state.task_index, task_ids),
+        task_logs: Map.drop(state.task_logs, task_ids)
+    }
   end
 
   # The queue cannot be rolled back, so it goes last; an exit is the caller's, not the store's.

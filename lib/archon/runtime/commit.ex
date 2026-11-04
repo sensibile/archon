@@ -33,13 +33,20 @@ defmodule Archon.Runtime.Commit do
       store refuses the commit with `{:error, {:limit, name}}` (ADR 0021, decision 5).
     * `queue` - worker queue operations (`Archon.Runtime.Queue`), applied in this order. They take
       the epoch time `deliver_on` a message becomes visible instead of a delay.
+    * `index_workflow` - the workflow's search index row (`Archon.Runtime.SearchIndex`), or `nil`:
+      upstream indexes the workflow when it creates or saves it (ADR 0027, decision 2).
+    * `index_tasks` - search index rows of the tasks upstream indexes in this change
+      (`ExecutionDAOFacade#updateTask`, not `createTasks` or `extendLease`).
 
   The store applies the fields in that order, checks the limits, and applies the queue operations
   last, all or none, and never stamps times: `Archon.Runtime.Step` sets the `updateTime`/`endTime`
-  values upstream's `ExecutionDAOFacade` stamps when it saves.
+  values upstream's `ExecutionDAOFacade` stamps when it saves. An index row replaces the stored
+  one only when its `update_time` is not older, and a task row keeps its stored `start_time` and
+  `workflow_type` (`SqliteIndexDAO`).
   """
 
   alias Archon.Domain.{Task, Workflow}
+  alias Archon.Runtime.SearchIndex
   alias Archon.Runtime.Step.Effect
 
   defstruct create: nil,
@@ -50,7 +57,9 @@ defmodule Archon.Runtime.Commit do
             outbox: [],
             wake: :keep,
             limits: %{},
-            queue: []
+            queue: [],
+            index_workflow: nil,
+            index_tasks: []
 
   @typedoc "A worker queue operation; `deliver_on` is epoch milliseconds."
   @type queue_op ::
@@ -71,14 +80,17 @@ defmodule Archon.Runtime.Commit do
           outbox: [Effect.t()],
           wake: wake(),
           limits: %{optional(String.t()) => pos_integer()},
-          queue: [queue_op()]
+          queue: [queue_op()],
+          index_workflow: SearchIndex.workflow_row() | nil,
+          index_tasks: [SearchIndex.task_row()]
         }
 
   @doc """
   The checks every store makes before it applies `commit` to `workflow_id`, raising
   `ArgumentError` in the caller: the workflows belong to `workflow_id` and have a known status,
-  the tasks have IDs and reference names and belong to `workflow_id`, and `outbox_ack`, `outbox`,
-  `wake` and `limits` have their shapes. The queue operations are checked by the store's queue.
+  the tasks have IDs and reference names and belong to `workflow_id`, the index rows are of
+  `workflow_id` and of task IDs, and `outbox_ack`, `outbox`, `wake` and `limits` have their
+  shapes. The queue operations are checked by the store's queue.
   """
   @spec check!(String.t(), t()) :: :ok
   # Upstream ExecutionDAO#createTasks rejects these before writing; a bad commit is a bug in the
@@ -97,8 +109,27 @@ defmodule Archon.Runtime.Commit do
     check_outbox!(commit.outbox, commit.outbox_ack)
     check_wake!(commit.wake)
     check_limits!(commit.limits)
+    check_index!(workflow_id, commit.index_workflow, commit.index_tasks)
     :ok
   end
+
+  defp check_index!(workflow_id, row, rows) do
+    unless row == nil or index_row?(row, :workflow_id, workflow_id),
+      do: raise(ArgumentError, "invalid workflow index row #{inspect(row)} for #{workflow_id}")
+
+    unless is_list(rows) and Enum.all?(rows, &index_row?(&1, :task_id, nil)),
+      do: raise(ArgumentError, "invalid task index rows #{inspect(rows)}")
+  end
+
+  # A row keyed by `key`, the given ID or any non-empty one, with its summary JSON.
+  defp index_row?(%{json_data: json} = row, key, id) when is_binary(json) do
+    case Map.get(row, key) do
+      value when is_binary(value) and value != "" -> id == nil or value == id
+      _other -> false
+    end
+  end
+
+  defp index_row?(_row, _key, _id), do: false
 
   defp check_outbox!(outbox, acks) do
     unless is_list(outbox) and is_list(acks) and Enum.all?(acks, &(is_integer(&1) and &1 > 0)),

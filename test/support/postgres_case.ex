@@ -21,7 +21,9 @@ defmodule Archon.PostgresCase do
   alias Archon.Runtime.Postgres.NodeLock
 
   # Every table of the migrations except the single node_lease row, which is reset.
-  @tables ~w(workflow task outbox queue_message poll_data meta_task_def meta_workflow_def)
+  # The search index backfill's marker stays, as schema_migrations does: it is the schema's state.
+  @tables ~w(workflow task outbox queue_message poll_data meta_task_def meta_workflow_def
+             workflow_index task_index task_execution_logs)
 
   using do
     quote do

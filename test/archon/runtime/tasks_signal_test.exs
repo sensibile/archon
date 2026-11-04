@@ -245,7 +245,7 @@ defmodule Archon.Runtime.TasksSignalTest do
           create: %{stored | workflow_id: id, tasks: tasks}
         })
 
-      on_exit(fn -> Runtime.store().remove_workflow(id) end)
+      on_exit(fn -> Runtime.store().remove_workflow(id, false) end)
 
       assert Tasks.signal(id, :completed, %{"s" => 1}) == {:ok, nil}
 
@@ -260,7 +260,7 @@ defmodule Archon.Runtime.TasksSignalTest do
       parent = start("archon_ops_signal_parent")
       child = child(parent)
       eventually(fn -> task(child, "wait1_ref") end)
-      :ok = Runtime.store().remove_workflow(child)
+      :ok = Runtime.store().remove_workflow(child, false)
 
       assert Tasks.signal(parent, :completed, %{}) ==
                {:error, {:not_found, "No such workflow found by id: #{child}"}}

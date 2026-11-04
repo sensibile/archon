@@ -246,7 +246,7 @@ defmodule ArchonWeb.SignalResponderTest do
     test "a child removed from the store is passed over" do
       parent = start("archon_ops_signal_parent")
       child = child(parent)
-      :ok = Runtime.store().remove_workflow(child)
+      :ok = Runtime.store().remove_workflow(child, false)
 
       assert SignalResponder.blocking_tasks(workflow(parent), []) == {[], nil}
     end

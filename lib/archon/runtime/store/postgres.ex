@@ -15,11 +15,14 @@
 # keeping lastPollTime from going back, and every write is fenced by the node epoch (ADR 0021,
 # decisions 2 to 7); the queries by name and correlation ID read index columns of the workflow
 # row instead of the workflow_def_to_workflow and workflow_pending tables (ADR 0025, decision 4).
+# The search index upserts and removals of sqlite-persistence/.../SqliteIndexDAO.java run in the
+# commit's and the removal's transaction instead of their own (ADR 0027, decision 2).
 
 defmodule Archon.Runtime.Store.Postgres do
   @moduledoc """
   PostgreSQL `Archon.Runtime.Store` on the `workflow`, `task`, `outbox` and `poll_data` tables
-  (ADR 0021, decisions 2 to 7).
+  (ADR 0021, decisions 2 to 7) and the search index tables `workflow_index`, `task_index` and
+  `task_execution_logs` (ADR 0027, decision 2).
 
   Each function takes an optional first argument, an `Archon.Runtime.Postgres` instance
   (`Archon.Runtime.Postgres.runtime/0` by default); the arities without it are the behaviour
@@ -40,7 +43,8 @@ defmodule Archon.Runtime.Store.Postgres do
   `commit/3` applies every field of the commit in one transaction (`Archon.Runtime.Postgres.transaction/2`,
   so its first statement is the write fence): it takes the limit locks, writes the workflow and
   its tasks, the outbox and the re-evaluation time, checks the limits and applies the queue
-  operations with `Archon.Runtime.Queue.Postgres.apply_ops/2` on the same connection. A refused
+  operations with `Archon.Runtime.Queue.Postgres.apply_ops/2` on the same connection; the index
+  rows are upserted just before the limit check. A refused
   commit rolls all of it back, and so does an exception, which reaches the caller (a database
   failure raises, ADR 0021 L5). A commit whose node epoch is stale is `{:error, :fenced}`.
 
@@ -66,7 +70,8 @@ defmodule Archon.Runtime.Store.Postgres do
   JSON; NUL inside JSON values is escaped and kept. Reads and deletes treat such an ID or name as
   absent. A page cursor with one raises `ArgumentError`, as no stored ID can have produced it.
 
-  A workflow's definition name and version, correlation ID and create time are the exception:
+  A workflow's definition name and version, correlation ID and create time, and the index rows'
+  columns other than their IDs (`Archon.Runtime.SearchIndex`), are the exception:
   only the queries read their columns, so a value a column cannot hold (NUL, invalid UTF-8, a
   number outside the column's range) leaves it `NULL` instead of refusing the commit, and the
   queries do not find that workflow by it (`Archon.Runtime.Store`).
@@ -84,6 +89,7 @@ defmodule Archon.Runtime.Store.Postgres do
   alias Archon.Runtime.{Commit, Postgres, Store}
   alias Archon.Runtime.Queue.Postgres, as: PgQueue
   alias Archon.Runtime.Step.Effect
+  alias Archon.Search.Query
 
   # The first key of the two-key advisory locks on task definition names ("Arch" in ASCII); the
   # two-key space never meets the one-key node lock and fence keys.
@@ -243,19 +249,52 @@ defmodule Archon.Runtime.Store.Postgres do
   defp clamp(ms), do: ms |> max(@bigint_range.first) |> min(@bigint_range.last)
 
   @impl Store
-  @spec remove_workflow(Postgres.t(), String.t()) :: :ok | {:error, :not_found}
-  def remove_workflow(instance \\ Postgres.runtime(), id) when is_binary(id) do
+  @spec remove_workflow(Postgres.t(), String.t(), boolean()) :: :ok | {:error, :not_found}
+  def remove_workflow(instance \\ Postgres.runtime(), id, archive?)
+      when is_binary(id) and is_boolean(archive?) do
     if storable?(id),
-      do: Postgres.transaction!(instance, fn -> delete_workflow(instance, id) end),
+      do: Postgres.transaction!(instance, fn -> delete_workflow(instance, id, archive?) end),
       else: {:error, :not_found}
   end
 
-  # The tasks and the outbox go with it (ON DELETE CASCADE).
-  defp delete_workflow(instance, id) do
+  # The tasks and the outbox go with it (ON DELETE CASCADE). Without archive?, first the index rows
+  # of the workflow and of the tasks it has, and their logs, under the workflow's row lock.
+  defp delete_workflow(instance, id, true) do
     %{num_rows: rows} =
       query!(instance, "DELETE FROM #{table(instance, "workflow")} WHERE workflow_id = $1", [id])
 
     if rows == 1, do: :ok, else: {:error, :not_found}
+  end
+
+  defp delete_workflow(instance, id, false) do
+    case query!(
+           instance,
+           "SELECT 1 FROM #{table(instance, "workflow")} WHERE workflow_id = $1 FOR UPDATE",
+           [id]
+         ) do
+      %{num_rows: 0} ->
+        {:error, :not_found}
+
+      %{num_rows: 1} ->
+        tasks =
+          ~s|SELECT task_id COLLATE "C" FROM #{table(instance, "task")} WHERE workflow_id = $1|
+
+        for name <- ["task_execution_logs", "task_index"],
+            do:
+              query!(
+                instance,
+                "DELETE FROM #{table(instance, name)} WHERE task_id IN (#{tasks})",
+                [id]
+              )
+
+        query!(
+          instance,
+          "DELETE FROM #{table(instance, "workflow_index")} WHERE workflow_id = $1",
+          [id]
+        )
+
+        delete_workflow(instance, id, true)
+    end
   end
 
   @impl Store
@@ -406,6 +445,38 @@ defmodule Archon.Runtime.Store.Postgres do
   defp poll_key(nil), do: "DEFAULT"
   defp poll_key(domain), do: domain
 
+  @impl Store
+  @spec search_workflows(Postgres.t(), Query.t(), integer(), integer()) :: Store.search_page()
+  def search_workflows(instance \\ Postgres.runtime(), %Query{} = query, start, size)
+      when is_integer(start) and is_integer(size),
+      do: search(instance, :workflow_index, "workflow_id", query, start, size)
+
+  @impl Store
+  @spec search_tasks(Postgres.t(), Query.t(), integer(), integer()) :: Store.search_page()
+  def search_tasks(instance \\ Postgres.runtime(), %Query{} = query, start, size)
+      when is_integer(start) and is_integer(size),
+      do: search(instance, :task_index, "task_id", query, start, size)
+
+  # The page and the count are two statements, as upstream's SqliteIndexDAO runs them.
+  defp search(instance, table, id, query, start, size) do
+    with {:ok, %{where: where, params: params, order_by: order_by}} <- Query.sql(query, table) do
+      name = table(instance, Atom.to_string(table))
+      {limit, offset} = Query.limit_offset(start, size)
+      n = length(params)
+
+      %{rows: rows} =
+        query!(
+          instance,
+          "SELECT #{id}, json_data FROM #{name} #{where} #{order_by} " <>
+            "LIMIT $#{n + 1} OFFSET $#{n + 2}",
+          params ++ [limit, offset]
+        )
+
+      %{rows: [[total]]} = query!(instance, "SELECT count(*) FROM #{name} #{where}", params)
+      {:ok, total, Enum.map(rows, fn [id, json] -> {id, json} end)}
+    end
+  end
+
   ## Commit
 
   # Applies the encoded commit inside the fenced transaction, in the order of the memory store.
@@ -423,6 +494,8 @@ defmodule Archon.Runtime.Store.Postgres do
          :ok <- delete_outbox(instance, workflow_id, outbox_ids(commit.outbox_ack)),
          :ok <- append_outbox(instance, workflow_id, rows.outbox),
          :ok <- put_wake(instance, workflow_id, commit.wake),
+         :ok <- index_workflow(instance, rows.index_workflow),
+         :ok <- index_tasks(instance, rows.index_tasks),
          :ok <- check_limits(instance, commit.limits),
          :ok <- PgQueue.apply_ops(instance, commit.queue) do
       :ok
@@ -438,8 +511,24 @@ defmodule Archon.Runtime.Store.Postgres do
       workflow: commit.workflow && encode_workflow!(commit.workflow),
       # The created tasks and then the upserts, as one statement: a later version wins.
       tasks: encode_tasks!(((commit.create && commit.create.tasks) || []) ++ commit.upsert_tasks),
-      outbox: Enum.map(commit.outbox, &encode_effect!/1)
+      outbox: Enum.map(commit.outbox, &encode_effect!/1),
+      index_workflow: commit.index_workflow && encode_index_workflow!(commit.index_workflow),
+      index_tasks: Enum.map(commit.index_tasks, &encode_index_task!/1)
     }
+  end
+
+  @index_workflow_columns ~w(workflow_id correlation_id workflow_type start_time end_time
+                             update_time status parent_workflow_id classifier json_data)a
+  @index_task_columns ~w(task_id task_type task_def_name status start_time end_time update_time
+                         workflow_type json_data)a
+
+  # Archon.Runtime.SearchIndex leaves out what a column cannot hold but the ID, status and JSON.
+  defp encode_index_workflow!(row), do: encode_index!(row, @index_workflow_columns, :workflow_id)
+  defp encode_index_task!(row), do: encode_index!(row, @index_task_columns, :task_id)
+
+  defp encode_index!(row, columns, id) do
+    Enum.each([id, :status, :json_data], &check_storable!(Map.fetch!(row, &1)))
+    Enum.map(columns, &Map.fetch!(row, &1))
   end
 
   defp encode_workflow!(%Workflow{} = workflow) do
@@ -680,6 +769,59 @@ defmodule Archon.Runtime.Store.Postgres do
       instance,
       "UPDATE #{table(instance, "workflow")} SET wake_at = #{set} WHERE workflow_id = $1",
       [workflow_id | params]
+    )
+
+    :ok
+  end
+
+  defp index_workflow(_instance, nil), do: :ok
+
+  # SqliteIndexDAO#indexWorkflow; a NULL update_time on either side changes nothing.
+  defp index_workflow(instance, row) do
+    query!(
+      instance,
+      """
+      INSERT INTO #{table(instance, "workflow_index")} AS i (workflow_id, correlation_id,
+        workflow_type, start_time, end_time, update_time, status, parent_workflow_id, classifier,
+        json_data)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ON CONFLICT (workflow_id) DO UPDATE SET correlation_id = EXCLUDED.correlation_id,
+        workflow_type = EXCLUDED.workflow_type, start_time = EXCLUDED.start_time,
+        end_time = EXCLUDED.end_time, update_time = EXCLUDED.update_time,
+        status = EXCLUDED.status, parent_workflow_id = EXCLUDED.parent_workflow_id,
+        classifier = EXCLUDED.classifier, json_data = EXCLUDED.json_data
+      WHERE EXCLUDED.update_time >= i.update_time
+      """,
+      row
+    )
+
+    :ok
+  end
+
+  defp index_tasks(_instance, []), do: :ok
+
+  # SqliteIndexDAO#indexTask, which keeps start_time and workflow_type. The rows (one per task ID)
+  # are inserted in list order, so new ones take their seq in that order.
+  defp index_tasks(instance, rows) do
+    query!(
+      instance,
+      """
+      INSERT INTO #{table(instance, "task_index")} AS i (task_id, task_type, task_def_name, status,
+        start_time, end_time, update_time, workflow_type, json_data)
+      SELECT u.task_id, u.task_type, u.task_def_name, u.status, u.start_time, u.end_time,
+        u.update_time, u.workflow_type, u.json_data
+      FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::bigint[], $6::bigint[],
+          $7::bigint[], $8::text[], $9::text[]) WITH ORDINALITY
+        AS u(task_id, task_type, task_def_name, status, start_time, end_time, update_time,
+          workflow_type, json_data, n)
+      ORDER BY u.n
+      ON CONFLICT (task_id) DO UPDATE SET task_type = EXCLUDED.task_type,
+        task_def_name = EXCLUDED.task_def_name, status = EXCLUDED.status,
+        end_time = EXCLUDED.end_time, update_time = EXCLUDED.update_time,
+        json_data = EXCLUDED.json_data
+      WHERE EXCLUDED.update_time >= i.update_time
+      """,
+      transpose(rows, 9)
     )
 
     :ok

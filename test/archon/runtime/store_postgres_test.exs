@@ -36,7 +36,7 @@ defmodule Archon.Runtime.StorePostgresTest do
     assert PgStore.get_workflow("store-postgres-none", false) == {:error, :not_found}
     assert is_list(PgStore.running_workflow_ids())
     # Without a published epoch the runtime instance's writes are fenced.
-    assert_raise FencedError, fn -> PgStore.remove_workflow("store-postgres-none") end
+    assert_raise FencedError, fn -> PgStore.remove_workflow("store-postgres-none", false) end
   end
 
   describe "rows" do
@@ -141,7 +141,7 @@ defmodule Archon.Runtime.StorePostgresTest do
       for id <- ["wf1\u0000", <<0xFF>>] do
         assert s(ctx, :get_workflow, [id, true]) == {:error, :not_found}
         assert s(ctx, :get_task, [id]) == {:error, :not_found}
-        assert s(ctx, :remove_workflow, [id]) == {:error, :not_found}
+        assert s(ctx, :remove_workflow, [id, false]) == {:error, :not_found}
         assert s(ctx, :in_progress_count, [id]) == 0
         assert s(ctx, :pending_outbox, [id]) == []
         assert s(ctx, :ack_outbox, [id, [1]]) == :ok
@@ -331,7 +331,7 @@ defmodule Archon.Runtime.StorePostgresTest do
                queue: [{:push, "q", "x", 0, 0}]
              }) == {:error, :fenced}
 
-      assert_raise FencedError, fn -> PgStore.remove_workflow(fenced, "wf1") end
+      assert_raise FencedError, fn -> PgStore.remove_workflow(fenced, "wf1", false) end
       assert_raise FencedError, fn -> PgStore.ack_outbox(fenced, "wf1", [a]) end
       assert_raise FencedError, fn -> PgStore.put_poll_data(fenced, "q", nil, "w", 1) end
 
@@ -355,9 +355,31 @@ defmodule Archon.Runtime.StorePostgresTest do
       [{a, _effect}] = PgStore.pending_outbox(fenced, "wf1")
       assert PgStore.ack_outbox(fenced, "wf1", [a]) == :ok
       assert PgStore.put_poll_data(fenced, "q", nil, "w", 1) == :ok
-      assert PgStore.remove_workflow(fenced, "wf1") == :ok
+      assert PgStore.remove_workflow(fenced, "wf1", false) == :ok
       assert PgQueue.contains?(fenced, "q", "x")
     end
+  end
+
+  # ADR 0027, decision 2: the logs of the tasks the workflow has go with its index rows.
+  test "remove_workflow deletes the logs of the workflow's tasks unless archiving", ctx do
+    for id <- ~w(wf1 wf2), do: create(ctx, workflow(id, tasks: [task(id, 1)]))
+
+    for task_id <- ~w(wf1_t1 wf2_t1 other) do
+      Repo.query!(
+        "INSERT INTO #{t(ctx, "task_execution_logs")} (task_id, log, created_time) " <>
+          "VALUES ($1, 'log', 1)",
+        [task_id]
+      )
+    end
+
+    logs = fn ->
+      Repo.query!("SELECT task_id FROM #{t(ctx, "task_execution_logs")} ORDER BY 1").rows
+    end
+
+    assert PgStore.remove_workflow(ctx.server, "wf1", true) == :ok
+    assert logs.() == [["other"], ["wf1_t1"], ["wf2_t1"]]
+    assert PgStore.remove_workflow(ctx.server, "wf2", false) == :ok
+    assert logs.() == [["other"], ["wf1_t1"]]
   end
 
   defp t(ctx, name), do: Postgres.table(ctx.server, name)

@@ -110,8 +110,11 @@ defmodule Archon.Runtime.Step.Tasks do
     end
   end
 
+  # extendLease saves the task without indexing it (ADR 0027, decision 2).
   defp apply_result(state, task, %TaskResult{extend_lease: true}) do
-    state = if Task.terminal?(task.status), do: state, else: State.save_task(state, task)
+    state =
+      if Task.terminal?(task.status), do: state, else: State.save_task(state, task, index: false)
+
     {:ok, nil, state, :none}
   end
 
