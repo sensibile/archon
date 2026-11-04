@@ -218,7 +218,17 @@ defmodule Archon.Runtime.SubWorkflowTest do
   defp await_statuses(id, expected),
     do: eventually(fn -> statuses(workflow(id)) == expected end)
 
-  defp child_of(id, ref), do: eventually(fn -> task(id, ref).sub_workflow_id end)
+  # A child workflow is stored before its first decide schedules its tasks (startWorkflowIdempotent,
+  # then the decide), so the workflow or the task may not be there yet.
+  defp child_of(id, ref) do
+    eventually(fn ->
+      with {:ok, workflow} <- Runtime.get_workflow(id),
+           %Task{sub_workflow_id: child} <-
+             Enum.find(workflow.tasks, &(&1.reference_task_name == ref)),
+           do: child,
+           else: (_not_yet -> nil)
+    end)
+  end
 
   defp await_status(id, status),
     do: eventually(fn -> match?(%Workflow{status: ^status}, workflow(id)) and workflow(id) end)
