@@ -381,6 +381,14 @@ defmodule Archon.Runtime.Step.HttpTest do
       assert task.output_data["response"]["body"] == "true"
     end
 
+    # extractBody's last branch: readTree("null") is a NullNode, and its asText() is the text
+    # "null" (Jackson 2.18.8), not a missing body.
+    test "a JSON null body is the text null" do
+      {task, _workflow} = complete(ok(200, "null"))
+      assert %Task{status: :completed} = task
+      assert task.output_data["response"]["body"] === "null"
+    end
+
     test "testPostNoContent: an empty 2xx body is null" do
       {task, _workflow} = complete(ok(204, "", []))
       assert %Task{status: :completed} = task
@@ -440,6 +448,24 @@ defmodule Archon.Runtime.Step.HttpTest do
         {task, _workflow} = complete(ok(200, text))
         assert task.output_data["response"]["body"] == text
       end
+    end
+
+    # Jackson 2.18.8 readTree, run on these texts: an escaped quote does not end the string, so
+    # the brackets after it are text and the object parses; an escaped backslash does not escape
+    # the quote after it, so the brackets past that quote nest deeper than 1000.
+    test "an escape in a string decides where the string ends for the nesting limit" do
+      escaped_quote = ~s({"s":"\\") <> String.duplicate("[", 2000) <> ~s("})
+      {task, _workflow} = complete(ok(200, escaped_quote))
+
+      assert task.output_data["response"]["body"] == %{
+               "s" => ~s(") <> String.duplicate("[", 2000)
+             }
+
+      escaped_backslash =
+        ~s(["\\\\",) <> String.duplicate("[", 1001) <> String.duplicate("]", 1001) <> "]"
+
+      {task, _workflow} = complete(ok(200, escaped_backslash))
+      assert task.output_data["response"]["body"] == escaped_backslash
     end
 
     test "a text body without a charset is read as ISO-8859-1, JSON as UTF-8" do
