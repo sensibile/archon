@@ -1,0 +1,21 @@
+# archon worker scope for .taeguk/tools/check_worker_scope.py (ADR 0029, docs/operations.md).
+# The checker reads this file at the base commit, so a worker PR cannot widen its own scope.
+# Built-in protection (.github/, .taeguk/, .claude/, .codex/, .agents/, AGENTS*.md, CLAUDE.md,
+# CLAUDE.local.md, .gitattributes, .gitignore, .gitmodules, mix.exs, mix.lock) applies on top of this.
+schema_version = 1
+
+# Matched without regard to case. Authority records, and what the scheduled workers execute:
+# scripts/ holds the Postgres wrapper the validation-health suites run, test/scripts/ the tests
+# that pin this scope.
+protected = ["docs/adr/", "docs/operations.md", "scripts/", "test/scripts/"]
+
+# Only mode 100644: no executable bit, symlink or submodule.
+executable_files = false
+python_import_roots = []
+
+[workers.test-gap]
+allow = ["test/"]
+forbid_removed_lines = true
+
+[workers.daily-cleanup]
+allow = ["lib/", "test/", "docs/", "README.md"]

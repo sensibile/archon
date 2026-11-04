@@ -1,6 +1,6 @@
 # ADR 0028: 태극 번들 갱신과 VER-005·VER-007 1.1, 도구 네 가지 반영
 
-- 상태: 제안
+- 상태: 승인 (결정 4·5는 [ADR 0029](0029-taeguk-worker-scope-and-validation-suites.md)가 대체)
 - 날짜: 2026-11-04
 - 태극 원본: sensibile/taeguk `7d0a7a82a0386651848f9b86411b2f48923acba8`(sensibile/taeguk#58 머지 커밋)
 - 보완: [ADR 0016](0016-taeguk-review-order-and-model.md) 결정 5의 "스킬에 적힌 태극 `scripts/check_worker_scope.py`는
@@ -103,3 +103,4 @@ archon에 설치된 태극 번들은 `81817cf`([ADR 0020](0020-taeguk-codex-tran
 - 이 PR이 머지되면 archon의 테스트 편집은 일반 개발까지 VER-007을 따른다. 로컬 Codex 리뷰 프롬프트가 VER-007을
   다루기 전까지 일반 개발에서의 효과는 UNKNOWN이다(Approval-2026-10-30-ver007-general 적용 문단).
 - 이 ADR은 구현 PR이 머지된 뒤 다음 PR에서 승인으로 바꾼다.
+- 비고(2026-11-04): 구현 PR #99가 머지돼 승인으로 바꿨다. 결과 절의 후속 둘은 ADR 0029가 맡는다.

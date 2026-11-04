@@ -36,39 +36,48 @@ CI는 push와 PR 때만 돌아서 변경이 없는 날의 `main`은 검증을 �
 여전히 통과하는지와 간헐 실패 테스트가 있는지를 본다.
 
 - 절차: 설치된 `taeguk-validation-health` 스킬(`.claude/skills/`, `.agents/skills/`). 아래는 archon에서 스킬의
-  태극용 명령을 대신하는 값이다. 스킬이 말하는 프로젝트 스위트 목록은 아래 목록이다. archon용 스위트 목록 TOML이 생기기
-  전까지 태극 `validation_health.py run --suites`는 쓰지 않는다. 읽기 전용 `observations` 명령은 쓸 수 있다
-  ([ADR 0028](adr/0028-taeguk-ver005-convergence-and-tools.md) 결정 5).
+  태극용 명령을 대신하는 값이다. 스킬이 말하는 프로젝트 스위트 목록은
+  [`.taeguk/validation-suites.toml`](../.taeguk/validation-suites.toml)이다
+  ([ADR 0029](adr/0029-taeguk-worker-scope-and-validation-suites.md) 결정 3).
 - 최신 `origin/main` SHA를 기록하고 `../archon-worktrees/` 아래 분리(detached) worktree에서 돌린다. main checkout과
   다른 워커의 worktree는 건드리지 않는다.
 - 툴체인 기록: `elixir --version`(Elixir, OTP), `cc --version`, `make --version`(archon_js 빌드),
   `docker version --format '{{.Server.Version}}'`, Postgres 이미지와 서버 버전, `python3 --version`, OS 버전. 이전 보고와 비교해 바뀐 값을 표시한다.
-- 스위트는 하나씩 따로 돌리고 종료 코드, 소요 시간, 출력 끝부분을 남긴다. `MIX_ENV=test`는 CI와 같이 둔다.
-  1. `mix deps.get`. 실패하면 이 단계에 기대는 스위트는 NOT_RUN이다.
-  2. `mix deps.unlock --check-unused`
-  3. `mix format --check-formatted`
-  4. `mix compile --warnings-as-errors`
-  5. `mix test`: 아래 일회용 Postgres의 `DATABASE_URL`과 `ARCHON_REQUIRE_POSTGRES=1`로 돌린다.
-  6. `ARCHON_BACKEND=postgres mix test`: 5와 같은 환경에 `ARCHON_BACKEND=postgres`를 더한다.
-  7. `mix credo --strict`
-  8. `mix dialyzer`
-  9. `mix hex.audit`, `mix deps.audit`. 코드와 툴체인이 그대로여도 새 보안 권고가 나오면 FAIL한다. 실패하면 권고 ID와
-     패키지를 보고에 남기고, 원인을 권고 DB 변화로 분류할 수 있는지 함께 적는다.
-  10. skill-creator 검증기(`~/.codex/skills/.system/skill-creator/scripts/quick_validate.py`)를 설치된 모든
-      `.claude/skills/taeguk-*`와 `.agents/skills/taeguk-*`에 돌린다. PyYAML은 main checkout의
-      `.taeguk/validation-health/venv`에 격리 설치한다.
-- 목록의 출처는 AGENTS.md "검증"과 `.github/workflows/ci.yml`이다. 둘이 바뀌면 워커는 그 실행의 `origin/main`
-  기준으로 따른다. `c-sanitize` job은 Linux CI 전용이라 로컬에서는 NOT_APPLICABLE이고, 주간 CI가 본다.
-- 일회용 Postgres: CI `services.postgres`와 같은 이미지(`ci.yml`에서 읽는다)를 docker로 띄운다. 컨테이너 이름은
-  `archon-validation-health-<날짜>-<시각>`, 포트는 `127.0.0.1`의 임의 포트(`-p 127.0.0.1::5432`), 비밀번호는 실행마다 새로
-  만들고 보고에 쓰지 않는다. 컨테이너 안에서 TCP 기준으로 준비를 확인한다
-  (`docker exec <이름> pg_isready -h 127.0.0.1 -U postgres`가 성공할 때까지, 최대 60초). 이미지 초기화 중에는 socket만
-  열린 임시 서버가 뜨므로 socket 기준 확인은 쓰지 않는다. 그 뒤
-  `DATABASE_URL=ecto://postgres:<비밀번호>@127.0.0.1:<포트>/archon_test`로 5·6과 그 재실행을 돌린다. 컨테이너는
-  모든 스위트와 재실행이 끝난 뒤 지운다(`docker rm -f`). 스위트가 실패하거나 실행이 중단돼도 이 실행이 띄운
-  컨테이너는 지운다. 다른 세션의 컨테이너나 기본 포트 5432의 서버는 쓰지 않는다. docker가 없거나 이미지를
-  받지 못하거나 서버가 준비되지 않으면 5·6은 NOT_RUN이고 원인을 남긴다. Postgres를 설치하거나 docker 설정을
-  바꾸지 않는다.
+- 스위트는 태극 `validation_health.py`로 돌린다. 도구는 태극 체크아웃의 `origin/main`에서 임시 파일로 꺼내고,
+  태극 체크아웃은 읽기만 한다. 도구가 스위트를 하나씩 따로 돌려 종료 코드, 소요 시간, 건수, 출력 끝부분을 표로 남기고,
+  실패한 스위트는 선행 스위트와 함께 한 번 다시 돌린다.
+
+  ```bash
+  tool="$(mktemp)" &&
+    git -C <태극 체크아웃> fetch origin &&
+    git -C <태극 체크아웃> show origin/main:scripts/validation_health.py >"$tool" &&
+    VALIDATOR_PYTHON=<main checkout>/.taeguk/validation-health/venv/bin/python \
+      python3 -I "$tool" run --suites .taeguk/validation-suites.toml --root <worktree> --rerun-failed \
+      --json <보고 디렉터리>/<날짜>.json --log-dir <보고 디렉터리>/<날짜>-logs
+  ```
+
+  - 목록: `mix deps.get`, `mix deps.unlock --check-unused`, `mix format --check-formatted`,
+    `mix compile --warnings-as-errors`, `mix test`, `ARCHON_BACKEND=postgres mix test`, `mix credo --strict`,
+    `mix dialyzer`, `mix hex.audit`, `mix deps.audit`, skill-creator 검증기(설치된 모든 `.claude/skills/taeguk-*`와
+    `.agents/skills/taeguk-*`). 모두 CI와 같이 `MIX_ENV=test`다. `mix deps.get`이 실패하면 그 뒤 스위트는 NOT_RUN이다.
+  - `mix hex.audit`, `mix deps.audit`은 코드와 툴체인이 그대로여도 새 보안 권고가 나오면 FAIL한다. 실패하면 권고 ID와
+    패키지를 보고에 남기고, 원인을 권고 DB 변화로 분류할 수 있는지 함께 적는다.
+  - skill-creator 검증기에 쓰는 PyYAML은 main checkout의 `.taeguk/validation-health/venv`에 격리 설치한다.
+  - 도구의 전체 상태가 UNKNOWN(SHA 확인 실패, 실행 중 HEAD나 추적 파일 변경, 건수를 못 읽음)이면 그 스위트를 PASS로
+    보고하지 않는다.
+- 목록의 출처는 AGENTS.md "검증"과 `.github/workflows/ci.yml`이다. 둘이 바뀌었는데 목록이 따라오지 않았으면 그 차이를
+  보고에 적는다. 목록은 워커가 바꿀 수 없는 경로(`.taeguk/`)에 있으므로 고치는 일은 일반 작업이다. `c-sanitize` job은
+  Linux CI 전용이라 로컬에서는 NOT_APPLICABLE이고, 주간 CI가 본다.
+- 일회용 Postgres: 두 `mix test` 스위트는 [`scripts/with_test_postgres.sh`](../scripts/with_test_postgres.sh)로 감싼다.
+  스위트(재실행 포함)마다 CI `services.postgres`와 같은 이미지(`ci.yml`에서 읽는다)의 컨테이너를
+  `archon-validation-health-<날짜>-<시각>-<pid>` 이름으로 띄운다. 포트는 `127.0.0.1`의 임의 포트이고, 비밀번호는
+  도구가 실행마다 새로 만들고 출력에서 가리는 `{secret}`이다. 컨테이너 안에서 TCP 기준으로 준비를 확인한 뒤(최대 60초)
+  `DATABASE_URL=ecto://postgres:<비밀번호>@127.0.0.1:<포트>/archon_test`와 `ARCHON_REQUIRE_POSTGRES=1`로 시험을 돌리고,
+  래퍼가 끝날 때 컨테이너를 지운다(`docker rm -f`). 시간 초과로 도구가 래퍼를 강제 종료하면 지우지 못하므로, 실행 끝에
+  `docker ps -a --filter name=archon-validation-health-`로 이 실행이 띄운 컨테이너가 남았는지 확인해 지운다. 다른
+  세션의 컨테이너나 기본 포트 5432의 서버는 쓰지 않는다. docker가 없거나 이미지를 받지 못하거나 서버가 준비되지 않으면
+  래퍼가 종료 코드 3으로 끝나고, 보고에서는 그 스위트를 원인과 함께 NOT_RUN으로 적는다. Postgres를 설치하거나 docker
+  설정을 바꾸지 않는다.
 - 실패한 스위트는 같은 SHA와 툴체인에서 한 번만 다시 돌린다. 다시 실패하면 결정적 실패, 통과하면 간헐 실패 의심이다.
   재시도 옵션을 더하거나 테스트를 빼지 않는다. 보고 두 건 이상에 나온 간헐 실패는 후보로 보고한다.
 - 보고에 실행 시작·종료 시각을 남긴다. 같은 시간대에 다른 워커(데일리 정리 등)가 돌아 CPU를 나눠 썼다면 적고,
@@ -100,42 +109,46 @@ CI는 push와 PR 때만 돌아서 변경이 없는 날의 `main`은 검증을 �
 명령을 실행해, 바뀐 경로가 모두 허용 목록 안에 있는지 기계적으로 확인한다. Codex가 동의했더라도 이 검사를
 통과하지 못하면 auto-merge를 켜지 않는다.
 
-검사는 [`scripts/worker_path_check.sh`](../scripts/worker_path_check.sh)로 한다. PR 브랜치가 스크립트 자체를 고쳐
-검사를 무력화하지 못하도록, 작업 브랜치의 사본이 아니라 `origin/main`의 스크립트를 실행한다. 대상은 리뷰한 head SHA이고,
-auto-merge의 `--match-head-commit`에도 같은 SHA를 쓴다.
+검사는 설치된 태극 검사기 `.taeguk/tools/check_worker_scope.py`와 archon 범위 파일
+[`.taeguk/worker-scope.toml`](../.taeguk/worker-scope.toml)로 한다
+([ADR 0029](adr/0029-taeguk-worker-scope-and-validation-suites.md)). PR 브랜치가 검사기를 고쳐 검사를 무력화하지
+못하도록 `origin/main`의 검사기를 꺼내 실행하고, 검사기는 범위 파일을 PR head가 아니라 base(`origin/main`)에서 읽는다.
+대상은 리뷰한 head SHA이고, auto-merge의 `--match-head-commit`에도 같은 SHA를 쓴다.
 
 ```bash
 gh pr view <번호> --json baseRefName,headRefOid   # baseRefName이 main이고 headRefOid가 리뷰한 head SHA인지 확인
 check="$(mktemp)" &&
   git fetch origin &&
-  git show origin/main:scripts/worker_path_check.sh >"$check" &&
+  git show origin/main:.taeguk/tools/check_worker_scope.py >"$check" &&
   test -s "$check" &&
-  bash "$check" <test-gap|daily-cleanup> origin/main <리뷰한 head SHA>
-echo "path check exit: $?"
+  python3 -I "$check" <test-gap|daily-cleanup> --base origin/main --head <리뷰한 head SHA> \
+    --config .taeguk/worker-scope.toml
+echo "scope check exit: $?"
 ```
 
-- 태극 데일리 정리·테스트 보강 스킬의 "Scope check"는 이 경로 검사다(ADR 0016 결정 5,
-  [ADR 0028](adr/0028-taeguk-ver005-convergence-and-tools.md) 결정 4). 설치된 `.taeguk/tools/check_worker_scope.py`는
-  archon 범위 파일(`.taeguk/worker-scope.toml`)이 없어 `UNKNOWN`을 내므로 아직 쓰지 않는다. 스킬이 auto-merge 조건으로 말하는
-  "exit 0 with status PASS"는 이 검사의 `path check exit` 0이다. 스킬이 자체 리뷰를 "project's PR flow step 2"로
-  가리키는 곳은 archon에서는 AGENTS.md "PR과 머지" 1단계(자체 리뷰 반복 후 Codex 리뷰)다.
-- 출력된 `path check exit` 값이 0일 때만 통과다. fetch나 스크립트 꺼내기가 실패해도 0이 아니게 묶여 있다. 스크립트의
-  종료 코드 1은 허용 밖 변경이 있다는 뜻이고 그 목록을 출력한다. 2는 사용법 오류나 git 오류다.
-- 스크립트는 저장소 루트에서 경로를 `git diff -z`로 그대로 읽고, 변경을 숨기는 git 설정(`diff.relative`,
-  `diff.ignoreSubmodules`)을 무시한다. 일반 파일 모드(`100644`)가 아닌 변경(심볼릭 링크, 서브모듈,
-  실행 비트), NUL 바이트가 있는 파일(바뀌기 전과 후 모두), 출력 가능한 ASCII 밖의 문자가 든 경로, git 메타 파일
-  (`.gitattributes`·`.gitignore`·`.gitmodules`), 에이전트 지시 파일(`AGENTS*.md`, `CLAUDE.md`, `CLAUDE.local.md`,
-  `.claude/`·`.codex/`·`.agents/` 아래)은 어느 깊이에 있든 허용 밖이다. 보호 경로는 대소문자를 가리지 않고 막고,
-  base와 head 트리를 합쳐 대소문자만 다른 경로가 있으면 거부한다. 그래서 대소문자만 바꾸는 이름 변경도 거부된다. base와 head는 커밋 SHA로 먼저 확인한다.
+- 태극 데일리 정리·테스트 보강 스킬의 "Scope check"는 이 검사다. 스킬이 auto-merge 조건으로 말하는
+  "exit 0 with status PASS"가 그대로 통과 조건이다. 출력된 `scope check exit` 값이 0이고 JSON `status`가 `PASS`일 때만
+  통과다. fetch나 검사기 꺼내기가 실패해도 0이 아니게 묶여 있다. 종료 코드 1(`FAIL`)은 허용 밖 변경이 있다는 뜻이고
+  `rejected`에 경로와 이유가 나온다. 2(`UNKNOWN`)는 범위 파일·인수·git 오류다. 스킬이 자체 리뷰를 "project's PR flow
+  step 2"로 가리키는 곳은 archon에서는 AGENTS.md "PR과 머지" 1단계(자체 리뷰 반복 후 Codex 리뷰)다.
+- 검사기는 저장소 최상위에서 경로를 `git diff -z`로 그대로 읽고, 변경을 숨기는 git 설정(`diff.relative`,
+  `diff.ignoreSubmodules`, 외부 diff)을 무시한다. 일반 파일 모드(`100644`)가 아닌 변경(심볼릭 링크, 서브모듈,
+  실행 비트), NUL 바이트가 있거나 UTF-8이 아닌 파일(바뀌기 전과 후 모두), 출력 가능한 ASCII 밖의 문자가 든 경로는
+  거부한다. 다음 보호 경로는 대소문자를 가리지 않고 막는다. 검사기 내장 보호는 `.github/`, `.taeguk/`, `.claude/`,
+  `.codex/`, `.agents/`(어느 깊이든), 어느 깊이든 `AGENTS*.md`·`CLAUDE.md`·`CLAUDE.local.md`·`.gitattributes`·
+  `.gitignore`·`.gitmodules`, `mix.exs`, `mix.lock`이다. 범위 파일이 더하는 보호는 `docs/adr/`, `docs/operations.md`,
+  `scripts/`, `test/scripts/`다. base와 head 트리를 합쳐 대소문자만 다른 경로가 있으면 거부한다. base와 head는 커밋
+  SHA로 먼저 확인한다.
 
 | 워커 | 허용 경로 | 추가 조건 |
 |---|---|---|
-| 테스트 보강(`test-gap`) | `test/` 아래 | 추가만. 파일 삭제와 지운 줄이 없어야 하고, 바이너리는 안 된다 |
-| 데일리 정리(`daily-cleanup`) | `lib/`, `test/`, `docs/` 아래와 `README.md`. 단 `docs/adr/`, `docs/operations.md`는 제외 | 없음 |
+| 테스트 보강(`test-gap`) | `test/` 아래. 단 `test/scripts/`는 제외 | 추가만. 파일 삭제와 지운 줄이 없어야 하고, 바이너리는 안 된다 |
+| 데일리 정리(`daily-cleanup`) | `lib/`, `test/`, `docs/` 아래와 `README.md`. 단 `docs/adr/`, `docs/operations.md`, `test/scripts/`는 제외 | 없음 |
 
 - 그 밖의 경로는 모두 허용 밖이다. 예: `.github/`, `mix.exs`, `mix.lock`, `config/`, `priv/`(외부 계약 포함),
-  `scripts/`, `AGENTS.md`, `.gitignore`, 태극 설치본(`.taeguk/`, `.claude/`, `.codex/`, `.agents/`).
-  워커는 자기 권한 기록(이 문서, ADR, AGENTS.md)을 바꿀 수 없다.
+  `scripts/`, `AGENTS.md`, `.gitignore`, 태극 설치본과 범위 파일·스위트 목록(`.taeguk/`, `.claude/`, `.codex/`, `.agents/`).
+  워커는 자기 권한 기록(이 문서, ADR, AGENTS.md, 범위 파일)과 정기 실행이 실행하는 명령(스위트 목록, `scripts/`)을
+  바꿀 수 없다.
 - 허용 밖 경로가 하나라도 있으면 그 PR에 `no-auto-merge` label을 붙이고, 해당 경로와 이유를 실행 보고에 남긴 뒤
   BOSS에게 보고한다. 그 경로를 빼서 다시 리뷰하는 것은 허용한다.
 - head가 바뀌면(새 커밋, `gh pr update-branch`) auto-merge를 다시 켜기 전에 이 검사도 다시 한다.
