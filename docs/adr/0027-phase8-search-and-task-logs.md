@@ -291,8 +291,10 @@ archon에 이미 있는 것(`541865c` 기준):
     `Sub workflow <이름.버전/ID[ -> ...]> retried.`·`restarted.`·`reran.`이고 rerun은 같은 글을 두 번 쓴다.
   - **rerun의 두 번.** upstream `rerunWF`는 다시 도는 워크플로우마다 `updateAndPushParents`를 두 번 부른다(대상 워크플로우는
     `:2399`와 `finalizeRerun`의 `:2567`·`:2614`, 전체 rerun은 `:2343`·`:2346`, 위 워크플로우(case 3)는 `:2399`·`:2532`). 그래서
-    archon은 rerun의 각 단계(`Step.Lifecycle`의 rerun 경로 전부)가 부모에게 되살림을 두 번 보내고, 부모마다 같은 글을 두 번 쓴다.
-    위로 이어 보내는 되살림은 upstream 걸음처럼 한 번씩이다. 세 단계(G→P→C)에서 C의 태스크를 rerun하면 P에 `C reran.` 둘, G에
+    첫 걸음은 대상의 decide 전, 대상이 아직 `RUNNING`일 때라 부모의 상태를 둘째 걸음과 다르게 바꾸지 않는다. archon의 되살림은 대상의
+    커밋(decide 포함) 뒤에 outbox로 가므로 두 번 보내면 첫 decide에서 다시 끝난 자식의 부모가 두 번 끝나고 실패 워크플로우도 두 번
+    시작한다(자체 리뷰 r1에서 재현). 그래서 상태를 바꾸는 되살림은 rerun 단계마다 한 번만 보내고, 동작이 `reran`인 되살림을 받은
+    워크플로우가 같은 글을 두 번 쓴다. 위로 이어 보내는 되살림도 `reran`을 실어 위의 워크플로우마다 두 번 쓴다. 세 단계(G→P→C)에서 C의 태스크를 rerun하면 P에 `C reran.` 둘, G에
     `P -> C reran.` 둘과 `P reran.` 둘이 이 순서로 쌓인다(upstream과 같음, `task_log_test.exs`).
   - **사슬의 자리.** 되살림 효과는 `{:revive_parent, 부모, 태스크, 동작, 사슬}`, 이벤트는 `{:child_revived, 태스크, 동작, 사슬}`이고
     사슬은 부모가 쓸 글의 `<이름.버전/ID[ -> ...]>` 글자다. 보내는 워크플로우가 자기 `toShortString`을 앞에 붙인다. 결정 6의 "rerun
@@ -308,6 +310,8 @@ archon에 이미 있는 것(`541865c` 기준):
     `createdTime`이 없으면 그 Step의 `now`(upstream 생성자가 읽을 때 찍음), `null`이면 0(Jackson 원시형), Java `long` 밖이면 가장 가까운
     `long`(upstream Jackson은 요청을 거절)이다. 이를 위해 `TaskExecLog.created_time`의 디코드 기본값을 `nil`로 바꿨다. 상한은
     `config :archon, Archon.Runtime, settings: [task_exec_log_size_limit: 10]`이고 POST에도 같이 적용된다.
+  - **다시 전달.** outbox는 한 번 이상 전달이므로 부모가 되살림을 저장한 뒤 ack 전에 실패하면 다시 전달된 되살림이 같은 로그를 또
+    쓴다(upstream에는 다시 전달이 없다). 로그는 워크플로우 상태가 아니고 드문 장애 경로라 받아들인다.
   - **글자.** 두 저장소가 같은 값을 갖도록 로그 글은 잘못된 UTF-8과 NUL을 U+FFFD로 바꿔 저장한다(Java UTF-8 디코딩은 앞의 것을 같게
     바꾼다. PostgreSQL text는 둘 다 담지 못함). 저장할 수 없는 태스크 ID(NUL, 잘못된 UTF-8)의 POST는 200이지만 아무 데도 쓰지 않는다
     (어느 GET도 그 ID로는 찾을 수 없다). POST body는 BOM을 떼지 않는다(`StringHttpMessageConverter`).

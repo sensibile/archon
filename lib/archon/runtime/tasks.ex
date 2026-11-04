@@ -230,7 +230,7 @@ defmodule Archon.Runtime.Tasks do
     logs = TaskLogs.prepare([%TaskExecLog{log: text}], task_id, Runtime.now(), limit)
 
     cond do
-      logs == [] or not SearchIndex.storable?(task_id) -> :ok
+      logs == [] or task_id == "" or not SearchIndex.storable?(task_id) -> :ok
       Runtime.store().add_task_logs(logs) == :ok -> :ok
       true -> {:error, {:commit, :fenced}}
     end

@@ -41,7 +41,7 @@ defmodule Archon.Runtime.TaskLogs do
           [TaskExecLog.t()]
   def prepare(logs, task_id, now, limit) do
     for(%TaskExecLog{log: log} = entry when is_binary(log) <- logs || [], do: entry)
-    |> Enum.take(limit)
+    |> Enum.take(max(limit, 0))
     |> Enum.map(fn entry ->
       %TaskExecLog{
         task_id: task_id,

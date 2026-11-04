@@ -188,6 +188,43 @@ defmodule Archon.Runtime.TaskLogTest do
       assert texts(pst) == [child_line, child_line]
     end
 
+    # Self-review r1: two state-changing revivals reached a parent whose child ended again in its
+    # first decide, so the parent ended twice and started its failure workflow twice.
+    test "a rerun of a child that ends in its first decide ends the parent once" do
+      for json <- [
+            ~S({"name": "log_term_child", "version": 1, "tasks": [
+              {"name": "term", "taskReferenceName": "term", "type": "TERMINATE",
+               "inputParameters": {"terminationStatus": "FAILED"}}]}),
+            ~S({"name": "log_handler", "version": 1, "tasks": [
+              {"name": "log_task", "taskReferenceName": "t1", "type": "SIMPLE",
+               "inputParameters": {}}]}),
+            ~S({"name": "log_term_parent", "version": 1, "failureWorkflow": "log_handler",
+              "tasks": [{"name": "log_sub", "taskReferenceName": "st", "type": "SUB_WORKFLOW",
+                "inputParameters": {},
+                "subWorkflowParam": {"name": "log_term_child", "version": 1}}]})
+          ] do
+        {:ok, definition} = json |> Jason.decode!() |> WorkflowDef.from_json()
+        :ok = Runtime.metadata().update_workflow_def(definition)
+      end
+
+      handlers = fn -> length(Runtime.store().pending_workflow_ids("log_handler")) end
+      parent = start("log_term_parent")
+      st = sub_task(parent)
+      ended = await_status(parent, :failed)
+      assert eventually(fn -> handlers.() == 1 end)
+
+      assert Lifecycle.rerun(Task.sub_workflow_id(st), %RerunWorkflowRequest{}) == :ok
+      line = "Sub workflow log_term_child.1/#{Task.sub_workflow_id(st)} reran."
+      assert await_logs(st.task_id, 2) == [line, line]
+      assert eventually(fn -> handlers.() == 2 end)
+      Process.sleep(300)
+
+      assert %Workflow{status: :failed, end_count: end_count} = workflow(parent)
+      assert end_count == ended.end_count + 1
+      assert handlers.() == 2
+      assert texts(st.task_id) == [line, line]
+    end
+
     test "a revival an outbox entry stored before ADR 0027 revives without a log" do
       %{grand: grand, gst: gst, parent: parent, pst: pst, child: child} = failed_family()
 

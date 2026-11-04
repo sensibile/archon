@@ -861,8 +861,9 @@ defmodule Archon.Runtime.Store.Postgres do
 
   defp insert_logs(_instance, []), do: :ok
 
-  # SqliteIndexDAO#addTaskExecutionLogs: log_id (bigserial) keeps the list order, as unnest's
-  # ordinality sorts the rows before the default is computed.
+  # SqliteIndexDAO#addTaskExecutionLogs. The rows are sorted by unnest's ordinality before
+  # PostgreSQL computes the log_id default, so in practice log_id follows the list order; only
+  # logs with the same created_time depend on it.
   defp insert_logs(instance, logs) do
     query!(
       instance,

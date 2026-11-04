@@ -328,17 +328,10 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
   # updateAndPushParents starts at the parent: it gets a message once this workflow's commit is
   # saved (ADR 0018, decision 1: a child only casts to its parent). The message names the
-  # operation and this workflow for the parent's log (ADR 0027, decision 6). Every path of
-  # upstream's rerunWF walks the parents twice (once before its decide and once after), so a
-  # rerun asks twice and each parent writes its log twice.
+  # operation and this workflow for the parent's log (ADR 0027, decision 6).
   defp push_parents(state, :none), do: state
 
-  defp push_parents(state, "reran"),
-    do: state |> push_parents(:once, "reran") |> push_parents(:once, "reran")
-
-  defp push_parents(state, operation), do: push_parents(state, :once, operation)
-
-  defp push_parents(state, :once, operation),
+  defp push_parents(state, operation),
     do: ask_parent(state, {operation, short_string(state.wf)})
 
   # A revival without an operation (an outbox entry stored before ADR 0027) asks on without one,
@@ -433,8 +426,13 @@ defmodule Archon.Runtime.Step.Lifecycle do
 
   defp revival_log(state, _task, nil), do: state
 
-  defp revival_log(%State{now: now} = state, task, {operation, chain}),
-    do: State.add_logs(state, [TaskLogs.revived(task.task_id, chain, operation, now)])
+  # Every path of upstream's rerunWF walks the parents twice, once before its decide and once
+  # after; the first walk's revival changes nothing the second does not, so a rerun asks once
+  # and each workflow above writes the log twice (ADR 0027, decision 6, slice 8d).
+  defp revival_log(%State{now: now} = state, task, {operation, chain}) do
+    log = TaskLogs.revived(task.task_id, chain, operation, now)
+    State.add_logs(state, List.duplicate(log, if(operation == "reran", do: 2, else: 1)))
+  end
 
   # ADR 0026, decision 7: a SCHEDULED HTTP task whose pollCount counted a start is taken as
   # started (in flight or lost) and not started again, so one rerun here starts from 0. Upstream

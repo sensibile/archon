@@ -259,7 +259,7 @@ defmodule Archon.Runtime.Store.Memory do
       workflow_index: %{},
       task_index: %{},
       index_seq: 0,
-      # task ID => execution logs (task_execution_logs), oldest first
+      # task ID => execution logs (task_execution_logs), newest first
       task_logs: %{}
     }
 
@@ -378,6 +378,7 @@ defmodule Archon.Runtime.Store.Memory do
     logs =
       state.task_logs
       |> Map.get(task_id, [])
+      |> Enum.reverse()
       |> Enum.with_index()
       |> Enum.sort_by(fn {log, index} -> {log.created_time, index} end)
       |> Enum.map(&elem(&1, 0))
@@ -484,10 +485,11 @@ defmodule Archon.Runtime.Store.Memory do
     end
   end
 
-  # SqliteIndexDAO#addTaskExecutionLogs; the list keeps the order they were added (log_id).
+  # SqliteIndexDAO#addTaskExecutionLogs; the list is newest first, and reversed it is the order
+  # they were added (log_id).
   defp add_logs(state, logs) do
     Enum.reduce(logs, state, fn %TaskExecLog{task_id: id} = log, state ->
-      %{state | task_logs: Map.update(state.task_logs, id, [log], &(&1 ++ [log]))}
+      %{state | task_logs: Map.update(state.task_logs, id, [log], &[log | &1])}
     end)
   end
 
