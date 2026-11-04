@@ -41,9 +41,9 @@ defmodule Archon.Search.Query do
       milliseconds here and UTC text (`yyyy-MM-dd HH:mm:ss.SSS`) upstream, which only converts
       the first value: a later `IN` value matches when it is that text exactly.
     * `=` with a `*` is `lower(column) LIKE lower(value)` with `*` as `%`; the free text is
-      `lower(json_data) LIKE pattern` with the pattern lowered by Java. `%` matches any run, `_`
-      one character, there is no escape character, and SQLite's `lower()` and `LIKE` fold ASCII
-      letters only.
+      `lower(json_data) LIKE pattern` with the pattern lowered by Java (final sigma included).
+      `%` matches any run, `_` one character, there is no escape character, the pattern ends at
+      a NUL, and SQLite's `lower()` and `LIKE` fold ASCII letters only.
     * `classifier` asked for `workflow` (Java `equalsIgnoreCase`) also matches rows without one.
 
   Not reproduced (ADR 0027): the `agentHierarchy` sort, which is dropped; non-ASCII digits in a
@@ -245,9 +245,10 @@ defmodule Archon.Search.Query do
   `params` numbered from `$<first>`, and `order_by` (`"ORDER BY ..., seq"`). Column names come
   from the allow list only; every value is a parameter. Text is compared and sorted with
   `COLLATE "C"` (bytes, as SQLite), `LIKE` has `ESCAPE ''` (no escape character, as SQLite) and
-  folds ASCII letters only. Index text never holds NUL (ADR 0027, decision 2), which PostgreSQL
-  text cannot bind, so a value with NUL is decided here: `=`, `IN` and `LIKE` never match it, and
-  `> "a\\0..."` is `> "a"`, `< "a\\0..."` is `<= "a"`.
+  folds ASCII letters only. A `LIKE` pattern ends at its first NUL, as SQLite reads it. Index
+  text never holds NUL (ADR 0027, decision 2), which PostgreSQL text cannot bind, so another value
+  with NUL is decided here: `=` and `IN` never match it, and `> "a\\0..."` is `> "a"`,
+  `< "a\\0..."` is `<= "a"`.
   """
   @spec sql(t(), table(), pos_integer()) ::
           {:ok, %{where: String.t(), params: [String.t() | integer()], order_by: String.t()}}
@@ -390,7 +391,7 @@ defmodule Archon.Search.Query do
   defp free_text_pattern(free_text) when free_text in [nil, "", "*"], do: nil
 
   defp free_text_pattern(free_text),
-    do: String.replace("%" <> String.downcase(free_text) <> "%", "*", "%")
+    do: String.replace("%" <> String.downcase(free_text, :greek) <> "%", "*", "%")
 
   defp sort_item(item) do
     with [field, order] <- java_split(item, ":"),
@@ -555,7 +556,7 @@ defmodule Archon.Search.Query do
     case {Map.get(row, column), operator == :eq and wildcard?([value])} do
       {nil, false} -> operator == :eq and untagged?(column, [value])
       {nil, true} -> false
-      {text, true} -> like?(text, String.downcase(bound, :ascii))
+      {text, true} -> like?(text, bound)
       {text, false} -> compare(operator, text, bound)
     end
   end
@@ -568,7 +569,12 @@ defmodule Archon.Search.Query do
   defp like?(nil, _pattern), do: false
 
   defp like?(text, pattern),
-    do: like_match?(String.downcase(text, :ascii), String.downcase(pattern, :ascii), 0, 0, nil)
+    do: like_match?(String.downcase(text, :ascii), like_pattern(pattern), 0, 0, nil)
+
+  # SQLite reads the pattern as a C string: it ends at the first NUL. Only its length limit
+  # counts the whole value.
+  defp like_pattern(pattern),
+    do: pattern |> :binary.split(<<0>>) |> hd() |> String.downcase(:ascii)
 
   # SQL LIKE without an escape character: `%` matches any run of characters, `_` one character.
   # Backtracks only to the last `%`, so the work is at most text size times pattern size.
@@ -647,7 +653,7 @@ defmodule Archon.Search.Query do
 
     cond do
       operator == :eq and wildcard?([value]) ->
-        like_sql(column, String.downcase(bound, :ascii))
+        like_sql(column, bound)
 
       operator == :eq ->
         null = if untagged?(column, [value]), do: " OR #{column} IS NULL", else: ""
@@ -674,13 +680,10 @@ defmodule Archon.Search.Query do
   end
 
   defp free_text_sql(nil), do: []
-  defp free_text_sql(pattern), do: [like_sql(:json_data, String.downcase(pattern, :ascii))]
+  defp free_text_sql(pattern), do: [like_sql(:json_data, pattern)]
 
-  defp like_sql(column, pattern) do
-    if nul?(pattern),
-      do: {fn [] -> "FALSE" end, []},
-      else: {&"#{ascii_lower(column)} LIKE #{hd(&1)} ESCAPE ''", [pattern]}
-  end
+  defp like_sql(column, pattern),
+    do: {&"#{ascii_lower(column)} LIKE #{hd(&1)} ESCAPE ''", [like_pattern(pattern)]}
 
   defp placeholders(values, at),
     do: values |> Enum.with_index(at) |> Enum.map(fn {_value, n} -> "$#{n}" end)

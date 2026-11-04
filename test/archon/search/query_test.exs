@@ -179,6 +179,8 @@ defmodule Archon.Search.QueryTest do
 
     test "turns freeText into a lowered LIKE pattern" do
       assert parse!("", "A*b_%").free_text == "%a%b_%%"
+      # Java's toLowerCase applies the final sigma rule.
+      assert parse!("", "ΑΣ").free_text == "%ας%"
       assert parse!("", nil).free_text == nil
       assert parse!(nil, "*").free_text == nil
     end
@@ -318,7 +320,7 @@ defmodule Archon.Search.QueryTest do
     end
 
     test "decides values with NUL, which PostgreSQL text cannot bind" do
-      assert %{where: "WHERE FALSE AND FALSE", params: []} = sql!("status=a\0b", "x\0")
+      assert %{where: "WHERE FALSE", params: []} = sql!("status=a\0b", "")
 
       assert %{
                where: "WHERE (classifier IN ($1) OR classifier IS NULL) AND FALSE",
@@ -328,7 +330,20 @@ defmodule Archon.Search.QueryTest do
       assert %{where: "WHERE status IN ($1)", params: ["b"]} = sql!("status IN (a\0,b)", "")
       assert %{where: ~s{WHERE status COLLATE "C" > $1}, params: ["a"]} = sql!("status>a\0b", "")
       assert %{where: ~s{WHERE status COLLATE "C" <= $1}, params: ["a"]} = sql!("status<a\0b", "")
-      assert %{where: "WHERE FALSE", params: []} = sql!("status=a\0*", "")
+    end
+
+    test "ends a LIKE pattern at its first NUL, as SQLite does" do
+      # Upstream's builder on SQLite: freeText "}\0zzz" is "%}" and matches every row,
+      # workflowType=*alpha\0q is "%alpha".
+      assert %{where: "WHERE #{@lower_workflow_type} LIKE $1 ESCAPE ''", params: ["%alpha"]} =
+               sql!("workflowType=*alpha\0q", "")
+
+      assert %{params: ["%}"]} = sql!("", "}\0zzz")
+      rows = QueryOracle.workflow_rows()
+      assert {:ok, 5, _page} = Query.run(parse!("", "}\0zzz"), :workflow_index, rows, 0, 9)
+
+      assert {:ok, 3, _page} =
+               Query.run(parse!("workflowType=*alpha\0q"), :workflow_index, rows, 0, 9)
     end
 
     test "turns bytes that are not UTF-8 into U+FFFD" do
