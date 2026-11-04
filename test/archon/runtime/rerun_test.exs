@@ -198,7 +198,7 @@ defmodule Archon.Runtime.RerunTest do
           )
         end)
 
-      assert_receive {:held, runner, {:revive_parent, ^parent, _task}}, 2_000
+      assert_receive {:held, runner, {:revive_parent, ^parent, _task, "reran", _chain}}, 2_000
 
       # the worker finishes the task while the rerun waits on the child's outbox
       finish(child, :completed)

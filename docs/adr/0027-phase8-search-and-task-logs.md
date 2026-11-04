@@ -285,6 +285,37 @@ archon에 이미 있는 것(`541865c` 기준):
 - **읽기.** `GET`은 `created_time`, `log_id` 순 목록, 없으면 204 body 없음.
 - 로그 API는 `Archon.Runtime.Tasks`에 둔다(8e의 `Archon.Runtime` 검색 함수와 나뉜다). 로그는 결정 2의 지우기 규칙으로 태스크 색인
   행과 함께 지워진다.
+- **조각 8d에서 정한 것(2026-11-04).**
+  - 8a 캡처대로 맞춘 것: `TaskResult.logs`의 `createdTime`은 보낸 값 그대로, POST 빈 body는 500 `Required request body is missing:
+    public void com.netflix.conductor.rest.controllers.TaskResource.log(java.lang.String,java.lang.String)`, 자식 로그 글은
+    `Sub workflow <이름.버전/ID[ -> ...]> retried.`·`restarted.`·`reran.`이고 rerun은 같은 글을 두 번 쓴다.
+  - **rerun의 두 번.** upstream `rerunWF`는 다시 도는 워크플로우마다 `updateAndPushParents`를 두 번 부른다(대상 워크플로우는
+    `:2399`와 `finalizeRerun`의 `:2567`·`:2614`, 전체 rerun은 `:2343`·`:2346`, 위 워크플로우(case 3)는 `:2399`·`:2532`). 그래서
+    archon은 rerun의 각 단계(`Step.Lifecycle`의 rerun 경로 전부)가 부모에게 되살림을 두 번 보내고, 부모마다 같은 글을 두 번 쓴다.
+    위로 이어 보내는 되살림은 upstream 걸음처럼 한 번씩이다. 세 단계(G→P→C)에서 C의 태스크를 rerun하면 P에 `C reran.` 둘, G에
+    `P -> C reran.` 둘과 `P reran.` 둘이 이 순서로 쌓인다(upstream과 같음, `task_log_test.exs`).
+  - **사슬의 자리.** 되살림 효과는 `{:revive_parent, 부모, 태스크, 동작, 사슬}`, 이벤트는 `{:child_revived, 태스크, 동작, 사슬}`이고
+    사슬은 부모가 쓸 글의 `<이름.버전/ID[ -> ...]>` 글자다. 보내는 워크플로우가 자기 `toShortString`을 앞에 붙인다. 결정 6의 "rerun
+    요청에 사슬"은 쓰지 않는다: upstream은 case 3의 각 워크플로우에서 걸음을 새로 시작해 사슬이 그 워크플로우 하나뿐이므로, 그 단계의
+    되살림 효과가 사슬을 싣는 것으로 충분하다. `Lifecycle.rerun_parent/2`의 요청 모양은 바뀌지 않았다.
+  - **옛 모양.** outbox에 저장된 옛 `{:revive_parent, 부모, 태스크}`(Postgres 인자 둘)는 그대로 읽고 `{:child_revived, 태스크}`로
+    전한다. 그 부모는 로그 없이 되살아나고 위로도 옛 모양으로 전해 그 걸음 전체에 로그가 없다.
+  - **로그가 없는 걸음.** upstream처럼 태스크가 없거나 optional이거나 이미 retry된 `SUB_WORKFLOW`면 로그 없이 멈춘다. case 3에서 아래
+    워크플로우가 이미 다시 끝났거나 태스크가 그사이 바뀌어 입력·상관 ID만 받는 경우(ADR 0025 결정 2, 6f)에는 되살림을 보내지 않으므로
+    그 단계의 `reran.` 로그도 없다(upstream은 그때도 쓴다, 의도적 차이).
+  - **`TaskResult.logs`.** 태스크와 워크플로우가 끝나지 않은 갱신에서만 쓰고(upstream `updateTask`가 앞에서 돌아감), `extendLease`는
+    쓰지 않는다. `null` 원소와 `log`가 `null`인 원소는 버리고(upstream은 NPE나 `NOT NULL` 위반으로 500) 남은 것의 앞 10개를 남긴다.
+    `createdTime`이 없으면 그 Step의 `now`(upstream 생성자가 읽을 때 찍음), `null`이면 0(Jackson 원시형), Java `long` 밖이면 가장 가까운
+    `long`(upstream Jackson은 요청을 거절)이다. 이를 위해 `TaskExecLog.created_time`의 디코드 기본값을 `nil`로 바꿨다. 상한은
+    `config :archon, Archon.Runtime, settings: [task_exec_log_size_limit: 10]`이고 POST에도 같이 적용된다.
+  - **글자.** 두 저장소가 같은 값을 갖도록 로그 글은 잘못된 UTF-8과 NUL을 U+FFFD로 바꿔 저장한다(Java UTF-8 디코딩은 앞의 것을 같게
+    바꾼다. PostgreSQL text는 둘 다 담지 못함). 저장할 수 없는 태스크 ID(NUL, 잘못된 UTF-8)의 POST는 200이지만 아무 데도 쓰지 않는다
+    (어느 GET도 그 ID로는 찾을 수 없다). POST body는 BOM을 떼지 않는다(`StringHttpMessageConverter`).
+  - **저장소 API.** `Store.add_task_logs/1`(`:ok | {:error, :fenced}`, Postgres는 펜스 트랜잭션 하나), `Store.task_logs/1`
+    (`created_time`, 넣은 순서), `Commit.task_logs`(색인 행 뒤에 같은 트랜잭션), `Commit.check_logs!/1`(두 저장소가 쓰기 전에 같은
+    검사). POST가 펜스에 걸리면 `{:error, {:commit, :fenced}}`로 커밋의 펜스와 같은 재시도 가능 500이다.
+  - 공용 plug는 `ArchonWeb.Plugs.RefuseCrossOrigin`이고 `WorkflowLifecycleController`의 retry·restart·resetcallbacks와
+    `TaskLogController.log`에 붙는다. 로그 GET은 다른 GET처럼 막지 않는다.
 
 ### 7. 골든 픽스처와 재생(8a가 한 번에 캡처)
 

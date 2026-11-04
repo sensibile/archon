@@ -195,8 +195,12 @@ defmodule Archon.Runtime.Step do
   defp handle({:retry, push_parents?}, state), do: Lifecycle.retry(state, push_parents?)
   defp handle({:restart, definition}, state), do: Lifecycle.restart(state, definition)
 
+  defp handle({:child_revived, task_id, operation, chain}, state),
+    do: {:ok, Lifecycle.child_revived(state, task_id, {operation, chain})}
+
+  # A revival an outbox entry stored before ADR 0027 asks for: no log.
   defp handle({:child_revived, task_id}, state),
-    do: {:ok, Lifecycle.child_revived(state, task_id)}
+    do: {:ok, Lifecycle.child_revived(state, task_id, nil)}
 
   defp handle({:skip_task, ref}, state), do: Lifecycle.skip_task(state, ref)
   defp handle(:reset_callbacks, state), do: Lifecycle.reset_callbacks(state)

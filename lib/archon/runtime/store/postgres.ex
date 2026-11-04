@@ -16,7 +16,8 @@
 # decisions 2 to 7); the queries by name and correlation ID read index columns of the workflow
 # row instead of the workflow_def_to_workflow and workflow_pending tables (ADR 0025, decision 4).
 # The search index upserts and removals of sqlite-persistence/.../SqliteIndexDAO.java run in the
-# commit's and the removal's transaction instead of their own (ADR 0027, decision 2).
+# commit's and the removal's transaction instead of their own (ADR 0027, decision 2), and so do its
+# task execution logs, which a log request writes in a fenced transaction of its own (decision 6).
 
 defmodule Archon.Runtime.Store.Postgres do
   @moduledoc """
@@ -85,7 +86,7 @@ defmodule Archon.Runtime.Store.Postgres do
 
   @behaviour Archon.Runtime.Store
 
-  alias Archon.Domain.{Codec, Task, Workflow, WorkflowDef}
+  alias Archon.Domain.{Codec, Task, TaskExecLog, Workflow, WorkflowDef}
   alias Archon.Runtime.{Commit, Postgres, Store}
   alias Archon.Runtime.Queue.Postgres, as: PgQueue
   alias Archon.Runtime.Step.Effect
@@ -457,6 +458,35 @@ defmodule Archon.Runtime.Store.Postgres do
       when is_integer(start) and is_integer(size),
       do: search(instance, :task_index, "task_id", query, start, size)
 
+  @impl Store
+  @spec add_task_logs(Postgres.t(), [TaskExecLog.t()]) :: :ok | {:error, :fenced}
+  def add_task_logs(instance \\ Postgres.runtime(), logs) when is_list(logs) do
+    Commit.check_logs!(logs)
+
+    case Postgres.transaction(instance, fn -> insert_logs(instance, logs) end) do
+      {:ok, :ok} -> :ok
+      {:error, :fenced} -> {:error, :fenced}
+    end
+  end
+
+  @impl Store
+  @spec task_logs(Postgres.t(), String.t()) :: [TaskExecLog.t()]
+  def task_logs(instance \\ Postgres.runtime(), task_id) when is_binary(task_id) do
+    if storable?(task_id) do
+      %{rows: rows} =
+        query!(
+          instance,
+          "SELECT log, created_time FROM #{table(instance, "task_execution_logs")} " <>
+            "WHERE task_id = $1 ORDER BY created_time, log_id",
+          [task_id]
+        )
+
+      for [log, time] <- rows, do: %TaskExecLog{task_id: task_id, log: log, created_time: time}
+    else
+      []
+    end
+  end
+
   # The page and the count are two statements, as upstream's SqliteIndexDAO runs them.
   defp search(instance, table, id, query, start, size) do
     with {:ok, %{where: where, params: params, order_by: order_by}} <- Query.sql(query, table) do
@@ -496,6 +526,7 @@ defmodule Archon.Runtime.Store.Postgres do
          :ok <- put_wake(instance, workflow_id, commit.wake),
          :ok <- index_workflow(instance, rows.index_workflow),
          :ok <- index_tasks(instance, rows.index_tasks),
+         :ok <- insert_logs(instance, commit.task_logs),
          :ok <- check_limits(instance, commit.limits),
          :ok <- PgQueue.apply_ops(instance, commit.queue) do
       :ok
@@ -828,6 +859,26 @@ defmodule Archon.Runtime.Store.Postgres do
     :ok
   end
 
+  defp insert_logs(_instance, []), do: :ok
+
+  # SqliteIndexDAO#addTaskExecutionLogs: log_id (bigserial) keeps the list order, as unnest's
+  # ordinality sorts the rows before the default is computed.
+  defp insert_logs(instance, logs) do
+    query!(
+      instance,
+      """
+      INSERT INTO #{table(instance, "task_execution_logs")} (task_id, log, created_time)
+      SELECT u.task_id, u.log, u.created_time
+      FROM unnest($1::text[], $2::text[], $3::bigint[]) WITH ORDINALITY
+        AS u(task_id, log, created_time, n)
+      ORDER BY u.n
+      """,
+      transpose(Enum.map(logs, &[&1.task_id, &1.log, &1.created_time]), 3)
+    )
+
+    :ok
+  end
+
   ## Reads
 
   # ADR 0021, decision 2: one statement, so the workflow and its tasks come from one snapshot.
@@ -937,6 +988,12 @@ defmodule Archon.Runtime.Store.Postgres do
   defp effect_args({:notify_parent, parent, task, _child}) when id?(parent) and task_id?(task),
     do: {"notify_parent", [parent, task]}
 
+  # ADR 0027, decision 6 adds the operation and the chain below; an entry stored without them
+  # still decodes to the shape of before.
+  defp effect_args({:revive_parent, parent, task, operation, chain})
+       when id?(parent) and task_id?(task) and id?(operation) and id?(chain),
+       do: {"revive_parent", [parent, task, operation, chain]}
+
   defp effect_args({:revive_parent, parent, task}) when id?(parent) and task_id?(task),
     do: {"revive_parent", [parent, task]}
 
@@ -985,6 +1042,9 @@ defmodule Archon.Runtime.Store.Postgres do
 
       %{"kind" => "notify_parent", "args" => [parent, task]} ->
         {:notify_parent, parent, task, nil}
+
+      %{"kind" => "revive_parent", "args" => [parent, task, operation, chain]} ->
+        {:revive_parent, parent, task, operation, chain}
 
       %{"kind" => "revive_parent", "args" => [parent, task]} ->
         {:revive_parent, parent, task}

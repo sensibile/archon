@@ -9,11 +9,12 @@
 # core/.../core/dal/ExecutionDAOFacade.java (updateTaskLastPoll) and
 # rest/src/main/java/com/netflix/conductor/rest/controllers/TaskResource.java (updateTaskV2,
 # updateTaskSync), ExecutionService.java (getPendingTaskForWorkflow) and TaskServiceImpl.java
-# (updateTask by reference, signalTask, findPendingBlockingTask) at commit
+# (updateTask by reference, signalTask, findPendingBlockingTask, log, getTaskLogs) at commit
 # 1488804170d159021c7e62dce61514b8f31ef9ff.
 # Modified by sensibile: each popped task goes to its workflow's process, which applies the poll
 # (ADR 0018, decisions 1 and 7); this module pops, records the poll data and acks. A signal
-# descends only into children the SUB_WORKFLOW task owns (ADR 0024, decision 2).
+# descends only into children the SUB_WORKFLOW task owns (ADR 0024, decision 2). A task log is
+# written straight to the store, fenced as a commit is (ADR 0027, decision 6).
 
 defmodule Archon.Runtime.Tasks do
   @moduledoc """
@@ -32,6 +33,8 @@ defmodule Archon.Runtime.Tasks do
       and `.../sync`, ADR 0025 decision 5).
     * `signal/3` - upstream `signalTask` (`POST /api/tasks/{workflowId}/{status}/signal` and
       `.../sync`).
+    * `log/2`, `logs/1` - upstream `ExecutionService#log` and `getTaskLogs`
+      (`POST`/`GET /api/tasks/{taskId}/log`, ADR 0027, decision 6): straight to the store.
 
   A poll pops task IDs from the queue `[domain:]taskType` and sends each to the process of its
   workflow (`Archon.Runtime.WorkflowServer.poll/3`), which checks the task, the concurrent
@@ -45,8 +48,9 @@ defmodule Archon.Runtime.Tasks do
   require Logger
 
   alias Archon.Decider.Parameters
-  alias Archon.Domain.{Task, TaskResult, Validation, Workflow}
+  alias Archon.Domain.{Task, TaskExecLog, TaskResult, Validation, Workflow}
   alias Archon.Runtime
+  alias Archon.Runtime.{SearchIndex, TaskLogs}
   alias Archon.Runtime.Step.Schedule
   alias Archon.Runtime.WorkflowServer
 
@@ -211,6 +215,33 @@ defmodule Archon.Runtime.Tasks do
       {:error, errors} -> {:error, {:invalid, errors}}
     end
   end
+
+  @doc """
+  Upstream `ExecutionService#log` (`POST /api/tasks/{taskId}/log`): adds `text` as one log of the
+  task, created now, without asking whether the task exists and without its workflow's process
+  (ADR 0027, decision 6). The text is kept as `Archon.Runtime.TaskLogs.text/1` makes it, and a
+  task ID no store can keep (NUL or invalid UTF-8) is written nowhere, as no log read finds it. A
+  Postgres store whose node lost the database refuses it as it refuses a commit, a transient
+  failure: `{:error, {:commit, :fenced}}`.
+  """
+  @spec log(String.t(), binary()) :: :ok | {:error, {:commit, :fenced}}
+  def log(task_id, text) when is_binary(task_id) and is_binary(text) do
+    limit = TaskLogs.limit(Runtime.setting(:settings, []))
+    logs = TaskLogs.prepare([%TaskExecLog{log: text}], task_id, Runtime.now(), limit)
+
+    cond do
+      logs == [] or not SearchIndex.storable?(task_id) -> :ok
+      Runtime.store().add_task_logs(logs) == :ok -> :ok
+      true -> {:error, {:commit, :fenced}}
+    end
+  end
+
+  @doc """
+  Upstream `getTaskLogs` (`GET /api/tasks/{taskId}/log`): the task's logs in `createdTime` order,
+  then the order they were written (ADR 0027, decision 6).
+  """
+  @spec logs(String.t()) :: [TaskExecLog.t()]
+  def logs(task_id) when is_binary(task_id), do: Runtime.store().task_logs(task_id)
 
   @doc "Upstream `getTask`: the stored task, or `{:error, :not_found}`."
   @spec get(String.t()) :: {:ok, Task.t()} | {:error, :not_found}

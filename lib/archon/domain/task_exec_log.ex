@@ -5,7 +5,8 @@
 #
 # Derived from conductor-oss common/src/main/java/com/netflix/conductor/common/metadata/tasks/TaskExecLog.java
 # at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
-# Modified by sensibile: re-modelled as an Elixir struct with a JSON codec.
+# Modified by sensibile: re-modelled as an Elixir struct with a JSON codec; a missing createdTime
+# decodes as nil for the write to stamp (ADR 0027, decision 6).
 
 defmodule Archon.Domain.TaskExecLog do
   @moduledoc "A log line reported by a worker (`TaskResult.logs`, `GET /api/tasks/{taskId}/log`)."
@@ -15,7 +16,9 @@ defmodule Archon.Domain.TaskExecLog do
   @fields [
     {:log, "log", :string, []},
     {:task_id, "taskId", :string, []},
-    {:created_time, "createdTime", :int, []}
+    # Upstream's constructor stamps the time a log without one is read; a write takes it then
+    # (`Archon.Runtime.TaskLogs.prepare/4`). `null` is a Java primitive's 0.
+    {:created_time, "createdTime", :int, default: nil}
   ]
 
   defstruct Codec.defaults(@fields)
@@ -23,7 +26,7 @@ defmodule Archon.Domain.TaskExecLog do
   @type t :: %__MODULE__{
           log: String.t() | nil,
           task_id: String.t() | nil,
-          created_time: integer()
+          created_time: integer() | nil
         }
 
   @doc "Decodes upstream JSON."

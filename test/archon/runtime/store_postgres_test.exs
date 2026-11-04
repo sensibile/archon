@@ -186,6 +186,7 @@ defmodule Archon.Runtime.StorePostgresTest do
         {:notify_parent, "p", "pt", workflow("wf1", output: %{"stale" => true})},
         {:notify_parent, "p", nil, nil},
         {:revive_parent, "p", nil},
+        {:revive_parent, "p", "pt", "reran", "c.1/x"},
         {:retry_sub_workflow, "c2"},
         {:start_failure_workflow, start}
       ]
@@ -202,6 +203,7 @@ defmodule Archon.Runtime.StorePostgresTest do
                {:notify_parent, "p", "pt", stored},
                {:notify_parent, "p", nil, stored},
                {:revive_parent, "p", nil},
+               {:revive_parent, "p", "pt", "reran", "c.1/x"},
                {:retry_sub_workflow, "c2"},
                {:start_failure_workflow, start}
              ]
@@ -210,6 +212,18 @@ defmodule Archon.Runtime.StorePostgresTest do
         Repo.query!("SELECT effect FROM #{t(ctx, "outbox")} ORDER BY id OFFSET 2").rows
 
       assert JSON.decode!(json) == %{"kind" => "notify_parent", "args" => ["p", "pt"]}
+
+      # ADR 0027, decision 6: the revival of before keeps its two arguments; the new one adds the
+      # operation and the chain.
+      assert [[old], [new]] =
+               Repo.query!("SELECT effect FROM #{t(ctx, "outbox")} ORDER BY id OFFSET 4 LIMIT 2").rows
+
+      assert JSON.decode!(old) == %{"kind" => "revive_parent", "args" => ["p", nil]}
+
+      assert JSON.decode!(new) == %{
+               "kind" => "revive_parent",
+               "args" => ["p", "pt", "reran", "c.1/x"]
+             }
     end
 
     test "effects of other kinds or shapes are refused before writing", ctx do
@@ -221,6 +235,8 @@ defmodule Archon.Runtime.StorePostgresTest do
             {:retry_sub_workflow, "c", :extra},
             {:terminate_sub_workflow, "c", :shutdown},
             {:revive_parent, :p, nil},
+            {:revive_parent, "p", "pt", :reran, "c.1/x"},
+            {:revive_parent, "p", "pt", "reran", nil},
             {:start_failure_workflow, %{workflow_id: "f", definition: %{"name" => "x"}}},
             {:start_failure_workflow, %{workflow_id: "f", unknown: 1}},
             :cancel_wake
@@ -319,6 +335,7 @@ defmodule Archon.Runtime.StorePostgresTest do
 
     test "every write is refused with a stale epoch and changes nothing", ctx do
       %{fenced: fenced} = ctx
+      log = %TaskExecLog{task_id: "t", log: "x", created_time: 1}
       create(ctx, workflow("wf1"))
       commit(ctx, "wf1", outbox: [{:retry_sub_workflow, "a"}])
       [a] = outbox_ids(ctx, "wf1")
@@ -334,6 +351,8 @@ defmodule Archon.Runtime.StorePostgresTest do
       assert_raise FencedError, fn -> PgStore.remove_workflow(fenced, "wf1", false) end
       assert_raise FencedError, fn -> PgStore.ack_outbox(fenced, "wf1", [a]) end
       assert_raise FencedError, fn -> PgStore.put_poll_data(fenced, "q", nil, "w", 1) end
+      assert PgStore.add_task_logs(fenced, [log]) == {:error, :fenced}
+      assert PgStore.task_logs(fenced, "t") == []
 
       assert {:ok, %Workflow{status: :running}} = PgStore.get_workflow(fenced, "wf1", false)
       assert PgStore.get_workflow(fenced, "wf2", false) == {:error, :not_found}
@@ -357,6 +376,10 @@ defmodule Archon.Runtime.StorePostgresTest do
       assert PgStore.put_poll_data(fenced, "q", nil, "w", 1) == :ok
       assert PgStore.remove_workflow(fenced, "wf1", false) == :ok
       assert PgQueue.contains?(fenced, "q", "x")
+
+      log = %TaskExecLog{task_id: "t", log: "x", created_time: 1}
+      assert PgStore.add_task_logs(fenced, [log]) == :ok
+      assert PgStore.task_logs(fenced, "t") == [log]
     end
   end
 

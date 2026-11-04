@@ -37,6 +37,8 @@ defmodule Archon.Runtime.Commit do
       upstream indexes the workflow when it creates or saves it (ADR 0027, decision 2).
     * `index_tasks` - search index rows of the tasks upstream indexes in this change
       (`ExecutionDAOFacade#updateTask`, not `createTasks` or `extendLease`).
+    * `task_logs` - task execution logs to add (`Archon.Domain.TaskExecLog` with `task_id`, `log`
+      and `created_time` set, `Archon.Runtime.TaskLogs`), in this order (ADR 0027, decision 6).
 
   The store applies the fields in that order, checks the limits, and applies the queue operations
   last, all or none, and never stamps times: `Archon.Runtime.Step` sets the `updateTime`/`endTime`
@@ -45,9 +47,11 @@ defmodule Archon.Runtime.Commit do
   `workflow_type` (`SqliteIndexDAO`).
   """
 
-  alias Archon.Domain.{Task, Workflow}
+  alias Archon.Domain.{Task, TaskExecLog, Workflow}
   alias Archon.Runtime.SearchIndex
   alias Archon.Runtime.Step.Effect
+
+  @bigint_range -0x8000000000000000..0x7FFFFFFFFFFFFFFF
 
   defstruct create: nil,
             workflow: nil,
@@ -59,7 +63,8 @@ defmodule Archon.Runtime.Commit do
             limits: %{},
             queue: [],
             index_workflow: nil,
-            index_tasks: []
+            index_tasks: [],
+            task_logs: []
 
   @typedoc "A worker queue operation; `deliver_on` is epoch milliseconds."
   @type queue_op ::
@@ -82,15 +87,16 @@ defmodule Archon.Runtime.Commit do
           limits: %{optional(String.t()) => pos_integer()},
           queue: [queue_op()],
           index_workflow: SearchIndex.workflow_row() | nil,
-          index_tasks: [SearchIndex.task_row()]
+          index_tasks: [SearchIndex.task_row()],
+          task_logs: [TaskExecLog.t()]
         }
 
   @doc """
   The checks every store makes before it applies `commit` to `workflow_id`, raising
   `ArgumentError` in the caller: the workflows belong to `workflow_id` and have a known status,
   the tasks have IDs and reference names and belong to `workflow_id`, the index rows are of
-  `workflow_id` and of distinct task IDs, and `outbox_ack`, `outbox`, `wake` and `limits` have their
-  shapes. The queue operations are checked by the store's queue.
+  `workflow_id` and of distinct task IDs, the logs have a task ID, a text and a time, and
+  `outbox_ack`, `outbox`, `wake` and `limits` have their shapes. The queue operations are checked by the store's queue.
   """
   @spec check!(String.t(), t()) :: :ok
   # Upstream ExecutionDAO#createTasks rejects these before writing; a bad commit is a bug in the
@@ -110,6 +116,29 @@ defmodule Archon.Runtime.Commit do
     check_wake!(commit.wake)
     check_limits!(commit.limits)
     check_index!(workflow_id, commit.index_workflow, commit.index_tasks)
+    check_logs!(commit.task_logs)
+    :ok
+  end
+
+  @doc """
+  The check of `task_logs`, also for logs added outside a commit: each is a `TaskExecLog` whose
+  task ID and text both stores can keep (valid UTF-8 without NUL, `Archon.Runtime.TaskLogs`
+  prepares them) and whose time is an integer in the `bigint` range.
+  """
+  @spec check_logs!([TaskExecLog.t()]) :: :ok
+  def check_logs!(logs) do
+    valid? = fn
+      %TaskExecLog{task_id: id, log: log, created_time: time} ->
+        is_binary(id) and id != "" and SearchIndex.storable?(id) and is_binary(log) and
+          SearchIndex.storable?(log) and is_integer(time) and time in @bigint_range
+
+      _other ->
+        false
+    end
+
+    unless is_list(logs) and Enum.all?(logs, valid?),
+      do: raise(ArgumentError, "invalid task logs #{inspect(logs)}")
+
     :ok
   end
 

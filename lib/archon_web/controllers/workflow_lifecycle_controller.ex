@@ -5,7 +5,8 @@
 #
 # Derived from conductor-oss rest/src/main/java/com/netflix/conductor/rest/controllers/
 # WorkflowResource.java at commit 1488804170d159021c7e62dce61514b8f31ef9ff.
-# Modified by sensibile: the Phase 6 handlers (ADR 0025) on Archon.Runtime.Lifecycle.
+# Modified by sensibile: the Phase 6 handlers (ADR 0025) on Archon.Runtime.Lifecycle; the
+# cross-origin refusal moved to ArchonWeb.Plugs.RefuseCrossOrigin (ADR 0027, decision 6).
 
 defmodule ArchonWeb.WorkflowLifecycleController do
   @moduledoc """
@@ -18,10 +19,8 @@ defmodule ArchonWeb.WorkflowLifecycleController do
   `retry`, `restart` and `resetcallbacks` read no body, so the JSON `Content-Type` check of
   `ArchonWeb.Request` that keeps a browser's cross-origin "simple" request from an action (ADR 0023,
   decision 3) does not run for them, and a browser can `POST` to them from another site without a
-  CORS preflight (a form, `fetch` in `no-cors` mode with no body, `<a ping>`). A request a browser
-  marks as cross-origin is refused with a 403 instead (ADR 0025, decision 3, a deliberate
-  difference): `Sec-Fetch-Site` other than `same-origin` or `none`, or, without it, an `Origin`
-  whose host and port are not the request's (`conn.host`, `conn.port`, from its `Host`).
+  CORS preflight. `ArchonWeb.Plugs.RefuseCrossOrigin` refuses a request a browser marks as
+  cross-origin with a 403 instead (ADR 0025, decision 3, a deliberate difference).
   `rerun` reads a required JSON body, so the `Content-Type` check already keeps those requests
   from it (a form or `text/plain` is refused, no body is the missing-body 500). Clients that are not browsers send neither
   header and are answered as upstream.
@@ -37,7 +36,7 @@ defmodule ArchonWeb.WorkflowLifecycleController do
                    "java.lang.String," <>
                    "com.netflix.conductor.common.metadata.workflow.RerunWorkflowRequest)"
 
-  plug :refuse_cross_origin when action in [:retry, :restart, :reset_callbacks]
+  plug ArchonWeb.Plugs.RefuseCrossOrigin when action in [:retry, :restart, :reset_callbacks]
 
   @doc "`PUT /api/workflow/{workflowId}/pause` (`pauseWorkflow`): 200 without a body."
   @spec pause(Plug.Conn.t(), map()) :: Plug.Conn.t()
@@ -126,47 +125,6 @@ defmodule ArchonWeb.WorkflowLifecycleController do
           reply(conn, id, result, &Response.empty/1)
       end
     end
-  end
-
-  defp refuse_cross_origin(conn, _opts) do
-    if cross_origin?(conn) do
-      conn
-      |> Errors.send_error({:forbidden, "Cross-origin request refused"})
-      |> halt()
-    else
-      conn
-    end
-  end
-
-  defp cross_origin?(conn) do
-    case get_req_header(conn, "sec-fetch-site") do
-      [site | _rest] ->
-        String.downcase(String.trim(site)) not in ["same-origin", "none"]
-
-      [] ->
-        case get_req_header(conn, "origin") do
-          [origin | _rest] -> authority(origin) != host(conn)
-          [] -> false
-        end
-    end
-  end
-
-  # "scheme://host[:port]" as "host:port", the default port of the scheme filled in.
-  defp authority(origin) do
-    case URI.parse(String.trim(origin)) do
-      %URI{host: host, port: port} when is_binary(host) and host != "" ->
-        "#{String.downcase(host)}:#{port}"
-
-      _opaque ->
-        nil
-    end
-  end
-
-  # The adapter takes the request's host and port from its Host header (or HTTP/2 authority),
-  # keeping an IPv6 literal's brackets, which URI.parse/1 drops.
-  defp host(conn) do
-    host = conn.host |> String.trim_leading("[") |> String.trim_trailing("]")
-    "#{String.downcase(host)}:#{conn.port}"
   end
 
   defp reply(conn, _id, :ok, send), do: send.(conn)

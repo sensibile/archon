@@ -55,6 +55,7 @@ defmodule Archon.Runtime.StoreContract do
       unquote(index_helpers())
       unquote(index_cases())
       unquote(index_search_cases())
+      unquote(log_cases())
     end
   end
 
@@ -728,7 +729,10 @@ defmodule Archon.Runtime.StoreContract do
         test "entries come back in the order added, with growing IDs", ctx do
           assert commit(ctx, "wf1",
                    create: workflow("wf1"),
-                   outbox: [{:retry_sub_workflow, "c1"}, {:revive_parent, "p", "pt"}]
+                   outbox: [
+                     {:retry_sub_workflow, "c1"},
+                     {:revive_parent, "p", "pt", "reran", "child.1/c -> grandchild.2/g"}
+                   ]
                  ) == :ok
 
           create(ctx, workflow("wf2"))
@@ -737,7 +741,7 @@ defmodule Archon.Runtime.StoreContract do
 
           assert outbox_effects(ctx, "wf1") == [
                    {:retry_sub_workflow, "c1"},
-                   {:revive_parent, "p", "pt"},
+                   {:revive_parent, "p", "pt", "reran", "child.1/c -> grandchild.2/g"},
                    {:retry_sub_workflow, "c2"}
                  ]
 
@@ -1250,6 +1254,104 @@ defmodule Archon.Runtime.StoreContract do
           assert hits(search(ctx, :search_tasks, "")) == ~w(wf1_t1 wf1_t2 wf2_t1)
 
           assert s(ctx, :remove_workflow, ["wf2", false]) == {:error, :not_found}
+        end
+      end
+    end
+  end
+
+  defp log_cases do
+    quote do
+      alias Archon.Domain.TaskExecLog
+
+      defp log(task_id, text, time),
+        do: %TaskExecLog{task_id: task_id, log: text, created_time: time}
+
+      defp texts(ctx, task_id), do: Enum.map(s(ctx, :task_logs, [task_id]), & &1.log)
+
+      # SqliteIndexDAO#addTaskExecutionLogs and #getTaskExecutionLogs (ADR 0027, decision 6).
+      describe "Store contract: task logs" do
+        test "logs come in created time order, then in the order they were added", ctx do
+          create(ctx, workflow("wf1", tasks: [task("wf1", 1)]))
+
+          assert commit(ctx, "wf1", task_logs: [log("wf1_t1", "c", 30), log("wf1_t1", "a", 10)]) ==
+                   :ok
+
+          assert s(ctx, :add_task_logs, [[log("wf1_t1", "b", 10), log("other", "x", 5)]]) == :ok
+          assert s(ctx, :add_task_logs, [[log("wf1_t1", "d", 20)]]) == :ok
+
+          assert s(ctx, :task_logs, ["wf1_t1"]) == [
+                   log("wf1_t1", "a", 10),
+                   log("wf1_t1", "b", 10),
+                   log("wf1_t1", "d", 20),
+                   log("wf1_t1", "c", 30)
+                 ]
+
+          # A task that does not exist has its logs too.
+          assert texts(ctx, "other") == ["x"]
+          assert s(ctx, :task_logs, ["none"]) == []
+          assert s(ctx, :task_logs, ["n\u0000ul"]) == []
+          assert s(ctx, :add_task_logs, [[]]) == :ok
+        end
+
+        test "a refused commit adds none of its logs", ctx do
+          create(ctx, workflow("wf1"))
+
+          assert commit(ctx, "wf2", workflow: workflow("wf2"), task_logs: [log("t", "x", 1)]) ==
+                   {:error, :not_found}
+
+          assert commit(ctx, "wf1",
+                   create: workflow("wf1"),
+                   task_logs: [log("t", "x", 1)]
+                 ) == {:error, :conflict}
+
+          assert s(ctx, :task_logs, ["t"]) == []
+        end
+
+        test "logs a store cannot keep raise before anything is written", ctx do
+          create(ctx, workflow("wf1"))
+
+          for bad <- [
+                log("t", "nul \u0000", 1),
+                log("t", <<0xFF>>, 1),
+                log("t\u0000", "x", 1),
+                log("", "x", 1),
+                log(nil, "x", 1),
+                log("t", nil, 1),
+                log("t", "x", nil),
+                log("t", "x", 0x8000000000000000),
+                %{task_id: "t", log: "x", created_time: 1}
+              ] do
+            assert_raise ArgumentError, fn ->
+              s(ctx, :add_task_logs, [[log("t", "ok", 1), bad]])
+            end
+
+            assert_raise ArgumentError, fn -> commit(ctx, "wf1", task_logs: [bad]) end
+          end
+
+          assert s(ctx, :task_logs, ["t"]) == []
+        end
+
+        # ExecutionDAOFacade#removeWorkflow: only removing without archiving deletes the logs of
+        # the tasks the workflow has then (ADR 0027, decision 2).
+        test "remove_workflow deletes the logs of the workflow's tasks unless archiving", ctx do
+          for id <- ~w(wf1 wf2) do
+            commit(ctx, id,
+              create: workflow(id, tasks: [task(id, 1), task(id, 2)]),
+              task_logs: [log("#{id}_t1", "one", 1), log("#{id}_t2", "two", 2)]
+            )
+          end
+
+          s(ctx, :add_task_logs, [[log("other", "x", 1)]])
+          commit(ctx, "wf2", delete_task_ids: ["wf2_t2"])
+
+          assert s(ctx, :remove_workflow, ["wf1", true]) == :ok
+          assert texts(ctx, "wf1_t1") == ["one"]
+
+          assert s(ctx, :remove_workflow, ["wf2", false]) == :ok
+          assert texts(ctx, "wf2_t1") == []
+          # keepLastN deleted it before: upstream's removal does not see it either.
+          assert texts(ctx, "wf2_t2") == ["two"]
+          assert texts(ctx, "other") == ["x"]
         end
       end
     end

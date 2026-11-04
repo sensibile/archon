@@ -31,8 +31,10 @@ defmodule Archon.Runtime.Step.Effect do
       entry holds `nil` and the runner reads the child when it runs.
     * `{:start_failure_workflow, start}` - starts the failure workflow. A refusal goes back as
       `{:failure_workflow_started, {:error, reason}}`.
-    * `{:revive_parent, parent_workflow_id, parent_task_id}` - calls the parent with
-      `{:child_revived, parent_task_id}` (upstream `updateAndPushParents`).
+    * `{:revive_parent, parent_workflow_id, parent_task_id, operation, chain}` - calls the parent
+      with `{:child_revived, parent_task_id, operation, chain}` (upstream `updateAndPushParents`,
+      ADR 0027, decision 6). `{:revive_parent, parent_workflow_id, parent_task_id}`, the shape
+      outbox entries were stored in before, calls it with `{:child_revived, parent_task_id}`.
     * `{:retry_sub_workflow, workflow_id}` - sends `{:retry, false}` to a child that failed, from
       a parent that revives.
     * `:cancel_wake` - cancels the `:wake` timer (a paused workflow).
@@ -80,6 +82,7 @@ defmodule Archon.Runtime.Step.Effect do
           | {:terminate_sub_workflow, String.t(), String.t(), non_neg_integer()}
           | {:notify_parent, String.t(), String.t() | nil, Workflow.t() | nil}
           | {:start_failure_workflow, start()}
+          | {:revive_parent, String.t(), String.t() | nil, String.t(), String.t()}
           | {:revive_parent, String.t(), String.t() | nil}
           | {:retry_sub_workflow, String.t()}
           | :cancel_wake

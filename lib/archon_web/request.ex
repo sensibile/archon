@@ -23,6 +23,8 @@ defmodule ArchonWeb.Request do
   or none (Spring reads it as `application/octet-stream`), is a 500
   `"Content-Type '<type>' is not supported"`. This also keeps a browser's cross-origin "simple"
   request (`text/plain`, a form), which needs no CORS preflight, from reaching an action.
+  `read_text/2` reads a body upstream takes as a `String` whatever its type, so its actions need
+  `ArchonWeb.Plugs.RefuseCrossOrigin` instead.
 
   ## Query values
 
@@ -71,6 +73,21 @@ defmodule ArchonWeb.Request do
 
       {:error, reason, conn} ->
         {:error, reason, conn}
+    end
+  end
+
+  @doc """
+  Reads the body as text, as Spring's `StringHttpMessageConverter` gives a `@RequestBody String`:
+  whatever its `Content-Type` (a JSON string keeps its quotes), with no byte order mark skipped
+  (ADR 0027, decision 6). Invalid UTF-8 is left to the caller. An empty body is the missing body
+  of `read_json/2`, and a body over 8 MB is a 413.
+  """
+  @spec read_text(Plug.Conn.t(), handler: String.t()) ::
+          {:ok, binary(), Plug.Conn.t()} | {:error, term(), Plug.Conn.t()}
+  def read_text(conn, opts \\ []) do
+    case read_all(conn, []) do
+      {:ok, "", conn} -> {:error, missing_body(opts), conn}
+      other -> other
     end
   end
 
