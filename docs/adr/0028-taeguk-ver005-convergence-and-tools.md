@@ -1,4 +1,4 @@
-# ADR 0028: 태극 번들 갱신과 VER-005 1.1, 도구 네 가지 반영
+# ADR 0028: 태극 번들 갱신과 VER-005·VER-007 1.1, 도구 네 가지 반영
 
 - 상태: 제안
 - 날짜: 2026-11-04
@@ -66,12 +66,26 @@ archon에 설치된 태극 번들은 `81817cf`([ADR 0020](0020-taeguk-codex-tran
    본문에 렌더된 블록을 넣으라고 한다. 같은 명령(`codex exec`, 읽기 전용 sandbox, `gpt-6-sol`, `high`)을 실행하고
    프롬프트 sha256과 실행 정보를 실행 결과에서 계산하므로, AGENTS.md "PR과 머지" 1단계의 "프롬프트 sha256을 PR 본문에
    적는다"를 이 블록이 채운다. 손으로 적는 기존 방식도 계속 허용한다.
-7. **VER-007과 DEV-004 사본이 함께 들어온다.** registry상 VER-007 범위는 "Taeguk and Taeguk pilot projects", DEV-004는
-   "Taeguk and explicitly assigned workflows"다. VER-007은 태극 지정 흐름에 사본 머지 뒤 새로 시작하는 작업부터
-   적용된다. 일반 개발에 적용되는 시점은 VER-007을 가리키는 진입 문구가 AGENTS.md에 머지된 때이며(VER-007 1.1
-   결정 (4)), 그 문구는 이 PR에서 BOSS 확인을 받아 따로 정한다(아래 결과). archon `test/`에는 mock 라이브러리
-   (Mox, meck 등) 사용이 없어, 데일리 정리 스킬의 일회성 VER-007 대역 조사는 찾을 항목이 거의 없을 것이다.
-8. **[ADR 0022](0022-taeguk-validation-health.md)를 승인으로 바꾼다.** 구현 PR #55(archon)가 머지됐다.
+7. **VER-007 1.1을 채택하고 AGENTS.md 진입 문구에 VER-007 절을 더한다.** 근거는 태극
+   Approval-2026-10-30-ver007-general이다. 그 결정 (5)는 시험 프로젝트에 설치할 때 진입 문구에 VER-007 절을 더해
+   제안하라고 정하고, 결정 (4)는 일반 개발의 적용 시점을 "1.1 규칙 사본과 진입 문구가 모두 그 프로젝트 `main`에
+   머지된 때"로 정한다. 2026-11-04 조정 세션을 거쳐 BOSS가 "이 PR에 넣음"(A안)을 골랐다.
+   - AGENTS.md 3행 끝에 태극 `installer/taeguk-init.md` 5단계의 시험 프로젝트용 문구 그대로
+     "; apply VER-007 (test doubles, `.taeguk/rules/verification.md`) to every edit that adds or changes tests or test
+     doubles, including test fakes and helpers and production code changed to add an injection point."를 더한다.
+     CLAUDE.md는 `@AGENTS.md`로 가져오므로 따로 고치지 않는다.
+   - 적용 시점: 태극 지정 흐름과 일반 개발 모두 이 PR이 archon `main`에 머지된 뒤 새로 시작하는 작업부터다.
+     진행 중인 작업에는 소급하지 않는다.
+   - 일반 개발은 예외만 PR 본문에 남긴다. 예외는 mock 라이브러리 사용과 직접 만들지 않은 이유, 구조 변경 신호로
+     분류한 위치와 처리(구조 변경 또는 `## 정리 후보` 기록)다.
+   - archon AGENTS.md에는 지금 테스트 대역 지침이 없어 조항별로 충돌하는 곳이 없다. archon `test/`에는 mock
+     라이브러리(Mox, meck 등) 사용이 없어, 데일리 정리 스킬의 일회성 VER-007 대역 조사는 찾을 항목이 거의 없을 것이다.
+   - 기존 테스트를 이 규칙만을 이유로 한 번에 재작성하지 않는다.
+8. **DEV-004 1.0 사본이 함께 들어온다.** 근거는 태극 Approval-2026-10-30-lessons다. registry 범위는 "Taeguk and
+   explicitly assigned workflows"라서 archon에서는 진입 문구의 "explicitly assigned workflows"에만 적용되고, 일반
+   개발에는 닿지 않는다. 스킬 `taeguk-harvest-lessons`·`taeguk-encode-mistake-class`는 지정된 경우에만 쓴다. 새
+   예약 작업이나 실행 권한은 없다.
+9. **[ADR 0022](0022-taeguk-validation-health.md)를 승인으로 바꾼다.** 구현 PR #55(archon)가 머지됐다.
 
 ## 대안
 
@@ -86,5 +100,6 @@ archon에 설치된 태극 번들은 `81817cf`([ADR 0020](0020-taeguk-codex-tran
 - 후속 작업 둘이 남는다. (1) `scripts/worker_path_check.sh`를 `.taeguk/tools/check_worker_scope.py`와
   `.taeguk/worker-scope.toml`로 바꾼다. 바꿀 때 검사 범위가 줄면 안 된다. (2) archon 검증 스위트 목록 TOML을 만든다.
   이 파일은 워커 보호 경로에 둔다(태극 sensibile/taeguk#56 PR 본문의 인계 노트 참고).
-- AGENTS.md 진입 문구에 VER-007 절을 더할지는 BOSS 확인 결과를 PR 본문에 남긴다.
+- 이 PR이 머지되면 archon의 테스트 편집은 일반 개발까지 VER-007을 따른다. 로컬 Codex 리뷰 프롬프트가 VER-007을
+  다루기 전까지 일반 개발에서의 효과는 UNKNOWN이다(Approval-2026-10-30-ver007-general 적용 문단).
 - 이 ADR은 구현 PR이 머지된 뒤 다음 PR에서 승인으로 바꾼다.

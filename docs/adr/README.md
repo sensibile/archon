@@ -44,4 +44,4 @@ Archon의 합의된 기술·운영 결정을 누적합니다. 파일 이름은 `
 | [0025](0025-phase6-workflow-operations-rest.md) | Phase 6 워크플로우 운영 REST 설계 | 승인 |
 | [0026](0026-phase7-system-task-types.md) | Phase 7 MVP 밖 시스템 태스크 타입 설계 | 승인 |
 | [0027](0027-phase8-search-and-task-logs.md) | Phase 8 검색·색인과 task 실행 로그 설계 | 승인 |
-| [0028](0028-taeguk-ver005-convergence-and-tools.md) | 태극 번들 갱신과 VER-005 1.1, 도구 네 가지 반영 | 제안 |
+| [0028](0028-taeguk-ver005-convergence-and-tools.md) | 태극 번들 갱신과 VER-005·VER-007 1.1, 도구 네 가지 반영 | 제안 |
