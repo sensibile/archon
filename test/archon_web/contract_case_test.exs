@@ -1,8 +1,7 @@
 defmodule ArchonWeb.ContractCaseTest do
   @moduledoc """
   The replay helper itself (ADR 0023 decision 6, ADR 0025 decision 7, ADR 0026 decision 8,
-  ADR 0027 decision 7): scenario coverage, the ID mapping, the step options and the skipping of
-  Phase 8 actions not implemented yet.
+  ADR 0027 decision 7): scenario coverage, the ID mapping and the step options.
   """
 
   use ArchonWeb.ContractCase, async: true
@@ -42,61 +41,17 @@ defmodule ArchonWeb.ContractCaseTest do
     assert scenario() |> Enum.drop(first) |> Enum.all?(&String.starts_with?(elem(&1, 1), "p8_"))
   end
 
-  describe "skip?/1" do
-    # A step that reaches an action still not implemented, one per controller (ADR 0027,
-    # decision 8); slice 8f removes the skipping.
-    @unimplemented_steps [
-      {"p8_search_all", ArchonWeb.SearchController, :search_workflows},
-      {"p8_index_logs", ArchonWeb.TaskLogController, :get_logs},
-      {"p8_bulk_search_mixed", ArchonWeb.WorkflowBulkController, :search}
-    ]
+  # ADR 0027, decision 7: every Phase 8 step reaches an action of its own, as each fixture is a
+  # Phase 8 route's answer (slice 8f removed the skipping of steps whose action was a skeleton).
+  test "every Phase 8 step reaches a handler" do
+    for step <- scenario(),
+        String.starts_with?(elem(step, 1), "p8_"),
+        elem(step, 0) != :wait_status do
+      %{"method" => method, "path" => path} = Contract.fixture(elem(step, 1))["request"]
+      uri = URI.parse(path).path
 
-    defp unimplemented_step do
-      Enum.find(@unimplemented_steps, fn {_name, controller, action} ->
-        action in controller.unimplemented()
-      end)
-    end
-
-    test "the scenario skips steps while an action is not implemented" do
-      if unimplemented_step(), do: assert(Enum.any?(scenario(), &skip?/1))
-    end
-
-    test "a step reaching an action its controller has not implemented is skipped" do
-      for {name, controller, action} <- @unimplemented_steps,
-          action in controller.unimplemented() do
-        assert skip?({:exchange, name})
-      end
-
-      refute :pause in ArchonWeb.WorkflowBulkController.unimplemented()
-      refute skip?({:exchange, "workflow_bulk_pause"})
-      refute skip?({:exchange, "p8_search_get_1", until: :settled})
-      refute skip?({:poll_until, "p8_index_poll"})
-      refute skip?({:exchange, "route_unsupported_workflow_decide"})
-    end
-
-    test "a step requiring an action not implemented yet is skipped, waits too" do
-      if step = unimplemented_step() do
-        {_name, controller, action} = step
-        requires = [requires: [{controller, action}]]
-        assert skip?({:exchange, "p8_index_get", requires})
-        assert skip?({:wait_status, "p8_index_start", "COMPLETED", requires})
-      end
-
-      implemented = [requires: [{ArchonWeb.WorkflowBulkController, :pause}]]
-      refute skip?({:exchange, "p8_index_get", implemented})
-      refute skip?({:wait_status, "p8_index_start", "COMPLETED"})
-      refute skip?({:exchange, "health", requires: [{ArchonWeb.HealthController, :check}]})
-    end
-
-    test "every requirement names an action of the router" do
-      routes = MapSet.new(ArchonWeb.Router.__routes__(), &{&1.plug, &1.plug_opts})
-
-      for step <- scenario(),
-          opts = List.last(Tuple.to_list(step)),
-          is_list(opts),
-          action <- Keyword.get(opts, :requires, []) do
-        assert action in routes, inspect(step)
-      end
+      assert %{plug: plug} = Phoenix.Router.route_info(ArchonWeb.Router, method, uri, "localhost")
+      refute plug == ArchonWeb.Errors, inspect(step)
     end
   end
 

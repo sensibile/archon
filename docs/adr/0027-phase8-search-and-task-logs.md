@@ -1,9 +1,10 @@
 # ADR 0027: Phase 8 검색·색인과 task 실행 로그 설계
 
-- 상태: 제안
+- 상태: 승인
 - 날짜: 2026-11-04
 - 기준 upstream: conductor-oss `1488804170d159021c7e62dce61514b8f31ef9ff`
 - 비고: 설계 갈림길 네 가지(주제, 색인 저장 방식, freeText 의미, 경로 범위)는 2026-11-04 BOSS가 이 문서의 추천안으로 정했다.
+- 비고: 2026-11-04 조각 8a~8f로 구현을 마치고 8f에서 `승인`으로 바꿨다(결정 8 끝 "조각 8f에서 정한 것").
 
 ## 맥락
 
@@ -184,8 +185,8 @@ archon에 이미 있는 것(`541865c` 기준):
 
 - `Archon.Search.Query`가 `query`·`freeText`·`sort`를 맥락 절의 문법대로 구문 트리(절 목록, freeText, 정렬 목록)로 바꾼다. 순수
   모듈이고 두 저장소가 같이 쓴다. `SqliteIndexQueryBuilder`의 세부를 그대로 옮긴다: camelCase → snake_case, `,`로 나눈 뒤 공백을
-  자르지 않음과 Java `split`의 끝 빈 항목 버림, `_time` 값 변환이 허용 목록 검사보다 먼저이고 첫 값만 변환(숫자가 아니면 오류. 둘째부터의 값은 upstream에서 변환되지 않은 글자라
-  UTC 시각 글자와 맞지 않으므로 archon도 그 값을 맞지 않는 값으로 다룬다),
+  자르지 않음과 Java `split`의 끝 빈 항목 버림, `_time` 값 변환이 허용 목록 검사보다 먼저이고 첫 값만 변환(숫자가 아니면 오류. 둘째부터의 값은 upstream에서 변환되지 않은 글자다.
+  그 글자가 UTC 시각 글자 형식이면 맞는다. 조각 8b가 이 문장을 바로잡았다. 아래 "조각 8b에서 정한 것"의 시각 `IN` 항목),
   모르는 필드의 절과 잘못된 정렬 항목은 버림.
 - **오류.** 잘못된 절(`IllegalArgumentException`), 숫자가 아닌 시각 값(`NumberFormatException`), 허용 목록에 있지만 그 표에 없는
   필드·정렬 필드(upstream SQLite의 SQL 오류)의 HTTP 상태와 문구는 8a 캡처가 정답이고 그대로 맞춘다.
@@ -193,7 +194,8 @@ archon에 이미 있는 것(`541865c` 기준):
   메모리 저장소는 같은 트리를 Elixir로 평가한다.
 - **freeText.** 비었거나 `*`가 아니면 요약 JSON 글자의 대소문자 무시 부분 문자열(`lower(json_data) LIKE '%' || lower(?) || '%' ESCAPE ''`).
   upstream SQLite처럼 `%`·`_`는 와일드카드로 두고, SQLite LIKE에 없는 이스케이프 문자를 Postgres에서도 끈다(`ESCAPE ''`, json_data에
-  많은 `\`가 글자 그대로 맞게). SQLite `lower()`는 ASCII만 바꾸고 Postgres `lower()`는 유니코드를 바꾼다(의도적 차이).
+  많은 `\`가 글자 그대로 맞게). 대소문자는 SQLite `lower()`처럼 ASCII만 접는다(설계 때 적은 "Postgres `lower()`는 유니코드"
+  의도적 차이는 조각 8b가 없앴다. 아래 "조각 8b에서 정한 것").
 - `=`의 `*` 와일드카드도 대소문자 무시 LIKE(SQLite와 같음, 같은 `ESCAPE ''`).
 - **순서.** upstream SQLite는 `ORDER BY`가 없거나 동점일 때 실행 계획에 따라 순서가 정해진다(ID만 고르는 `-v2`는 기본 키 순, 요약을
   고르면 rowid 순, `IN`은 값별, 인덱스 열 정렬의 동점은 rowid 역순 등). archon은 계획에 기대지 않고 `ORDER BY <sort 항목>, seq`로
@@ -385,7 +387,7 @@ archon에 이미 있는 것(`541865c` 기준):
   적는다.
 - **아직 구현하지 않은 액션의 재생.** ADR 0025 결정 7의 장치(컨트롤러의 미구현 목록, 재생의 건너뛰기, 단계 옵션 `requires:`)를
   다시 쓴다. 장치는 조각 6a(`c39f066`, sensibile/archon#68)가 만들고 6h(`5c2355f`, #77)가 지웠으니 그 diff로 되살린다. 8a가 컨트롤러
-  골격·목록·`requires:`를 만들고, 각 조각은 자기 액션을 목록에서 빼면 단계가 켜진다. 8f가 장치를 없앤다.
+  골격·목록·`requires:`를 만들고, 각 조각은 자기 액션을 목록에서 빼면 단계가 켜진다. 8f가 장치를 없앴다(결정 8 끝).
 - **조각 8a에서 정한 것(2026-11-04).**
   - 액션 이름: `ArchonWeb.SearchController`의 `search_workflows`, `search_workflows_v2`, `search_workflows_by_tasks`,
     `search_workflows_by_tasks_v2`, `search_tasks`, `search_tasks_v2`(8e), `ArchonWeb.TaskLogController`의 `log`(POST)·`get_logs`(GET)(8d),
@@ -462,6 +464,15 @@ archon에 이미 있는 것(`541865c` 기준):
   4번 절차(auto-merge 끄기, 새 head 재리뷰, 다시 켜기)를 따른다.
 - 각 조각은 이 ADR의 결정 번호와 조각 이름을 PR에 적는다. 조각 중에 결정이 바뀌면 이 ADR의 해당 결정 끝에 "조각 8x에서 정한
   것(날짜)"으로 적는다. ADR이 "캡처가 정답"이라 한 세부는 조각이 캡처대로 맞추고 그 사실만 적는다.
+- **조각 8f에서 정한 것(2026-11-04).**
+  - 재생 건너뛰기 장치를 없앴다: `ArchonWeb.ContractCase`의 `skip?/1`, 단계 옵션 `requires:`, 4튜플 `wait_status`, 세 컨트롤러
+    (`SearchController`, `TaskLogController`, `WorkflowBulkController`)의 `unimplemented/0`과 persist 속성, `ContractCaseTest`의 건너뛰기
+    시험, `RouterTest`의 "미구현 액션은 404" 시험. 대신 `ContractCaseTest`가 모든 Phase 8 단계의 요청이 없는 경로의 404
+    (`ArchonWeb.Errors`)가 아닌 액션에 닿는 것을 본다. 이제 골든 픽스처 691개 전체가 메모리·Postgres 두 백엔드에서 건너뛰는 단계
+    없이 재생된다.
+  - 조각 인계 노트에 빠진 픽스처는 없었다. 재캡처하지 않았다.
+  - 조각들이 남긴 의도적 차이를 아래 "upstream과 의도적으로 다른 점"에 모으고 README 호환성 절에 요약했다. 상속 위험(인증 없는 로그
+    쓰기, 검색으로 모든 요약 열람, 음수·큰 `size`와 다시 읽기, `keepLastN`으로 지운 태스크의 색인 행)은 README 경고에 적었다.
 
 ## upstream과 의도적으로 다른 점
 
@@ -469,22 +480,37 @@ ADR 0023·0025·0026의 목록에 더해 다음이 생긴다.
 
 - **색인 시각 열**(결정 2): epoch 밀리초 `bigint`. upstream SQLite는 UTC 글자다. 질의 결과는 같다.
 - **정해지지 않은 순서**(결정 4): archon은 `ORDER BY <sort>, seq`로 늘 정해진 순서다. upstream SQLite는 실행 계획에 따른다.
-- **`lower()`의 범위**(결정 4): Postgres는 비ASCII도 대소문자를 무시한다. upstream SQLite는 ASCII만.
 - **요약 `input`·`output`의 맵 키 순서와 `failedTaskNames`·`failedReferenceTaskNames` 순서**(결정 3): 정렬 순. upstream은 입력 순서·
   `HashSet` 순서다.
 - **`agentHierarchy` 정렬**(결정 1): 옮기지 않는다(AI 에이전트 계층, ADR 0001 Unsupported의 AI 컨트롤러와 같은 범위).
 - **시각 값의 비ASCII 숫자**(결정 4, 조각 8b): `startTime>١٢`처럼 Java `Long.parseLong`이 읽는 다른 문자 체계의 숫자를 archon은
   숫자가 아닌 값(`NumberFormatException`과 같은 오류)으로 다룬다.
-- **`TaskResult.logs`의 `null` 원소**(결정 6): 버린다. upstream은 태스크를 저장한 뒤 500이다.
+- **시각 비교의 경계**(결정 4, 조각 8b): 시각 열은 epoch 밀리초로 비교한다. 1~9999년 밖의 경계값은 모든 행보다 앞서는 값으로
+  다루고, 기원전·1970년 이전 경계의 기년 글자가 행 사이에 끼는 upstream 글자 비교는 재현하지 않는다.
+- **`LIKE` 패턴 상한**(결정 4, 조각 8b): 50,000바이트를 넘는 패턴은 실행 계획과 상관없이 늘 500이다. SQLite는 그 `LIKE`를 평가할
+  때만 실패한다.
+- **정의 없는 요약**(결정 3, 조각 8b): upstream은 NPE지만 archon은 `workflowType`을 빼고 `version` 0으로 만든다. `taskToDomain`
+  객체도 키 정렬 순이다.
+- **`TaskResult.logs`의 `null` 원소**(결정 6): 버린다(`log`가 `null`인 원소도). upstream은 태스크를 저장한 뒤 500이다. `long` 밖의
+  `createdTime`은 가장 가까운 `long`이다(upstream은 요청을 거절).
+- **로그 글자와 charset**(결정 6, 조각 8d): 잘못된 UTF-8과 NUL은 U+FFFD로 바꿔 저장한다. 저장할 수 없는 태스크 ID의 POST는 200이지만
+  쓰지 않는다. POST body는 `ISO-8859-1`·`US-ASCII`·`UTF-16` 계열 밖의 charset과 charset 없음을 UTF-8로 읽는다(upstream은 JVM이 아는
+  charset으로 읽음).
+- **되살림 로그가 없거나 겹치는 경우**(결정 6, 조각 8d): rerun case 3에서 입력·상관 ID만 받는 단계는 `reran.` 로그를 쓰지 않는다.
+  outbox가 되살림을 다시 전달하면 같은 로그가 한 번 더 쌓일 수 있다(upstream에는 다시 전달이 없다).
+- **검색 다시 읽기의 저장소 오류**(결정 5, 조각 8e): 저장소 예외는 검색 전체를 500으로 만든다. upstream은 결과마다 예외를 잡아 빼고
+  `totalHits`를 줄인다. by-tasks의 중복 제거는 워크플로우 ID로 한다(동시 갱신 때만 다름). `WorkflowModel`의 불리언이 아닌
+  `asyncComplete` 입력은 false다(upstream은 직렬화 500).
 - **비동기 색인과 요약 JSON 직렬화 설정**(결정 2·3): 옮기지 않는다. upstream 기본값의 동작만 있다.
 - **archiveWorkflow=false의 색인 삭제 시점**(결정 2): 같은 트랜잭션. upstream은 비동기다.
 - **백필한 태스크 색인**(결정 2): 배포 전부터 있던 태스크는 갱신 여부와 상관없이 모두 색인한다.
 - **POST 로그의 교차 출처 거절**(결정 6): 브라우저가 교차 출처로 표시한 요청은 403. 두 헤더를 보내지 않는 클라이언트는 upstream과 같다.
   상속 위험: HTTP 포트에 닿는 브라우저 밖 클라이언트는 임의 태스크 ID에 요청마다 8MB까지 로그를 쌓을 수 있다(upstream과 같은 신뢰
   모델, ADR 0024 결정 4). 같은 이유로 포트에 닿는 클라이언트는 ID를 몰라도 검색을 넘겨 가며 모든 워크플로우 요약(입력·출력 포함)을
-  읽을 수 있고, 음수·큰 `size`로 한 요청이 모든 행을 읽고 `-v2`·by-tasks는 결과마다 다시 읽게 할 수 있다(결정 5). 8f가 README
-  배포 절에 셋 다 적는다(포트를 외부에 열면 인증하는 역프록시 뒤에 두고, 역프록시에서 요청 크기·빈도를 제한할 것). 조각 8e에서
-  BOSS가 검색 두 건을 upstream 그대로 두기로 했다(2026-11-04).
+  읽을 수 있고, 음수·큰 `size`로 한 요청이 모든 행을 읽고 `-v2`·by-tasks는 결과마다 다시 읽게 할 수 있다(결정 5). `archiveWorkflow=false`로
+  지운 워크플로우라도 DO_WHILE `keepLastN`으로 먼저 지운 태스크의 색인 행은 남아 검색으로 계속 읽힌다(결정 2, upstream과 같음).
+  8f가 README 배포 절에 넷 다 적었다(포트를 외부에 열면 인증하는 역프록시 뒤에 두고, 역프록시에서 요청 크기·빈도를 제한할 것).
+  조각 8c(색인 행)와 8e(검색 두 건)에서 BOSS가 upstream 그대로 두기로 했다(2026-11-04).
 
 ## 대안
 
@@ -502,9 +528,10 @@ ADR 0023·0025·0026의 목록에 더해 다음이 생긴다.
 
 ## 결과
 
-- 이 ADR은 결정만 담는다. 구현은 결정 8의 조각 8a~8f로 하고, 마지막 조각 8f의 PR에서 `승인`으로 바꾼다.
-- [ADR 0003](0003-porting-strategy.md) 단계 표에 Phase 8을 더한다. [ADR 0001](0001-api-contract-scope.md)의 분류 표에는 이 Phase가
-  여는 9개 경로의 비고에 "Phase 8(ADR 0027)"을 적는다. 구현이 끝나면 8f가 분류를 고친다.
+- 이 ADR은 결정만 담는다. 구현은 결정 8의 조각 8a~8f로 했고(2026-11-04, sensibile/archon#91, #93, #94, #97, #96과 8f), 마지막 조각
+  8f의 PR에서 `승인`으로 바꿨다.
+- [ADR 0003](0003-porting-strategy.md) 단계 표에 Phase 8을 더했다. [ADR 0001](0001-api-contract-scope.md)의 분류 표에서 이 Phase가
+  연 9개 경로는 8f가 Later에서 "Phase 8"로 바꿨다(MVP 19, Phase 6 33, Phase 8 9, Later 27, Unsupported 4).
 - ADR 0025 결정 1이 Later로 둔 task 로그와 `TaskResult.logs` 저장을 이 ADR이 다룬다.
 - `Archon.Runtime.Commit`에 `index_workflow`·`index_tasks`·`task_logs`가 더해지고(ADR 0021 결정 3의 커밋 단위), `Store.remove_workflow`가
   archive 여부를 받는다.

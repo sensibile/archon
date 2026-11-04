@@ -18,9 +18,6 @@ defmodule ArchonWeb.TaskLogController do
   that keeps a browser's cross-origin "simple" request from an action does not run for it.
   `ArchonWeb.Plugs.RefuseCrossOrigin` refuses such a request with a 403 instead (a deliberate
   difference, as for ADR 0025's bodyless actions).
-
-  `unimplemented/0` is the list of actions the contract replay (`ArchonWeb.ContractCase`) skips
-  (ADR 0027, decision 7); slice 8f removes it.
   """
 
   use ArchonWeb, :controller
@@ -31,16 +28,7 @@ defmodule ArchonWeb.TaskLogController do
   @log_handler "public void com.netflix.conductor.rest.controllers.TaskResource.log(" <>
                  "java.lang.String,java.lang.String)"
 
-  # Persisted and read back at run time, so the list may shrink to [] without a spec to change.
-  Module.register_attribute(__MODULE__, :unimplemented, persist: true)
-
-  @unimplemented []
-
   plug ArchonWeb.Plugs.RefuseCrossOrigin when action in [:log]
-
-  @doc "The actions not implemented yet."
-  @spec unimplemented() :: [atom()]
-  def unimplemented, do: Keyword.fetch!(__MODULE__.__info__(:attributes), :unimplemented)
 
   @doc """
   `POST /api/tasks/{taskId}/log` (`log`, the body's text as the log): 200 without a body, whether
