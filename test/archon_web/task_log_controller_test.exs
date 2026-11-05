@@ -92,6 +92,23 @@ defmodule ArchonWeb.TaskLogControllerTest do
     end
   end
 
+  # ADR 0027 decision 6 (8d): UTF-16LE decodes as Java's decoder does (OpenJDK 25): a surrogate
+  # pair is one character, a high surrogate swallows the unit after it, and a high surrogate
+  # with an odd last byte or an odd last byte alone is U+FFFD.
+  test "a UTF-16LE body joins surrogate pairs and replaces malformed units as Java does" do
+    for {bytes, expected} <- [
+          {<<0x3D, 0xD8, 0x00, 0xDE>>, "\u{1F600}"},
+          {<<0x00, 0xD8, 0x41, 0x00, 0x42, 0x00>>, "\uFFFDB"},
+          {<<0x00, 0xD8, 0x41>>, "\uFFFD"},
+          {<<0x41, 0x00, 0x42>>, "A\uFFFD"},
+          {<<0x00, 0xDC, 0x41, 0x00>>, "\uFFFDA"}
+        ] do
+      id = task_id()
+      assert response(post_log(id, bytes, "text/plain;charset=UTF-16LE"), 200) == ""
+      assert [%{"log" => ^expected}] = json_response(logs(id), 200)
+    end
+  end
+
   # Self-review r3: a converter that returns the rest of a large body as a list lost its tail.
   test "a large UTF-16 body keeps the text after a unit without its pair, in linear time" do
     id = task_id()
