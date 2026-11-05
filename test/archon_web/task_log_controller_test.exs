@@ -77,6 +77,21 @@ defmodule ArchonWeb.TaskLogControllerTest do
              ["é", "a\uFFFD", "é", "é", "é\uFFFD", "é", "é"]
   end
 
+  # ADR 0027 decision 6 (8d): UTF-16 reads a byte order mark, and is big-endian without one.
+  # Expected values from Java's UTF-16 decoder (OpenJDK 25).
+  test "a UTF-16 body is big-endian after a big-endian mark and without a mark" do
+    for {bytes, expected} <- [
+          {<<0xFE, 0xFF, 0x00, 0xE9>>, "é"},
+          {<<0xFE, 0xFF, 0xD8, 0x3D, 0xDE, 0x00>>, "\u{1F600}"},
+          {<<0x00, 0xE9>>, "é"},
+          {<<0x00, 0xE9, 0xFE, 0xFF>>, "é\uFEFF"}
+        ] do
+      id = task_id()
+      assert response(post_log(id, bytes, "text/plain;charset=UTF-16"), 200) == ""
+      assert [%{"log" => ^expected}] = json_response(logs(id), 200)
+    end
+  end
+
   # Self-review r3: a converter that returns the rest of a large body as a list lost its tail.
   test "a large UTF-16 body keeps the text after a unit without its pair, in linear time" do
     id = task_id()
