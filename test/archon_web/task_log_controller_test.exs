@@ -77,6 +77,50 @@ defmodule ArchonWeb.TaskLogControllerTest do
              ["é", "a\uFFFD", "é", "é", "é\uFFFD", "é", "é"]
   end
 
+  # ADR 0027 decision 6 (8d): UTF-16 reads a byte order mark, and is big-endian without one.
+  # Expected values from Java's UTF-16 decoder (OpenJDK 25).
+  test "a UTF-16 body is big-endian after a big-endian mark and without a mark" do
+    for {bytes, expected} <- [
+          {<<0xFE, 0xFF, 0x00, 0xE9>>, "é"},
+          {<<0xFE, 0xFF, 0xD8, 0x3D, 0xDE, 0x00>>, "\u{1F600}"},
+          {<<0x00, 0xE9>>, "é"},
+          {<<0x00, 0xE9, 0xFE, 0xFF>>, "é\uFEFF"}
+        ] do
+      id = task_id()
+      assert response(post_log(id, bytes, "text/plain;charset=UTF-16"), 200) == ""
+      assert [%{"log" => ^expected}] = json_response(logs(id), 200)
+    end
+  end
+
+  # ADR 0027 decision 6 (8d): UTF-16LE decodes as Java's decoder does (OpenJDK 25): a surrogate
+  # pair is one character, a high surrogate swallows the unit after it, and a high surrogate
+  # with an odd last byte or an odd last byte alone is U+FFFD.
+  test "a UTF-16LE body joins surrogate pairs and replaces malformed units as Java does" do
+    for {bytes, expected} <- [
+          {<<0x3D, 0xD8, 0x00, 0xDE>>, "\u{1F600}"},
+          {<<0x00, 0xD8, 0x41, 0x00, 0x42, 0x00>>, "\uFFFDB"},
+          {<<0x00, 0xD8, 0x41>>, "\uFFFD"},
+          {<<0x41, 0x00, 0x42>>, "A\uFFFD"},
+          {<<0x00, 0xDC, 0x41, 0x00>>, "\uFFFDA"}
+        ] do
+      id = task_id()
+      assert response(post_log(id, bytes, "text/plain;charset=UTF-16LE"), 200) == ""
+      assert [%{"log" => ^expected}] = json_response(logs(id), 200)
+    end
+  end
+
+  # ADR 0027 decision 6 (8d): the body is read whatever its Content-Type, as UTF-8 without a
+  # charset, and so also when the request has no Content-Type at all.
+  test "a body without a Content-Type is read as UTF-8" do
+    id = task_id()
+    # Phoenix.ConnTest refuses a binary body without a Content-Type, so the endpoint is called
+    # with the test adapter's request as it is.
+    conn = build_conn(:post, "/api/tasks/#{id}/log", "é") |> @endpoint.call(@endpoint.init([]))
+    assert get_req_header(conn, "content-type") == []
+    assert response(conn, 200) == ""
+    assert [%{"log" => "é", "taskId" => ^id}] = json_response(logs(id), 200)
+  end
+
   # Self-review r3: a converter that returns the rest of a large body as a list lost its tail.
   test "a large UTF-16 body keeps the text after a unit without its pair, in linear time" do
     id = task_id()
