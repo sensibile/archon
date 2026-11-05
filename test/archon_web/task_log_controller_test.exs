@@ -109,6 +109,18 @@ defmodule ArchonWeb.TaskLogControllerTest do
     end
   end
 
+  # ADR 0027 decision 6 (8d): the body is read whatever its Content-Type, as UTF-8 without a
+  # charset, and so also when the request has no Content-Type at all.
+  test "a body without a Content-Type is read as UTF-8" do
+    id = task_id()
+    # Phoenix.ConnTest refuses a binary body without a Content-Type, so the endpoint is called
+    # with the test adapter's request as it is.
+    conn = build_conn(:post, "/api/tasks/#{id}/log", "é") |> @endpoint.call(@endpoint.init([]))
+    assert get_req_header(conn, "content-type") == []
+    assert response(conn, 200) == ""
+    assert [%{"log" => "é", "taskId" => ^id}] = json_response(logs(id), 200)
+  end
+
   # Self-review r3: a converter that returns the rest of a large body as a list lost its tail.
   test "a large UTF-16 body keeps the text after a unit without its pair, in linear time" do
     id = task_id()
